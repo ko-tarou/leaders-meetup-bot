@@ -1,0 +1,68 @@
+import type {
+  Meeting,
+  MeetingDetail,
+  MeetingMember,
+  Poll,
+  Reminder,
+} from "./types";
+
+const BASE = "/api";
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  getMeetings: () => request<Meeting[]>("/meetings"),
+  getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
+  createMeeting: (data: { name: string; channelId: string }) =>
+    request<Meeting>("/meetings", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateMeeting: (id: string, data: { name?: string; channelId?: string }) =>
+    request<Meeting>(`/meetings/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteMeeting: (id: string) =>
+    request<{ ok: boolean }>(`/meetings/${id}`, { method: "DELETE" }),
+
+  getMembers: (meetingId: string) =>
+    request<MeetingMember[]>(`/meetings/${meetingId}/members`),
+  addMember: (meetingId: string, slackUserId: string) =>
+    request<MeetingMember>(`/meetings/${meetingId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ slackUserId }),
+    }),
+  removeMember: (meetingId: string, memberId: string) =>
+    request<{ ok: boolean }>(
+      `/meetings/${meetingId}/members/${memberId}`,
+      { method: "DELETE" },
+    ),
+
+  getPolls: (meetingId: string) =>
+    request<Poll[]>(`/meetings/${meetingId}/polls`),
+
+  getReminders: (meetingId: string) =>
+    request<Reminder[]>(`/meetings/${meetingId}/reminders`),
+  createReminder: (
+    meetingId: string,
+    data: {
+      type: string;
+      offsetDays: number;
+      time: string;
+      messageTemplate?: string;
+    },
+  ) =>
+    request<Reminder>(`/meetings/${meetingId}/reminders`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteReminder: (id: string) =>
+    request<{ ok: boolean }>(`/reminders/${id}`, { method: "DELETE" }),
+};
