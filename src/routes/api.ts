@@ -11,6 +11,7 @@ import {
   pollVotes,
   reminders,
   scheduledJobs,
+  autoSchedules,
 } from "../db/schema";
 
 const api = new Hono<{ Bindings: Env }>();
@@ -243,6 +244,113 @@ api.delete("/reminders/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   await db.delete(reminders).where(eq(reminders.id, id));
+  return c.json({ ok: true });
+});
+
+// --- Auto Schedules ---
+
+api.get("/meetings/:meetingId/auto-schedule", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+  const schedule = await db
+    .select()
+    .from(autoSchedules)
+    .where(eq(autoSchedules.meetingId, meetingId))
+    .get();
+  if (!schedule) return c.json({ error: "Not found" }, 404);
+  return c.json({
+    ...schedule,
+    candidateRule: JSON.parse(schedule.candidateRule),
+    reminderDaysBefore: JSON.parse(schedule.reminderDaysBefore),
+  });
+});
+
+api.post("/meetings/:meetingId/auto-schedule", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+
+  const body = await c.req.json<{
+    candidateRule: { type: string; weekday: number; weeks: number[] };
+    pollStartDay: number;
+    pollCloseDay: number;
+    reminderDaysBefore?: number[];
+    reminderTime?: string;
+  }>();
+
+  if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
+    return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
+  }
+  if (!body.pollStartDay || !body.pollCloseDay || body.pollStartDay < 1 || body.pollStartDay > 28 || body.pollCloseDay < 1 || body.pollCloseDay > 28) {
+    return c.json({ error: "pollStartDay and pollCloseDay must be between 1 and 28" }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const record = {
+    id,
+    meetingId,
+    candidateRule: JSON.stringify(body.candidateRule),
+    pollStartDay: body.pollStartDay,
+    pollCloseDay: body.pollCloseDay,
+    reminderDaysBefore: JSON.stringify(body.reminderDaysBefore ?? [3, 0]),
+    reminderTime: body.reminderTime ?? "09:00",
+    enabled: 1,
+    createdAt,
+  };
+  await db.insert(autoSchedules).values(record);
+  return c.json({ ...record, candidateRule: body.candidateRule, reminderDaysBefore: body.reminderDaysBefore ?? [3, 0] }, 201);
+});
+
+api.put("/auto-schedules/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const existing = await db.select().from(autoSchedules).where(eq(autoSchedules.id, id)).get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const body = await c.req.json<{
+    candidateRule?: { type: string; weekday: number; weeks: number[] };
+    pollStartDay?: number;
+    pollCloseDay?: number;
+    reminderDaysBefore?: number[];
+    reminderTime?: string;
+    enabled?: number;
+  }>();
+
+  if (body.pollStartDay != null && (body.pollStartDay < 1 || body.pollStartDay > 28)) {
+    return c.json({ error: "pollStartDay must be between 1 and 28" }, 400);
+  }
+  if (body.pollCloseDay != null && (body.pollCloseDay < 1 || body.pollCloseDay > 28)) {
+    return c.json({ error: "pollCloseDay must be between 1 and 28" }, 400);
+  }
+  if (body.candidateRule && (!body.candidateRule.type || body.candidateRule.weekday == null || !body.candidateRule.weeks)) {
+    return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
+  }
+
+  await db
+    .update(autoSchedules)
+    .set({
+      candidateRule: body.candidateRule ? JSON.stringify(body.candidateRule) : existing.candidateRule,
+      pollStartDay: body.pollStartDay ?? existing.pollStartDay,
+      pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
+      reminderDaysBefore: body.reminderDaysBefore ? JSON.stringify(body.reminderDaysBefore) : existing.reminderDaysBefore,
+      reminderTime: body.reminderTime ?? existing.reminderTime,
+      enabled: body.enabled ?? existing.enabled,
+    })
+    .where(eq(autoSchedules.id, id));
+
+  return c.json({ ok: true });
+});
+
+api.delete("/auto-schedules/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const existing = await db.select().from(autoSchedules).where(eq(autoSchedules.id, id)).get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  await db.delete(autoSchedules).where(eq(autoSchedules.id, id));
   return c.json({ ok: true });
 });
 
