@@ -10,3 +10,6 @@ database_id = "417d85e1-611e-4fff-a72c-d5b0f98761ac"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+[assets]
+directory = "./public"

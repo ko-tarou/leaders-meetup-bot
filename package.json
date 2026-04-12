@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev:frontend": "vite --config frontend/vite.config.ts",
+    "build:frontend": "vite build --config frontend/vite.config.ts",
+    "deploy": "npm run build:frontend && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply leaders-meetup-bot --local",
@@ -12,12 +14,18 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
-    "hono": "latest"
+    "hono": "latest",
+    "react": "^19",
+    "react-dom": "^19"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "latest",
     "drizzle-kit": "^0.31.10",
     "typescript": "latest",
+    "vite": "latest",
     "wrangler": "latest"
   }
 }
