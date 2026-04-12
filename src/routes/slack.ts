@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
-import { createPoll } from "../services/poll";
+import { createPoll, handleVote, closePoll } from "../services/poll";
 
 type Variables = {
   rawBody: string;
@@ -42,12 +42,29 @@ slack.post("/commands", async (c) => {
   const channelId = params.get("channel_id") || "";
 
   if (command === "/meetup") {
+    if (text.trim() === "close") {
+      const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+      try {
+        await closePoll(c.env.DB, client, channelId);
+        return c.json({
+          response_type: "ephemeral",
+          text: "投票を締め切りました。結果を送信しました。",
+        });
+      } catch (error) {
+        console.error("Failed to close poll:", error);
+        return c.json({
+          response_type: "ephemeral",
+          text: `投票の締め切りに失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
+        });
+      }
+    }
+
     const dates = text.trim().split(/\s+/).filter(Boolean);
 
     if (dates.length === 0) {
       return c.json({
         response_type: "ephemeral",
-        text: "使い方: `/meetup 2026-04-20 2026-04-27 2026-05-04`\n候補日をスペース区切りで入力してください。",
+        text: "使い方:\n`/meetup 2026-04-20 2026-04-27` - 日程調整の投票を作成\n`/meetup close` - 現在の投票を締め切り、結果を表示",
       });
     }
 
@@ -87,7 +104,31 @@ slack.post("/commands", async (c) => {
 });
 
 slack.post("/interactions", async (c) => {
-  // TODO: インタラクション（ボタン・モーダル等）の処理
+  const rawBody = c.get("rawBody");
+  const params = new URLSearchParams(rawBody);
+  const payloadStr = params.get("payload");
+  if (!payloadStr) return c.json({ ok: true });
+
+  const payload = JSON.parse(payloadStr);
+
+  if (payload.type === "block_actions") {
+    const action = payload.actions?.[0];
+    if (!action) return c.json({ ok: true });
+
+    if (action.action_id?.startsWith("poll_vote_")) {
+      const optionId = action.value;
+      const userId = payload.user?.id;
+      if (!optionId || !userId) return c.json({ ok: true });
+
+      const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+      try {
+        await handleVote(c.env.DB, client, optionId, userId);
+      } catch (error) {
+        console.error("Failed to handle vote:", error);
+      }
+    }
+  }
+
   return c.json({ ok: true });
 });
 
