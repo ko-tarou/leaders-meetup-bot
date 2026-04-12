@@ -1,4 +1,5 @@
 import type {
+  AutoSchedule,
   Meeting,
   MeetingDetail,
   MeetingMember,
@@ -65,4 +66,38 @@ export const api = {
     }),
   deleteReminder: (id: string) =>
     request<{ ok: boolean }>(`/reminders/${id}`, { method: "DELETE" }),
+
+  getAutoSchedule: (meetingId: string) =>
+    request<AutoSchedule | null>(`/meetings/${meetingId}/auto-schedule`),
+  createAutoSchedule: (
+    meetingId: string,
+    data: {
+      candidateRule: { type: string; weekday: number; weeks: number[] };
+      pollStartDay: number;
+      pollCloseDay: number;
+      reminderDaysBefore: number[];
+      reminderTime: string;
+    },
+  ) =>
+    request<AutoSchedule>(`/meetings/${meetingId}/auto-schedule`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateAutoSchedule: (
+    id: string,
+    data: Partial<{
+      candidateRule: { type: string; weekday: number; weeks: number[] };
+      pollStartDay: number;
+      pollCloseDay: number;
+      reminderDaysBefore: number[];
+      reminderTime: string;
+      enabled: number;
+    }>,
+  ) =>
+    request<{ ok: boolean }>(`/auto-schedules/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteAutoSchedule: (id: string) =>
+    request<{ ok: boolean }>(`/auto-schedules/${id}`, { method: "DELETE" }),
 };
