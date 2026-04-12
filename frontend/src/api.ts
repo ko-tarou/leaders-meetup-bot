@@ -48,6 +48,15 @@ export const api = {
 
   getPolls: (meetingId: string) =>
     request<Poll[]>(`/meetings/${meetingId}/polls`),
+  createPoll: (meetingId: string, dates: string[]) =>
+    request<{ ok: boolean; pollId: string }>(`/meetings/${meetingId}/polls`, {
+      method: "POST",
+      body: JSON.stringify({ dates }),
+    }),
+  closePoll: (meetingId: string) =>
+    request<{ ok: boolean }>(`/meetings/${meetingId}/polls/close`, {
+      method: "POST",
+    }),
 
   getReminders: (meetingId: string) =>
     request<Reminder[]>(`/meetings/${meetingId}/reminders`),

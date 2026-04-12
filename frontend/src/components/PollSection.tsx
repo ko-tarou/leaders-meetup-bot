@@ -6,14 +6,79 @@ type Props = { meetingId: string };
 
 export function PollSection({ meetingId }: Props) {
   const [polls, setPolls] = useState<Poll[]>([]);
+  const [dates, setDates] = useState("");
+  const [sending, setSending] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     api.getPolls(meetingId).then(setPolls);
+  };
+  useEffect(() => {
+    load();
   }, [meetingId]);
+
+  const hasOpenPoll = polls.some((p) => p.status === "open");
+
+  const handleCreate = async () => {
+    const dateList = dates.split(/[,\s]+/).filter(Boolean);
+    if (dateList.length === 0) return;
+    setSending(true);
+    try {
+      await api.createPoll(meetingId, dateList);
+      setDates("");
+      load();
+    } catch (e) {
+      alert("送信に失敗しました");
+    }
+    setSending(false);
+  };
+
+  const handleClose = async () => {
+    if (!confirm("投票を締め切りますか？")) return;
+    try {
+      await api.closePoll(meetingId);
+      load();
+    } catch (e) {
+      alert("締め切りに失敗しました");
+    }
+  };
 
   return (
     <div>
       <h3>投票</h3>
+
+      {/* 即時投票作成フォーム */}
+      <div style={cardStyle}>
+        <h4 style={{ margin: "0 0 8px" }}>今すぐ投票を送信</h4>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            placeholder="候補日（例: 2026-05-10, 2026-05-17, 2026-05-24）"
+            value={dates}
+            onChange={(e) => setDates(e.target.value)}
+            style={{ ...inputStyle, flex: 1 }}
+          />
+          <button
+            onClick={handleCreate}
+            disabled={sending}
+            style={buttonStyle}
+          >
+            {sending ? "送信中..." : "送信"}
+          </button>
+        </div>
+        <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+          YYYY-MM-DD形式でカンマまたはスペース区切り
+        </p>
+      </div>
+
+      {/* 投票締切ボタン */}
+      {hasOpenPoll && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={handleClose} style={dangerButtonStyle}>
+            投票を締め切る
+          </button>
+        </div>
+      )}
+
+      {/* 投票一覧 */}
       {polls.length === 0 ? (
         <p>投票がありません</p>
       ) : (
@@ -62,4 +127,25 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 8,
   padding: 16,
   marginBottom: 12,
+};
+const inputStyle: React.CSSProperties = {
+  padding: "8px 12px",
+  border: "1px solid #ddd",
+  borderRadius: 4,
+};
+const buttonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: "#4A90D9",
+  color: "#fff",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
+};
+const dangerButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: "#E74C3C",
+  color: "#fff",
+  border: "none",
+  borderRadius: 4,
+  cursor: "pointer",
 };
