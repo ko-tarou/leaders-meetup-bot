@@ -5,13 +5,18 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply leaders-meetup-bot --local",
+    "db:migrate:remote": "wrangler d1 migrations apply leaders-meetup-bot --remote"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "hono": "latest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
+    "drizzle-kit": "^0.31.10",
     "typescript": "latest",
     "wrangler": "latest"
   }
