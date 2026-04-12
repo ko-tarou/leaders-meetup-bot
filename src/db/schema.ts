@@ -68,6 +68,30 @@ export const reminders = sqliteTable("reminders", {
   enabled: integer("enabled").notNull().default(1),
 });
 
+// 自動スケジュール設定
+export const autoSchedules = sqliteTable("auto_schedules", {
+  id: text("id").primaryKey(),
+  meetingId: text("meeting_id")
+    .notNull()
+    .references(() => meetings.id),
+  // 候補日生成ルール（JSON文字列）
+  // 例: {"type":"weekday","weekday":6,"weeks":[2,3,4]}
+  // weekday: 0=日, 1=月, ..., 6=土
+  // weeks: 第何週（1-5）
+  candidateRule: text("candidate_rule").notNull(),
+  // 毎月何日に投票を開始するか (1-28)
+  pollStartDay: integer("poll_start_day").notNull(),
+  // 毎月何日に投票を締め切るか (1-28)
+  pollCloseDay: integer("poll_close_day").notNull(),
+  // 開催何日前にリマインドするか（JSON配列）例: [3, 0]
+  reminderDaysBefore: text("reminder_days_before").notNull().default("[3, 0]"),
+  // リマインド時刻 "09:00"
+  reminderTime: text("reminder_time").notNull().default("09:00"),
+  // 有効/無効
+  enabled: integer("enabled").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+});
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
   id: text("id").primaryKey(),
