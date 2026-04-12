@@ -1,7 +1,11 @@
 import { Hono } from "hono";
+import { drizzle } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
+import { createReminderJob } from "../services/scheduler";
+import { meetings } from "../db/schema";
 
 type Variables = {
   rawBody: string;
@@ -59,12 +63,54 @@ slack.post("/commands", async (c) => {
       }
     }
 
+    if (text.trim().startsWith("remind ")) {
+      const parts = text.trim().replace("remind ", "").split(/\s+/);
+      const date = parts[0];
+      const time = parts[1] || "09:00";
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return c.json({
+          response_type: "ephemeral",
+          text: "日付の形式が正しくありません。YYYY-MM-DD形式で入力してください。",
+        });
+      }
+
+      if (!/^\d{2}:\d{2}$/.test(time)) {
+        return c.json({
+          response_type: "ephemeral",
+          text: "時刻の形式が正しくありません。HH:MM形式で入力してください。",
+        });
+      }
+
+      const d1 = drizzle(c.env.DB);
+      const meeting = await d1
+        .select()
+        .from(meetings)
+        .where(eq(meetings.channelId, channelId))
+        .get();
+
+      if (!meeting) {
+        return c.json({
+          response_type: "ephemeral",
+          text: "このチャンネルにはミーティングが設定されていません。先に `/meetup` で投票を作成してください。",
+        });
+      }
+
+      const runAt = `${date}T${time}:00.000Z`;
+      await createReminderJob(c.env.DB, meeting.id, runAt);
+
+      return c.json({
+        response_type: "ephemeral",
+        text: `リマインドを設定しました: ${date} ${time} (UTC)`,
+      });
+    }
+
     const dates = text.trim().split(/\s+/).filter(Boolean);
 
     if (dates.length === 0) {
       return c.json({
         response_type: "ephemeral",
-        text: "使い方:\n`/meetup 2026-04-20 2026-04-27` - 日程調整の投票を作成\n`/meetup close` - 現在の投票を締め切り、結果を表示",
+        text: "使い方:\n`/meetup 2026-04-20 2026-04-27` - 日程調整の投票を作成\n`/meetup close` - 現在の投票を締め切り、結果を表示\n`/meetup remind 2026-04-20 09:00` - リマインドを設定",
       });
     }
 
