@@ -7,9 +7,8 @@ import { SlackClient } from "./services/slack-api";
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.get("/", (c) => {
-  return c.json({ name: "leaders-meetup-bot", version: "0.1.0" });
-});
+// Workers Assets serves static files from ./public (including index.html at /)
+// Only API and Slack routes are handled by the Worker
 
 app.route("/slack", slack);
 app.route("/api", api);
