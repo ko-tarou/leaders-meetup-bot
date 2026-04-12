@@ -3,6 +3,7 @@ import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
 import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
+import { processAutoCycles } from "./services/auto-cycle";
 import { SlackClient } from "./services/slack-api";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -18,6 +19,11 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     const client = new SlackClient(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
-    ctx.waitUntil(processScheduledJobs(env.DB, client));
+    ctx.waitUntil(
+      Promise.all([
+        processScheduledJobs(env.DB, client),
+        processAutoCycles(env.DB, client),
+      ]),
+    );
   },
 };
