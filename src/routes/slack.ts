@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
+import { createPoll } from "../services/poll";
 
 type Variables = {
   rawBody: string;
@@ -34,8 +35,55 @@ slack.post("/events", async (c) => {
 });
 
 slack.post("/commands", async (c) => {
-  // TODO: スラッシュコマンドの処理
-  return c.json({ ok: true });
+  const rawBody = c.get("rawBody");
+  const params = new URLSearchParams(rawBody);
+  const command = params.get("command");
+  const text = params.get("text") || "";
+  const channelId = params.get("channel_id") || "";
+
+  if (command === "/meetup") {
+    const dates = text.trim().split(/\s+/).filter(Boolean);
+
+    if (dates.length === 0) {
+      return c.json({
+        response_type: "ephemeral",
+        text: "使い方: `/meetup 2026-04-20 2026-04-27 2026-05-04`\n候補日をスペース区切りで入力してください。",
+      });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const invalidDates = dates.filter((d) => !dateRegex.test(d));
+    if (invalidDates.length > 0) {
+      return c.json({
+        response_type: "ephemeral",
+        text: `日付の形式が正しくありません: ${invalidDates.join(", ")}\nYYYY-MM-DD形式で入力してください。`,
+      });
+    }
+
+    const client = new SlackClient(
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_SIGNING_SECRET,
+    );
+
+    try {
+      await createPoll(c.env.DB, client, channelId, "リーダー雑談会", dates);
+      return c.json({
+        response_type: "ephemeral",
+        text: "日程調整の投票を作成しました！",
+      });
+    } catch (error) {
+      console.error("Failed to create poll:", error);
+      return c.json({
+        response_type: "ephemeral",
+        text: "投票の作成に失敗しました。もう一度お試しください。",
+      });
+    }
+  }
+
+  return c.json({
+    response_type: "ephemeral",
+    text: "不明なコマンドです。",
+  });
 });
 
 slack.post("/interactions", async (c) => {
