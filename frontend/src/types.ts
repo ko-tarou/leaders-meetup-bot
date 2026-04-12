@@ -47,6 +47,22 @@ export type Reminder = {
   enabled: number;
 };
 
+export type AutoSchedule = {
+  id: string;
+  meetingId: string;
+  candidateRule: {
+    type: "weekday";
+    weekday: number;
+    weeks: number[];
+  };
+  pollStartDay: number;
+  pollCloseDay: number;
+  reminderDaysBefore: number[];
+  reminderTime: string;
+  enabled: number;
+  createdAt: string;
+};
+
 export type MeetingDetail = Meeting & {
   members?: MeetingMember[];
   polls?: Poll[];
