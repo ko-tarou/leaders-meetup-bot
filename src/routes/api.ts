@@ -3,6 +3,9 @@ import { cors } from "hono/cors";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../types/env";
+import { processScheduledJobs } from "../services/scheduler";
+import { processAutoCycles } from "../services/auto-cycle";
+import { SlackClient } from "../services/slack-api";
 import {
   meetings,
   meetingMembers,
@@ -27,6 +30,19 @@ api.use(
 
 api.get("/health", async (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// --- Test: manual cron trigger (temporary) ---
+
+api.post("/trigger-cron", async (c) => {
+  const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+
+  const [jobsResult] = await Promise.all([
+    processScheduledJobs(c.env.DB, client),
+    processAutoCycles(c.env.DB, client),
+  ]);
+
+  return c.json({ ok: true, processed: jobsResult.processed, timestamp: new Date().toISOString() });
 });
 
 // --- Meetings ---
