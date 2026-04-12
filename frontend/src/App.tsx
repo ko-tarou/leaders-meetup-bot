@@ -1,17 +1,11 @@
-import { useState, useEffect } from "react";
-import { api } from "./api";
-import type { Meeting } from "./types";
+import { useState } from "react";
+import { MeetingList } from "./components/MeetingList";
+import { MeetingDetail } from "./components/MeetingDetail";
+
+type Page = { type: "list" } | { type: "detail"; meetingId: string };
 
 export function App() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    api.getMeetings().then((data) => {
-      setMeetings(data);
-      setLoading(false);
-    });
-  }, []);
+  const [page, setPage] = useState<Page>({ type: "list" });
 
   return (
     <div
@@ -19,29 +13,48 @@ export function App() {
         maxWidth: 800,
         margin: "0 auto",
         padding: 20,
-        fontFamily: "sans-serif",
+        fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
-      <h1>Leaders Meetup Bot</h1>
-      <p>管理画面</p>
-      {loading ? (
-        <p>読み込み中...</p>
-      ) : (
-        <div>
-          <h2>ミーティング一覧</h2>
-          {meetings.length === 0 ? (
-            <p>ミーティングがありません</p>
-          ) : (
-            <ul>
-              {meetings.map((m) => (
-                <li key={m.id}>
-                  {m.name} ({m.channelId})
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <header
+        style={{
+          marginBottom: 24,
+          borderBottom: "1px solid #eee",
+          paddingBottom: 12,
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
+        {page.type === "detail" && (
+          <button
+            onClick={() => setPage({ type: "list" })}
+            style={linkStyle}
+          >
+            &#8592; ミーティング一覧に戻る
+          </button>
+        )}
+      </header>
+      {page.type === "list" && (
+        <MeetingList
+          onSelect={(id) => setPage({ type: "detail", meetingId: id })}
+        />
+      )}
+      {page.type === "detail" && (
+        <MeetingDetail
+          meetingId={page.meetingId}
+          onBack={() => setPage({ type: "list" })}
+        />
       )}
     </div>
   );
 }
+
+const linkStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: "#4A90D9",
+  cursor: "pointer",
+  padding: "4px 0",
+  fontSize: 14,
+  marginTop: 8,
+  display: "inline-block",
+};
