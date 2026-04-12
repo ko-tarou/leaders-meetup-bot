@@ -6,6 +6,7 @@ import type { Env } from "../types/env";
 import { processScheduledJobs } from "../services/scheduler";
 import { processAutoCycles } from "../services/auto-cycle";
 import { SlackClient } from "../services/slack-api";
+import { createPoll, closePoll } from "../services/poll";
 import {
   meetings,
   meetingMembers,
@@ -174,6 +175,45 @@ api.get("/meetings/:meetingId/polls", async (c) => {
     })
   );
   return c.json(result);
+});
+
+api.post("/meetings/:meetingId/polls", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+
+  const body = await c.req.json<{ dates: string[] }>();
+  if (!body.dates || body.dates.length === 0) {
+    return c.json({ error: "dates array is required" }, 400);
+  }
+
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  const invalid = body.dates.filter(d => !dateRegex.test(d));
+  if (invalid.length > 0) {
+    return c.json({ error: `Invalid date format: ${invalid.join(", ")}` }, 400);
+  }
+
+  const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+  const result = await createPoll(c.env.DB, client, meeting.channelId, meeting.name, body.dates);
+  return c.json({ ok: true, pollId: result.pollId }, 201);
+});
+
+api.post("/meetings/:meetingId/polls/close", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+
+  const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+  try {
+    await closePoll(c.env.DB, client, meeting.channelId);
+    return c.json({ ok: true });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : "Unknown error" }, 400);
+  }
 });
 
 api.get("/polls/:pollId", async (c) => {
