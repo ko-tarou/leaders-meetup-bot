@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { Poll } from "../types";
+import { MentionPicker } from "./MentionPicker";
 
 type Props = { meetingId: string };
 
@@ -38,6 +39,13 @@ export function PollSection({ meetingId }: Props) {
     setSending(false);
   };
 
+  const handleInsertMention = (text: string) => {
+    setMessageTemplate((prev) => {
+      if (prev.endsWith(" ") || prev === "") return prev + text + " ";
+      return prev + " " + text + " ";
+    });
+  };
+
   const handleClose = async () => {
     if (!confirm("投票を締め切りますか？")) return;
     try {
@@ -73,6 +81,9 @@ export function PollSection({ meetingId }: Props) {
         <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
           YYYY-MM-DD形式でカンマまたはスペース区切り
         </p>
+        <div style={{ marginTop: 8 }}>
+          <MentionPicker meetingId={meetingId} onInsert={handleInsertMention} />
+        </div>
         <textarea
           value={messageTemplate}
           onChange={(e) => setMessageTemplate(e.target.value)}
