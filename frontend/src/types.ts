@@ -60,6 +60,7 @@ export type AutoSchedule = {
   reminderDaysBefore: number[];
   reminderTime: string;
   messageTemplate?: string | null;
+  reminderMessageTemplate?: string | null;
   enabled: number;
   createdAt: string;
 };

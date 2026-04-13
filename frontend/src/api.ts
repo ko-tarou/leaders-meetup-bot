@@ -91,6 +91,7 @@ export const api = {
       reminderDaysBefore: number[];
       reminderTime: string;
       messageTemplate?: string | null;
+      reminderMessageTemplate?: string | null;
     },
   ) =>
     request<AutoSchedule>(`/meetings/${meetingId}/auto-schedule`, {
@@ -106,6 +107,7 @@ export const api = {
       reminderDaysBefore: number[];
       reminderTime: string;
       messageTemplate: string | null;
+      reminderMessageTemplate: string | null;
       enabled: number;
     }>,
   ) =>
