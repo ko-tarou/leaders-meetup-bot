@@ -7,6 +7,7 @@ type Props = { meetingId: string };
 export function MemberSection({ meetingId }: Props) {
   const [members, setMembers] = useState<MeetingMember[]>([]);
   const [slackUserId, setSlackUserId] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   const load = () => {
     api.getMembers(meetingId).then(setMembers);
@@ -27,9 +28,70 @@ export function MemberSection({ meetingId }: Props) {
     load();
   };
 
+  const handleSyncChannel = async () => {
+    if (
+      !confirm(
+        "チャンネルの全メンバーを追加しますか？\n（既に登録されているメンバーはスキップされます）",
+      )
+    )
+      return;
+    setSyncing(true);
+    try {
+      const result = await api.syncChannelMembers(meetingId);
+      if (result.ok) {
+        alert(
+          `${result.added}人を追加しました（既に登録済み: ${result.skipped}人）`,
+        );
+        load();
+      } else {
+        alert(
+          `失敗しました: ${result.error ?? "不明なエラー"}\nBotがチャンネルに参加していることを確認してください。`,
+        );
+      }
+    } catch (e) {
+      alert("エラーが発生しました");
+    }
+    setSyncing(false);
+  };
+
   return (
     <div>
       <h3>メンバー ({members.length}人)</h3>
+
+      <div
+        style={{
+          marginBottom: 12,
+          padding: 12,
+          background: "#f0f7ff",
+          border: "1px solid #c7dcff",
+          borderRadius: 4,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <div style={{ fontSize: 13 }}>
+            <strong>チャンネルから一括追加</strong>
+            <br />
+            <span style={{ color: "#666", fontSize: 12 }}>
+              Botがチャンネルに参加している必要があります
+            </span>
+          </div>
+          <button
+            onClick={handleSyncChannel}
+            disabled={syncing}
+            style={{ ...buttonStyle, whiteSpace: "nowrap" }}
+          >
+            {syncing ? "同期中..." : "チャンネル全員を追加"}
+          </button>
+        </div>
+      </div>
+
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <input
           placeholder="Slack User ID"

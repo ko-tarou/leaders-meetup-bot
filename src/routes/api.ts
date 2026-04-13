@@ -145,6 +145,57 @@ api.post("/meetings/:meetingId/members", async (c) => {
   return c.json({ id, meetingId, slackUserId: body.slackUserId, createdAt }, 201);
 });
 
+api.post("/meetings/:meetingId/members/sync-channel", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+
+  const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+  const result = await client.getChannelMembers(meeting.channelId);
+
+  if (!result.ok) {
+    return c.json({ error: `Slack API error: ${result.error ?? "unknown"}` }, 400);
+  }
+
+  const channelMembers = (result.members ?? []) as string[];
+
+  const existing = await db
+    .select()
+    .from(meetingMembers)
+    .where(eq(meetingMembers.meetingId, meetingId))
+    .all();
+  const existingIds = new Set(existing.map((m) => m.slackUserId));
+
+  const newMembers = channelMembers.filter((id) => !existingIds.has(id));
+  if (newMembers.length === 0) {
+    return c.json({
+      ok: true,
+      added: 0,
+      skipped: channelMembers.length,
+      totalInChannel: channelMembers.length,
+    });
+  }
+
+  const now = new Date().toISOString();
+  const values = newMembers.map((slackUserId) => ({
+    id: crypto.randomUUID(),
+    meetingId,
+    slackUserId,
+    createdAt: now,
+  }));
+
+  await db.insert(meetingMembers).values(values);
+
+  return c.json({
+    ok: true,
+    added: newMembers.length,
+    skipped: channelMembers.length - newMembers.length,
+    totalInChannel: channelMembers.length,
+  });
+});
+
 api.delete("/meetings/:meetingId/members/:memberId", async (c) => {
   const db = drizzle(c.env.DB);
   const memberId = c.req.param("memberId");
