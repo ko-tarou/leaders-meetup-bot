@@ -74,6 +74,10 @@ export class SlackClient {
     return this.callApiGet("conversations.members", { channel });
   }
 
+  async getChannelInfo(channel: string): Promise<SlackResponse> {
+    return this.callApiGet("conversations.info", { channel });
+  }
+
   async verifySignature(
     signature: string,
     timestamp: string,

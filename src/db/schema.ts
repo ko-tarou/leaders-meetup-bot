@@ -105,6 +105,13 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   createdAt: text("created_at").notNull(),
 });
 
+// Slack名前解決のキャッシュ
+export const slackCache = sqliteTable("slack_cache", {
+  id: text("id").primaryKey(), // "user:U..." または "channel:C..."
+  name: text("name").notNull(),
+  fetchedAt: text("fetched_at").notNull(),
+});
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
   id: text("id").primaryKey(),

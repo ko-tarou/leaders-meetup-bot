@@ -18,6 +18,11 @@ import {
   autoSchedules,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
+import {
+  getUserName,
+  getChannelName,
+  getUserNames,
+} from "../services/slack-names";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -689,6 +694,58 @@ api.delete("/auto-schedules/:id", async (c) => {
 
   await db.delete(autoSchedules).where(eq(autoSchedules.id, id));
   return c.json({ ok: true });
+});
+
+// --- Slack Names (resolve IDs to display names) ---
+
+api.get("/slack/user/:userId", async (c) => {
+  const client = new SlackClient(
+    c.env.SLACK_BOT_TOKEN,
+    c.env.SLACK_SIGNING_SECRET,
+  );
+  const userId = c.req.param("userId");
+  const name = await getUserName(c.env.DB, client, userId);
+  return c.json({ id: userId, name });
+});
+
+api.get("/slack/channel/:channelId", async (c) => {
+  const client = new SlackClient(
+    c.env.SLACK_BOT_TOKEN,
+    c.env.SLACK_SIGNING_SECRET,
+  );
+  const channelId = c.req.param("channelId");
+  const name = await getChannelName(c.env.DB, client, channelId);
+  return c.json({ id: channelId, name });
+});
+
+api.get("/slack/users/batch", async (c) => {
+  const idsParam = c.req.query("ids") ?? "";
+  const ids = idsParam.split(",").filter(Boolean);
+  if (ids.length === 0) return c.json([]);
+  const client = new SlackClient(
+    c.env.SLACK_BOT_TOKEN,
+    c.env.SLACK_SIGNING_SECRET,
+  );
+  const names = await getUserNames(c.env.DB, client, ids);
+  return c.json(ids.map((id) => ({ id, name: names[id] || id })));
+});
+
+api.get("/slack/channels", async (c) => {
+  const client = new SlackClient(
+    c.env.SLACK_BOT_TOKEN,
+    c.env.SLACK_SIGNING_SECRET,
+  );
+  const result = await client.getChannelList(200);
+  if (!result.ok) return c.json({ error: result.error }, 400);
+  const channels = (result.channels as Array<{
+    id: string;
+    name: string;
+    is_member?: boolean;
+  }>) ?? [];
+  const filtered = channels
+    .filter((ch) => ch.is_member)
+    .map((ch) => ({ id: ch.id, name: ch.name }));
+  return c.json(filtered);
 });
 
 // --- Scheduled Jobs ---
