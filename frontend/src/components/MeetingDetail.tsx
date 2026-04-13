@@ -4,15 +4,12 @@ import type { MeetingDetail as MeetingDetailType } from "../types";
 import { AutoScheduleSection } from "./AutoScheduleSection";
 import { MemberSection } from "./MemberSection";
 import { PollSection } from "./PollSection";
-import { ReminderSection } from "./ReminderSection";
 
 type Props = { meetingId: string; onBack: () => void };
 
 export function MeetingDetail({ meetingId }: Props) {
   const [meeting, setMeeting] = useState<MeetingDetailType | null>(null);
-  const [tab, setTab] = useState<
-    "members" | "polls" | "reminders" | "auto"
-  >("members");
+  const [tab, setTab] = useState<"members" | "polls" | "auto">("members");
 
   useEffect(() => {
     api.getMeeting(meetingId).then(setMeeting);
@@ -27,7 +24,7 @@ export function MeetingDetail({ meetingId }: Props) {
 
       {/* タブ */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {(["members", "polls", "reminders", "auto"] as const).map((t) => (
+        {(["members", "polls", "auto"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -40,20 +37,13 @@ export function MeetingDetail({ meetingId }: Props) {
               cursor: "pointer",
             }}
           >
-            {t === "members"
-              ? "メンバー"
-              : t === "polls"
-                ? "投票"
-                : t === "reminders"
-                  ? "リマインド"
-                  : "自動スケジュール"}
+            {t === "members" ? "メンバー" : t === "polls" ? "投票" : "自動スケジュール"}
           </button>
         ))}
       </div>
 
       {tab === "members" && <MemberSection meetingId={meetingId} />}
       {tab === "polls" && <PollSection meetingId={meetingId} />}
-      {tab === "reminders" && <ReminderSection meetingId={meetingId} />}
       {tab === "auto" && <AutoScheduleSection meetingId={meetingId} />}
     </div>
   );
