@@ -155,11 +155,29 @@ async function scheduleRemindersForWinner(
     const runAt = `${reminderDate.toISOString().split("T")[0]}T${schedule.reminderTime}:00.000Z`;
 
     if (new Date(runAt) > new Date()) {
-      const payload = config.message ? JSON.stringify({ message: config.message }) : null;
+      let message = config.message;
+      if (message) {
+        const formattedDate = formatDateJa(winnerDate);
+        message = message
+          .replaceAll("{date}", formattedDate)
+          .replaceAll("{dateISO}", winnerDate)
+          .replaceAll("{meetingName}", meeting.name)
+          .replaceAll("{daysBefore}", String(config.daysBefore));
+      }
+      const payload = message ? JSON.stringify({ message }) : null;
       await createReminderJob(db, meeting.id, runAt, payload);
       console.log(`Scheduled reminder for ${meeting.name} at ${runAt}`);
     }
   }
+}
+
+/** "2026-04-23" → "2026年4月23日(木)" */
+function formatDateJa(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const wd = weekdays[date.getDay()];
+  return `${year}年${month}月${day}日(${wd})`;
 }
 
 /** candidateRuleに基づいて候補日を生成する（純粋関数） */
