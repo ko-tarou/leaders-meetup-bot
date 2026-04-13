@@ -59,6 +59,7 @@ export type AutoSchedule = {
   pollCloseDay: number;
   reminderDaysBefore: number[];
   reminderTime: string;
+  messageTemplate?: string | null;
   enabled: number;
   createdAt: string;
 };

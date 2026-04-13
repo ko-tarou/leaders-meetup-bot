@@ -48,10 +48,14 @@ export const api = {
 
   getPolls: (meetingId: string) =>
     request<Poll[]>(`/meetings/${meetingId}/polls`),
-  createPoll: (meetingId: string, dates: string[]) =>
+  createPoll: (
+    meetingId: string,
+    dates: string[],
+    messageTemplate?: string | null,
+  ) =>
     request<{ ok: boolean; pollId: string }>(`/meetings/${meetingId}/polls`, {
       method: "POST",
-      body: JSON.stringify({ dates }),
+      body: JSON.stringify({ dates, messageTemplate }),
     }),
   closePoll: (meetingId: string) =>
     request<{ ok: boolean }>(`/meetings/${meetingId}/polls/close`, {
@@ -86,6 +90,7 @@ export const api = {
       pollCloseDay: number;
       reminderDaysBefore: number[];
       reminderTime: string;
+      messageTemplate?: string | null;
     },
   ) =>
     request<AutoSchedule>(`/meetings/${meetingId}/auto-schedule`, {
@@ -100,6 +105,7 @@ export const api = {
       pollCloseDay: number;
       reminderDaysBefore: number[];
       reminderTime: string;
+      messageTemplate: string | null;
       enabled: number;
     }>,
   ) =>

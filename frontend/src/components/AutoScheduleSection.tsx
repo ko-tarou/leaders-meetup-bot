@@ -17,6 +17,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
   const [pollCloseDay, setPollCloseDay] = useState(10);
   const [reminderDays, setReminderDays] = useState("3, 0");
   const [reminderTime, setReminderTime] = useState("09:00");
+  const [messageTemplate, setMessageTemplate] = useState("");
 
   const load = async () => {
     try {
@@ -33,6 +34,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
           setReminderDays(data.reminderDaysBefore.join(", "));
         }
         setReminderTime(data.reminderTime);
+        if (data.messageTemplate) setMessageTemplate(data.messageTemplate);
       }
     } catch {
       // 404 = 未設定
@@ -62,6 +64,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
         .map((s) => parseInt(s.trim()))
         .filter((n) => !isNaN(n)),
       reminderTime,
+      messageTemplate: messageTemplate.trim() ? messageTemplate : null,
     };
 
     if (schedule) {
@@ -180,6 +183,27 @@ export function AutoScheduleSection({ meetingId }: Props) {
               style={{ ...inputStyle, width: 120 }}
             />
           </div>
+        </div>
+
+        {/* メッセージ本文 */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>メッセージ本文（任意）</label>
+          <textarea
+            value={messageTemplate}
+            onChange={(e) => setMessageTemplate(e.target.value)}
+            placeholder=":tada: 今月のリーダー雑談会の日程調整です！参加できる日程を選んでください :raising_hand:"
+            rows={3}
+            style={{
+              ...inputStyle,
+              width: "100%",
+              resize: "vertical",
+              fontFamily: "inherit",
+              boxSizing: "border-box",
+            }}
+          />
+          <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+            Slackの絵文字記法（:tada: など）も使えます。空欄ならデフォルト文言を使用。
+          </p>
         </div>
 
         {/* ボタン */}
