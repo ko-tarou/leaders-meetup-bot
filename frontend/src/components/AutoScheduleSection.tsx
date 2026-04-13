@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { AutoSchedule } from "../types";
+import { MentionPicker } from "./MentionPicker";
 
 type Props = { meetingId: string };
 
@@ -80,6 +81,13 @@ export function AutoScheduleSection({ meetingId }: Props) {
     if (!confirm("自動スケジュールを削除しますか？")) return;
     await api.deleteAutoSchedule(schedule.id);
     setSchedule(null);
+  };
+
+  const handleInsertMention = (text: string) => {
+    setMessageTemplate((prev) => {
+      if (prev.endsWith(" ") || prev === "") return prev + text + " ";
+      return prev + " " + text + " ";
+    });
   };
 
   if (loading) return <p>読み込み中...</p>;
@@ -188,6 +196,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
         {/* メッセージ本文 */}
         <div style={{ marginBottom: 16 }}>
           <label style={labelStyle}>メッセージ本文（任意）</label>
+          <MentionPicker meetingId={meetingId} onInsert={handleInsertMention} />
           <textarea
             value={messageTemplate}
             onChange={(e) => setMessageTemplate(e.target.value)}
