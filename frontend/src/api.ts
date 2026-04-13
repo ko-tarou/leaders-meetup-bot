@@ -3,6 +3,7 @@ import type {
   Meeting,
   MeetingDetail,
   MeetingMember,
+  MeetingStatus,
   Poll,
   Reminder,
   ReminderItem,
@@ -21,6 +22,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   getMeetings: () => request<Meeting[]>("/meetings"),
   getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
+  getMeetingStatus: (id: string) =>
+    request<MeetingStatus>(`/meetings/${id}/status`),
   createMeeting: (data: { name: string; channelId: string }) =>
     request<Meeting>("/meetings", {
       method: "POST",

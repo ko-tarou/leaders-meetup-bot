@@ -92,3 +92,12 @@ export type MeetingDetail = Meeting & {
   polls?: Poll[];
   reminders?: Reminder[];
 };
+
+export type MeetingStatus = {
+  status: "voting" | "manual" | "before_poll" | "closed" | "past";
+  label: string;
+  color: "green" | "blue" | "red" | "gray";
+  nextDate: string | null;
+  pollStartDate: string | null;
+  pollCloseDate: string | null;
+};
