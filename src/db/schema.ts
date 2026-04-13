@@ -105,5 +105,8 @@ export const scheduledJobs = sqliteTable("scheduled_jobs", {
   referenceId: text("reference_id").notNull(),
   nextRunAt: text("next_run_at").notNull(),
   status: text("status").notNull().default("pending"),
+  // ジョブ固有データ（JSON文字列）
+  // 例（reminder）: {"message": "..."}
+  payload: text("payload"),
   createdAt: text("created_at").notNull(),
 });

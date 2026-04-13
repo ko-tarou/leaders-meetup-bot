@@ -24,7 +24,16 @@ export async function processScheduledJobs(
   for (const job of jobs) {
     try {
       if (job.type === "reminder") {
-        await sendReminder(db, slackClient, job.referenceId);
+        let customMessage: string | null = null;
+        if (job.payload) {
+          try {
+            const payload = JSON.parse(job.payload);
+            customMessage = payload?.message ?? null;
+          } catch {
+            // payload不正時は無視してデフォルト動作へ
+          }
+        }
+        await sendReminder(db, slackClient, job.referenceId, customMessage);
       }
 
       await d1
@@ -48,6 +57,7 @@ export async function createReminderJob(
   db: D1Database,
   meetingId: string,
   runAt: string,
+  payload?: string | null,
 ): Promise<string> {
   const d1 = drizzle(db);
   const jobId = crypto.randomUUID();
@@ -58,6 +68,7 @@ export async function createReminderJob(
     referenceId: meetingId,
     nextRunAt: runAt,
     status: "pending",
+    payload: payload ?? null,
     createdAt: new Date().toISOString(),
   });
 
