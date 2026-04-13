@@ -10,6 +10,7 @@ import { createPoll, closePoll } from "../services/poll";
 import {
   meetings,
   meetingMembers,
+  meetingResponders,
   polls,
   pollOptions,
   pollVotes,
@@ -332,6 +333,55 @@ api.delete("/meetings/:meetingId/members/:memberId", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Responders (自動応答のメンション対象) ---
+
+api.get("/meetings/:meetingId/responders", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+  const result = await db
+    .select()
+    .from(meetingResponders)
+    .where(eq(meetingResponders.meetingId, meetingId))
+    .all();
+  return c.json(result);
+});
+
+api.post("/meetings/:meetingId/responders", async (c) => {
+  const db = drizzle(c.env.DB);
+  const meetingId = c.req.param("meetingId");
+  const body = await c.req.json<{ slackUserId: string }>();
+  if (!body.slackUserId) {
+    return c.json({ error: "slackUserId is required" }, 400);
+  }
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
+  if (!meeting) return c.json({ error: "Meeting not found" }, 404);
+
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  await db.insert(meetingResponders).values({
+    id,
+    meetingId,
+    slackUserId: body.slackUserId,
+    createdAt,
+  });
+  return c.json({ id, meetingId, slackUserId: body.slackUserId, createdAt }, 201);
+});
+
+api.delete("/meetings/:meetingId/responders/:responderId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const responderId = c.req.param("responderId");
+  const existing = await db
+    .select()
+    .from(meetingResponders)
+    .where(eq(meetingResponders.id, responderId))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  await db.delete(meetingResponders).where(eq(meetingResponders.id, responderId));
+  return c.json({ ok: true });
+});
+
 // --- Polls ---
 
 api.get("/meetings/:meetingId/polls", async (c) => {
@@ -542,6 +592,8 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
     reminders?: unknown;
+    autoRespondEnabled?: boolean | number;
+    autoRespondTemplate?: string | null;
   }>();
 
   if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
@@ -594,6 +646,8 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
     reminders: remindersStr,
     enabled: 1,
+    autoRespondEnabled: body.autoRespondEnabled ? 1 : 0,
+    autoRespondTemplate: body.autoRespondTemplate ?? null,
     createdAt,
   };
   await db.insert(autoSchedules).values(record);
@@ -626,6 +680,8 @@ api.put("/auto-schedules/:id", async (c) => {
     reminderMessageTemplate?: string | null;
     reminders?: unknown;
     enabled?: number;
+    autoRespondEnabled?: boolean | number;
+    autoRespondTemplate?: string | null;
   }>();
 
   if (body.pollStartDay != null && (body.pollStartDay < 1 || body.pollStartDay > 28)) {
@@ -680,6 +736,16 @@ api.put("/auto-schedules/:id", async (c) => {
           : body.reminderMessageTemplate,
       reminders: remindersStr,
       enabled: body.enabled ?? existing.enabled,
+      autoRespondEnabled:
+        body.autoRespondEnabled === undefined
+          ? existing.autoRespondEnabled
+          : body.autoRespondEnabled
+            ? 1
+            : 0,
+      autoRespondTemplate:
+        body.autoRespondTemplate === undefined
+          ? existing.autoRespondTemplate
+          : body.autoRespondTemplate,
     })
     .where(eq(autoSchedules.id, id));
 
