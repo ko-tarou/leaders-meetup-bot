@@ -10,6 +10,7 @@ export async function createPoll(
   channelId: string,
   title: string,
   dates: string[],
+  messageTemplate?: string | null,
 ): Promise<{ pollId: string }> {
   const d1 = drizzle(db);
   const now = new Date().toISOString();
@@ -38,6 +39,7 @@ export async function createPoll(
     id: pollId,
     meetingId: meeting.id,
     status: "open",
+    messageTemplate: messageTemplate ?? null,
     createdAt: now,
   });
 
@@ -50,7 +52,7 @@ export async function createPoll(
   await d1.insert(pollOptions).values(options);
 
   // 4. Slackにメッセージ送信
-  const blocks = createPollBlocks(title, options);
+  const blocks = createPollBlocks(title, options, messageTemplate);
   const result = await slackClient.postMessage(
     channelId,
     `${title} - 日程調整`,
@@ -122,7 +124,12 @@ export async function handleVote(
 async function updatePollMessage(
   d1: ReturnType<typeof drizzle>,
   slackClient: SlackClient,
-  poll: { id: string; meetingId: string; slackMessageTs: string | null },
+  poll: {
+    id: string;
+    meetingId: string;
+    slackMessageTs: string | null;
+    messageTemplate?: string | null;
+  },
 ) {
   if (!poll.slackMessageTs) return;
 
@@ -150,10 +157,14 @@ async function updatePollMessage(
     }),
   );
 
+  const body =
+    poll.messageTemplate && poll.messageTemplate.trim().length > 0
+      ? poll.messageTemplate
+      : "参加できる日程を選んでください:";
   const blocks: Record<string, unknown>[] = [
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*${meeting.name}*\n参加できる日程を選んでください:` },
+      text: { type: "mrkdwn", text: `*${meeting.name}*\n${body}` },
     },
     { type: "divider" },
   ];

@@ -7,6 +7,7 @@ type Props = { meetingId: string };
 export function PollSection({ meetingId }: Props) {
   const [polls, setPolls] = useState<Poll[]>([]);
   const [dates, setDates] = useState("");
+  const [messageTemplate, setMessageTemplate] = useState("");
   const [sending, setSending] = useState(false);
 
   const load = () => {
@@ -23,8 +24,13 @@ export function PollSection({ meetingId }: Props) {
     if (dateList.length === 0) return;
     setSending(true);
     try {
-      await api.createPoll(meetingId, dateList);
+      await api.createPoll(
+        meetingId,
+        dateList,
+        messageTemplate.trim() ? messageTemplate : null,
+      );
       setDates("");
+      setMessageTemplate("");
       load();
     } catch (e) {
       alert("送信に失敗しました");
@@ -66,6 +72,23 @@ export function PollSection({ meetingId }: Props) {
         </div>
         <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
           YYYY-MM-DD形式でカンマまたはスペース区切り
+        </p>
+        <textarea
+          value={messageTemplate}
+          onChange={(e) => setMessageTemplate(e.target.value)}
+          placeholder="メッセージ本文（任意）例: :tada: 今月もよろしく！"
+          rows={2}
+          style={{
+            ...inputStyle,
+            width: "100%",
+            resize: "vertical",
+            marginTop: 8,
+            fontFamily: "inherit",
+            boxSizing: "border-box",
+          }}
+        />
+        <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+          空欄ならデフォルト文言（:tada: などSlack絵文字記法OK）
         </p>
       </div>
 

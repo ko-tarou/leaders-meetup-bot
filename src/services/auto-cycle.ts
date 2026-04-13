@@ -53,7 +53,7 @@ async function autoStartPoll(
   db: D1Database,
   slackClient: SlackClient,
   meeting: { id: string; name: string; channelId: string },
-  schedule: { candidateRule: string },
+  schedule: { candidateRule: string; messageTemplate?: string | null },
   currentMonth: string,
 ): Promise<void> {
   const existingPolls = await d1
@@ -75,7 +75,7 @@ async function autoStartPoll(
     return;
   }
 
-  await createPoll(db, slackClient, meeting.channelId, meeting.name, dates);
+  await createPoll(db, slackClient, meeting.channelId, meeting.name, dates, schedule.messageTemplate);
   console.log(`Auto-created poll for ${meeting.name} with dates: ${dates.join(", ")}`);
 }
 
