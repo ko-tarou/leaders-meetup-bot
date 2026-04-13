@@ -10,10 +10,27 @@ type Props = {
 export function MentionPicker({ meetingId, onInsert }: Props) {
   const [members, setMembers] = useState<MeetingMember[]>([]);
   const [showMemberList, setShowMemberList] = useState(false);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     api.getMembers(meetingId).then(setMembers);
   }, [meetingId]);
+
+  useEffect(() => {
+    if (members.length === 0) {
+      setNameMap({});
+      return;
+    }
+    const ids = members.map((m) => m.slackUserId);
+    api
+      .getUserNamesBatch(ids)
+      .then((list) => {
+        const map: Record<string, string> = {};
+        for (const u of list) map[u.id] = u.name;
+        setNameMap(map);
+      })
+      .catch(() => {});
+  }, [members]);
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -70,7 +87,7 @@ export function MentionPicker({ meetingId, onInsert }: Props) {
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#f0f0f0")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                @{m.slackUserId}
+                @{nameMap[m.slackUserId] || m.slackUserId}
               </button>
             ))
           )}

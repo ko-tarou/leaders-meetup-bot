@@ -136,4 +136,15 @@ export const api = {
     }),
   deleteAutoSchedule: (id: string) =>
     request<{ ok: boolean }>(`/auto-schedules/${id}`, { method: "DELETE" }),
+
+  getUserName: (userId: string) =>
+    request<{ id: string; name: string }>(`/slack/user/${userId}`),
+  getChannelName: (channelId: string) =>
+    request<{ id: string; name: string }>(`/slack/channel/${channelId}`),
+  getUserNamesBatch: (ids: string[]) =>
+    request<{ id: string; name: string }[]>(
+      `/slack/users/batch?ids=${ids.join(",")}`,
+    ),
+  getSlackChannels: () =>
+    request<{ id: string; name: string }[]>(`/slack/channels`),
 };

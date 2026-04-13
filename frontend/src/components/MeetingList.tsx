@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { Meeting } from "../types";
+import { ChannelSelector } from "./ChannelSelector";
 
 type Props = { onSelect: (id: string) => void };
 
@@ -9,6 +10,7 @@ export function MeetingList({ onSelect }: Props) {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [channelId, setChannelId] = useState("");
+  const [channelNames, setChannelNames] = useState<Record<string, string>>({});
 
   const load = () => {
     api
@@ -19,6 +21,23 @@ export function MeetingList({ onSelect }: Props) {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (meetings.length === 0) return;
+    meetings.forEach(async (m) => {
+      setChannelNames((prev) => {
+        if (prev[m.channelId] !== undefined) return prev;
+        // 先にプレースホルダを埋めて二重リクエストを防ぐ
+        return { ...prev, [m.channelId]: "" };
+      });
+      try {
+        const res = await api.getChannelName(m.channelId);
+        setChannelNames((prev) => ({ ...prev, [m.channelId]: res.name }));
+      } catch {
+        // フェッチ失敗時はIDフォールバックを使うのでそのまま
+      }
+    });
+  }, [meetings]);
 
   const handleCreate = async () => {
     if (!name || !channelId) return;
@@ -41,18 +60,16 @@ export function MeetingList({ onSelect }: Props) {
       {/* 新規作成フォーム */}
       <div style={cardStyle}>
         <h3 style={{ margin: "0 0 8px" }}>新しいミーティングを作成</h3>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input
             placeholder="ミーティング名"
             value={name}
             onChange={(e) => setName(e.target.value)}
             style={inputStyle}
           />
-          <input
-            placeholder="チャンネルID"
+          <ChannelSelector
             value={channelId}
-            onChange={(e) => setChannelId(e.target.value)}
-            style={inputStyle}
+            onChange={(id) => setChannelId(id)}
           />
           <button onClick={handleCreate} style={buttonStyle}>
             作成
@@ -83,7 +100,7 @@ export function MeetingList({ onSelect }: Props) {
                   {m.name}
                 </strong>
                 <span style={{ color: "#666", marginLeft: 8 }}>
-                  #{m.channelId}
+                  #{channelNames[m.channelId] || m.channelId}
                 </span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
