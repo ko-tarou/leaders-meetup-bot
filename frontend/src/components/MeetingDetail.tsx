@@ -1,15 +1,19 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { MeetingDetail as MeetingDetailType } from "../types";
-import { AutoScheduleSection } from "./AutoScheduleSection";
 import { MemberSection } from "./MemberSection";
-import { PollSection } from "./PollSection";
+import { ScheduleSection } from "./ScheduleSection";
+import { HistorySection } from "./HistorySection";
+import { StatusIndicator } from "./StatusIndicator";
 
 type Props = { meetingId: string; onBack: () => void };
 
 export function MeetingDetail({ meetingId }: Props) {
   const [meeting, setMeeting] = useState<MeetingDetailType | null>(null);
-  const [tab, setTab] = useState<"members" | "polls" | "auto">("members");
+  const [tab, setTab] = useState<"members" | "schedule" | "history">(
+    "schedule",
+  );
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     api.getMeeting(meetingId).then(setMeeting);
@@ -22,9 +26,10 @@ export function MeetingDetail({ meetingId }: Props) {
       <h2>{meeting.name}</h2>
       <p style={{ color: "#666" }}>チャンネル: #{meeting.channelId}</p>
 
-      {/* タブ */}
+      <StatusIndicator meetingId={meetingId} refreshKey={refreshKey} />
+
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {(["members", "polls", "auto"] as const).map((t) => (
+        {(["members", "schedule", "history"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -37,14 +42,23 @@ export function MeetingDetail({ meetingId }: Props) {
               cursor: "pointer",
             }}
           >
-            {t === "members" ? "メンバー" : t === "polls" ? "投票" : "自動スケジュール"}
+            {t === "members"
+              ? "メンバー"
+              : t === "schedule"
+                ? "スケジュール"
+                : "履歴"}
           </button>
         ))}
       </div>
 
       {tab === "members" && <MemberSection meetingId={meetingId} />}
-      {tab === "polls" && <PollSection meetingId={meetingId} />}
-      {tab === "auto" && <AutoScheduleSection meetingId={meetingId} />}
+      {tab === "schedule" && (
+        <ScheduleSection
+          meetingId={meetingId}
+          onChange={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+      {tab === "history" && <HistorySection meetingId={meetingId} />}
     </div>
   );
 }
