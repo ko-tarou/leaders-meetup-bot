@@ -99,7 +99,9 @@ export const api = {
     data: {
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
+      pollStartTime?: string;
       pollCloseDay: number;
+      pollCloseTime?: string;
       reminders: ReminderItem[];
       messageTemplate?: string | null;
       // 互換性のため残す
@@ -117,7 +119,9 @@ export const api = {
     data: Partial<{
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
+      pollStartTime: string;
       pollCloseDay: number;
+      pollCloseTime: string;
       reminders: ReminderItem[];
       reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
       reminderTime: string;

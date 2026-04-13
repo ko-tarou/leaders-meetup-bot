@@ -83,8 +83,12 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   candidateRule: text("candidate_rule").notNull(),
   // 毎月何日に投票を開始するか (1-28)
   pollStartDay: integer("poll_start_day").notNull(),
+  // 投票開始時刻 "HH:MM" UTC
+  pollStartTime: text("poll_start_time").notNull().default("00:00"),
   // 毎月何日に投票を締め切るか (1-28)
   pollCloseDay: integer("poll_close_day").notNull(),
+  // 投票締切時刻 "HH:MM" UTC
+  pollCloseTime: text("poll_close_time").notNull().default("00:00"),
   // 開催何日前にリマインドするか（JSON配列）例: [3, 0]
   reminderDaysBefore: text("reminder_days_before").notNull().default("[3, 0]"),
   // リマインド時刻 "09:00"

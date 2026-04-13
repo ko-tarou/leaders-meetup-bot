@@ -43,6 +43,13 @@
       "when": 1776065185222,
       "tag": "0005_red_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1776068372578,
+      "tag": "0006_breezy_paladin",
+      "breakpoints": true
     }
   ]
 }

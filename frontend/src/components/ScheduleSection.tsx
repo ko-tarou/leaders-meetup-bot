@@ -28,7 +28,9 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
   const [weekday, setWeekday] = useState(6);
   const [weeks, setWeeks] = useState<number[]>([2, 3, 4]);
   const [pollStartDay, setPollStartDay] = useState(1);
+  const [pollStartTime, setPollStartTime] = useState("00:00");
   const [pollCloseDay, setPollCloseDay] = useState(10);
+  const [pollCloseTime, setPollCloseTime] = useState("00:00");
 
   const [messageTemplate, setMessageTemplate] = useState("");
   const [reminders, setReminders] = useState<ReminderItem[]>(DEFAULT_REMINDERS);
@@ -46,7 +48,9 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
           setWeeks(data.candidateRule.weeks);
         }
         setPollStartDay(data.pollStartDay);
+        setPollStartTime(data.pollStartTime || "00:00");
         setPollCloseDay(data.pollCloseDay);
+        setPollCloseTime(data.pollCloseTime || "00:00");
         setMessageTemplate(data.messageTemplate ?? "");
         if (Array.isArray(data.reminders) && data.reminders.length > 0) {
           setReminders(
@@ -161,7 +165,9 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
     const data = {
       candidateRule: { type: "weekday" as const, weekday, weeks },
       pollStartDay,
+      pollStartTime,
       pollCloseDay,
+      pollCloseTime,
       reminders: normalized,
       messageTemplate: messageTemplate.trim() ? messageTemplate : null,
     };
@@ -313,30 +319,52 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
             <div>
-              <label style={labelStyle}>投票開始日（毎月）</label>
-              <input
-                type="number"
-                min={1}
-                max={28}
-                value={pollStartDay}
-                onChange={(e) => setPollStartDay(Number(e.target.value))}
-                style={{ ...inputStyle, width: 80 }}
-              />
-              <span style={{ marginLeft: 4, color: "#666" }}>日</span>
+              <label style={labelStyle}>投票開始（毎月）</label>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={pollStartDay}
+                  onChange={(e) => setPollStartDay(Number(e.target.value))}
+                  style={{ ...inputStyle, width: 70 }}
+                />
+                <span style={{ color: "#666" }}>日</span>
+                <input
+                  type="time"
+                  value={pollStartTime}
+                  onChange={(e) => setPollStartTime(e.target.value)}
+                  style={{ ...inputStyle, width: 110 }}
+                />
+              </div>
+              <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
+                UTC時刻（JSTは+9時間）
+              </p>
             </div>
             <div>
-              <label style={labelStyle}>投票締切日（毎月）</label>
-              <input
-                type="number"
-                min={1}
-                max={28}
-                value={pollCloseDay}
-                onChange={(e) => setPollCloseDay(Number(e.target.value))}
-                style={{ ...inputStyle, width: 80 }}
-              />
-              <span style={{ marginLeft: 4, color: "#666" }}>日</span>
+              <label style={labelStyle}>投票締切（毎月）</label>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={pollCloseDay}
+                  onChange={(e) => setPollCloseDay(Number(e.target.value))}
+                  style={{ ...inputStyle, width: 70 }}
+                />
+                <span style={{ color: "#666" }}>日</span>
+                <input
+                  type="time"
+                  value={pollCloseTime}
+                  onChange={(e) => setPollCloseTime(e.target.value)}
+                  style={{ ...inputStyle, width: 110 }}
+                />
+              </div>
+              <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
+                UTC時刻（JSTは+9時間）
+              </p>
             </div>
           </div>
         </div>

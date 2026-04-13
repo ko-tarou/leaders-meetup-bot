@@ -23,7 +23,9 @@ type ScheduleRow = {
   meetingId: string;
   candidateRule: string;
   pollStartDay: number;
+  pollStartTime: string;
   pollCloseDay: number;
+  pollCloseTime: string;
   reminderDaysBefore: string;
   reminderTime: string;
   messageTemplate: string | null;
@@ -45,6 +47,7 @@ export async function processAutoCycles(
   const now = new Date();
   const today = now.getUTCDate();
   const todayStr = now.toISOString().split("T")[0];
+  const currentHM = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
   const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 
   const schedules = await d1
@@ -61,10 +64,13 @@ export async function processAutoCycles(
       .get();
     if (!meeting) continue;
 
-    if (today === schedule.pollStartDay) {
+    const startTime = schedule.pollStartTime ?? "00:00";
+    const closeTime = schedule.pollCloseTime ?? "00:00";
+
+    if (today === schedule.pollStartDay && currentHM >= startTime) {
       await autoStartPoll(d1, db, slackClient, meeting, schedule, currentMonth);
     }
-    if (today === schedule.pollCloseDay) {
+    if (today === schedule.pollCloseDay && currentHM >= closeTime) {
       await autoClosePoll(d1, db, slackClient, meeting, schedule, todayStr);
     }
 

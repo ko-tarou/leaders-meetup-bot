@@ -75,7 +75,9 @@ export type AutoSchedule = {
     weeks: number[];
   };
   pollStartDay: number;
+  pollStartTime: string; // HH:MM UTC
   pollCloseDay: number;
+  pollCloseTime: string; // HH:MM UTC
   // 旧形式の数値配列と新形式のオブジェクト配列の両方を許容する
   reminderDaysBefore: Array<ReminderConfig | number>;
   reminderTime: string;

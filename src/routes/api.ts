@@ -529,7 +529,9 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
   const body = await c.req.json<{
     candidateRule: { type: string; weekday: number; weeks: number[] };
     pollStartDay: number;
+    pollStartTime?: string;
     pollCloseDay: number;
+    pollCloseTime?: string;
     reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
@@ -542,6 +544,12 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
   }
   if (!body.pollStartDay || !body.pollCloseDay || body.pollStartDay < 1 || body.pollStartDay > 28 || body.pollCloseDay < 1 || body.pollCloseDay > 28) {
     return c.json({ error: "pollStartDay and pollCloseDay must be between 1 and 28" }, 400);
+  }
+  if (body.pollStartTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollStartTime)) {
+    return c.json({ error: "pollStartTime must be HH:MM format" }, 400);
+  }
+  if (body.pollCloseTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollCloseTime)) {
+    return c.json({ error: "pollCloseTime must be HH:MM format" }, 400);
   }
 
   let reminderDaysBefore: ReminderDaysBeforeItem[] = [
@@ -572,7 +580,9 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     meetingId,
     candidateRule: JSON.stringify(body.candidateRule),
     pollStartDay: body.pollStartDay,
+    pollStartTime: body.pollStartTime ?? "00:00",
     pollCloseDay: body.pollCloseDay,
+    pollCloseTime: body.pollCloseTime ?? "00:00",
     reminderDaysBefore: JSON.stringify(reminderDaysBefore),
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
@@ -602,7 +612,9 @@ api.put("/auto-schedules/:id", async (c) => {
   const body = await c.req.json<{
     candidateRule?: { type: string; weekday: number; weeks: number[] };
     pollStartDay?: number;
+    pollStartTime?: string;
     pollCloseDay?: number;
+    pollCloseTime?: string;
     reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
@@ -616,6 +628,12 @@ api.put("/auto-schedules/:id", async (c) => {
   }
   if (body.pollCloseDay != null && (body.pollCloseDay < 1 || body.pollCloseDay > 28)) {
     return c.json({ error: "pollCloseDay must be between 1 and 28" }, 400);
+  }
+  if (body.pollStartTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollStartTime)) {
+    return c.json({ error: "pollStartTime must be HH:MM format" }, 400);
+  }
+  if (body.pollCloseTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollCloseTime)) {
+    return c.json({ error: "pollCloseTime must be HH:MM format" }, 400);
   }
   if (body.candidateRule && (!body.candidateRule.type || body.candidateRule.weekday == null || !body.candidateRule.weeks)) {
     return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
@@ -644,7 +662,9 @@ api.put("/auto-schedules/:id", async (c) => {
     .set({
       candidateRule: body.candidateRule ? JSON.stringify(body.candidateRule) : existing.candidateRule,
       pollStartDay: body.pollStartDay ?? existing.pollStartDay,
+      pollStartTime: body.pollStartTime ?? existing.pollStartTime,
       pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
+      pollCloseTime: body.pollCloseTime ?? existing.pollCloseTime,
       reminderDaysBefore: reminderDaysBeforeStr,
       reminderTime: body.reminderTime ?? existing.reminderTime,
       messageTemplate:
