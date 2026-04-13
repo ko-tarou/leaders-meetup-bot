@@ -15,7 +15,7 @@ export type Trigger =
 
 export type Reminder = {
   trigger: Trigger;
-  time: string; // "HH:MM"
+  time: string; // "HH:MM" または "HH:MM:SS"
   message: string | null;
 };
 
@@ -175,7 +175,7 @@ export function validateReminders(value: unknown): Reminder[] | null {
     const trigger = parseTrigger((item as { trigger?: unknown }).trigger);
     if (!trigger) return null;
     const timeRaw = (item as { time?: unknown }).time;
-    if (typeof timeRaw !== "string" || !/^\d{2}:\d{2}$/.test(timeRaw)) {
+    if (typeof timeRaw !== "string" || !/^\d{2}:\d{2}(:\d{2})?$/.test(timeRaw)) {
       return null;
     }
     const msgRaw = (item as { message?: unknown }).message;
