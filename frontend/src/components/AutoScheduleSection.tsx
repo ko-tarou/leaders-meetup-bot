@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { AutoSchedule } from "../types";
 import { MentionPicker } from "./MentionPicker";
+import { AutoTextarea } from "./AutoTextarea";
 
 type Props = { meetingId: string };
 
@@ -270,11 +271,10 @@ export function AutoScheduleSection({ meetingId }: Props) {
                 meetingId={meetingId}
                 onInsert={(text) => insertMentionIntoReminder(i, text)}
               />
-              <textarea
+              <AutoTextarea
                 value={r.message}
                 onChange={(e) => updateReminder(i, "message", e.target.value)}
-                placeholder="メッセージ本文（空欄でデフォルト）例: :bell: もうすぐだよ！"
-                rows={2}
+                placeholder="メッセージ本文（空欄でデフォルト）例: :bell: {date} のリーダー雑談会まで {daysBefore} 日！"
                 style={{
                   ...inputStyle,
                   width: "100%",
@@ -283,6 +283,9 @@ export function AutoScheduleSection({ meetingId }: Props) {
                   boxSizing: "border-box",
                 }}
               />
+              <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+                使えるプレースホルダ: <code>{"{date}"}</code>（決定日）, <code>{"{meetingName}"}</code>, <code>{"{daysBefore}"}</code>
+              </p>
             </div>
           ))}
           <button
@@ -315,11 +318,11 @@ export function AutoScheduleSection({ meetingId }: Props) {
         <div style={{ marginBottom: 16 }}>
           <label style={labelStyle}>メッセージ本文（任意）</label>
           <MentionPicker meetingId={meetingId} onInsert={handleInsertMention} />
-          <textarea
+          <AutoTextarea
             value={messageTemplate}
             onChange={(e) => setMessageTemplate(e.target.value)}
             placeholder=":tada: 今月のリーダー雑談会の日程調整です！参加できる日程を選んでください :raising_hand:"
-            rows={3}
+            minRows={3}
             style={{
               ...inputStyle,
               width: "100%",
