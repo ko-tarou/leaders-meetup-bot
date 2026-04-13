@@ -88,7 +88,7 @@ export const api = {
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
       pollCloseDay: number;
-      reminderDaysBefore: number[];
+      reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
       reminderTime: string;
       messageTemplate?: string | null;
       reminderMessageTemplate?: string | null;
@@ -104,7 +104,7 @@ export const api = {
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
       pollCloseDay: number;
-      reminderDaysBefore: number[];
+      reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
       reminderTime: string;
       messageTemplate: string | null;
       reminderMessageTemplate: string | null;

@@ -47,6 +47,11 @@ export type Reminder = {
   enabled: number;
 };
 
+export type ReminderConfig = {
+  daysBefore: number;
+  message: string | null;
+};
+
 export type AutoSchedule = {
   id: string;
   meetingId: string;
@@ -57,7 +62,8 @@ export type AutoSchedule = {
   };
   pollStartDay: number;
   pollCloseDay: number;
-  reminderDaysBefore: number[];
+  // 旧形式の数値配列と新形式のオブジェクト配列の両方を許容する
+  reminderDaysBefore: Array<ReminderConfig | number>;
   reminderTime: string;
   messageTemplate?: string | null;
   reminderMessageTemplate?: string | null;
