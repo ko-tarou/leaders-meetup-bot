@@ -39,7 +39,16 @@ export function createReminderBlocks(
   meetingName: string,
   date: string,
   time?: string,
+  customTemplate?: string | null,
 ): Block[] {
+  if (customTemplate && customTemplate.trim().length > 0) {
+    return [
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: customTemplate },
+      },
+    ];
+  }
   const datetime = time ? `${date} ${time}` : date;
   return [
     {

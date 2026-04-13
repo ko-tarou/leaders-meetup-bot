@@ -19,6 +19,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
   const [reminderDays, setReminderDays] = useState("3, 0");
   const [reminderTime, setReminderTime] = useState("09:00");
   const [messageTemplate, setMessageTemplate] = useState("");
+  const [reminderMessageTemplate, setReminderMessageTemplate] = useState("");
 
   const load = async () => {
     try {
@@ -36,6 +37,8 @@ export function AutoScheduleSection({ meetingId }: Props) {
         }
         setReminderTime(data.reminderTime);
         if (data.messageTemplate) setMessageTemplate(data.messageTemplate);
+        if (data.reminderMessageTemplate)
+          setReminderMessageTemplate(data.reminderMessageTemplate);
       }
     } catch {
       // 404 = 未設定
@@ -66,6 +69,9 @@ export function AutoScheduleSection({ meetingId }: Props) {
         .filter((n) => !isNaN(n)),
       reminderTime,
       messageTemplate: messageTemplate.trim() ? messageTemplate : null,
+      reminderMessageTemplate: reminderMessageTemplate.trim()
+        ? reminderMessageTemplate
+        : null,
     };
 
     if (schedule) {
@@ -85,6 +91,13 @@ export function AutoScheduleSection({ meetingId }: Props) {
 
   const handleInsertMention = (text: string) => {
     setMessageTemplate((prev) => {
+      if (prev.endsWith(" ") || prev === "") return prev + text + " ";
+      return prev + " " + text + " ";
+    });
+  };
+
+  const handleInsertReminderMention = (text: string) => {
+    setReminderMessageTemplate((prev) => {
       if (prev.endsWith(" ") || prev === "") return prev + text + " ";
       return prev + " " + text + " ";
     });
@@ -212,6 +225,31 @@ export function AutoScheduleSection({ meetingId }: Props) {
           />
           <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
             Slackの絵文字記法（:tada: など）も使えます。空欄ならデフォルト文言を使用。
+          </p>
+        </div>
+
+        {/* リマインドメッセージ本文 */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>リマインドメッセージ本文（任意）</label>
+          <MentionPicker
+            meetingId={meetingId}
+            onInsert={handleInsertReminderMention}
+          />
+          <textarea
+            value={reminderMessageTemplate}
+            onChange={(e) => setReminderMessageTemplate(e.target.value)}
+            placeholder=":bell: リーダー雑談会のリマインドです！ <!channel>"
+            rows={3}
+            style={{
+              ...inputStyle,
+              width: "100%",
+              resize: "vertical",
+              fontFamily: "inherit",
+              boxSizing: "border-box",
+            }}
+          />
+          <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+            Slackの絵文字・メンション記法が使えます。空欄ならデフォルト文言を使用。
           </p>
         </div>
 

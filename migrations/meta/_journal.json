@@ -22,6 +22,13 @@
       "when": 1776041739782,
       "tag": "0002_heavy_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776042685093,
+      "tag": "0003_cool_albert_cleary",
+      "breakpoints": true
     }
   ]
 }

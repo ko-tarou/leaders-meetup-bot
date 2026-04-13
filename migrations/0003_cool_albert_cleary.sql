@@ -1,0 +1,1 @@
+ALTER TABLE `auto_schedules` ADD `reminder_message_template` text;
