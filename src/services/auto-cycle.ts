@@ -12,6 +12,12 @@ import {
 } from "./reminder-triggers";
 import { sendReminder } from "./reminder";
 
+/** HH:MM → HH:MM:00, HH:MM:SS → そのまま */
+function normalizeTime(time: string): string {
+  if (/^\d{2}:\d{2}$/.test(time)) return `${time}:00`;
+  return time;
+}
+
 type CandidateRule = {
   type: "weekday";
   weekday: number; // 0=日, 1=月, ..., 6=土
@@ -233,7 +239,7 @@ async function scheduleRemindersForWinner(
       continue; // day_of_month と on_poll_* は別経路
     }
 
-    const runAt = `${targetDate}T${rem.time}:00.000Z`;
+    const runAt = `${targetDate}T${normalizeTime(rem.time)}.000Z`;
     if (new Date(runAt).getTime() <= nowMs) continue; // 過去はスキップ
 
     const processed = processPlaceholders(rem.message, {
@@ -264,7 +270,7 @@ async function handleDayOfMonthTriggers(
     if (rem.trigger.type !== "day_of_month") continue;
     if (today !== rem.trigger.day) continue;
 
-    const runAt = `${todayStr}T${rem.time}:00.000Z`;
+    const runAt = `${todayStr}T${normalizeTime(rem.time)}.000Z`;
     const processed = processPlaceholders(rem.message, {
       meetingName: meeting.name,
       trigger: rem.trigger,

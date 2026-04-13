@@ -472,9 +472,10 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
                 </span>
                 <input
                   type="time"
+                  step="1"
                   value={r.time}
                   onChange={(e) => updateReminder(i, { time: e.target.value })}
-                  style={{ ...inputStyle, width: 120 }}
+                  style={{ ...inputStyle, width: 140 }}
                 />
               </div>
             )}

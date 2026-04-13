@@ -67,7 +67,13 @@ export class SlackClient {
   }
 
   async getChannelList(limit = 100): Promise<SlackResponse> {
-    return this.callApiGet("conversations.list", { limit });
+    // users.conversations を使う（bot自身が参加中のチャンネルだけ返る）
+    // conversations.list は is_member: false で返ることがあるため使わない
+    return this.callApiGet("users.conversations", {
+      limit,
+      types: "public_channel,private_channel",
+      exclude_archived: "true",
+    });
   }
 
   async getChannelMembers(channel: string): Promise<SlackResponse> {
