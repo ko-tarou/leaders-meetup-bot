@@ -63,15 +63,15 @@ export class SlackClient {
   }
 
   async getUserInfo(userId: string): Promise<SlackResponse> {
-    return this.callApi("users.info", { user: userId });
+    return this.callApiGet("users.info", { user: userId });
   }
 
   async getChannelList(limit = 100): Promise<SlackResponse> {
-    return this.callApi("conversations.list", { limit });
+    return this.callApiGet("conversations.list", { limit });
   }
 
   async getChannelMembers(channel: string): Promise<SlackResponse> {
-    return this.callApi("conversations.members", { channel });
+    return this.callApiGet("conversations.members", { channel });
   }
 
   async verifySignature(
@@ -119,6 +119,22 @@ export class SlackClient {
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify(body),
+    });
+    return response.json() as Promise<SlackResponse>;
+  }
+
+  private async callApiGet(
+    method: string,
+    params: Record<string, string | number>,
+  ): Promise<SlackResponse> {
+    const query = new URLSearchParams(
+      Object.entries(params).map(([k, v]) => [k, String(v)]),
+    ).toString();
+    const response = await fetch(`https://slack.com/api/${method}?${query}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
     });
     return response.json() as Promise<SlackResponse>;
   }
