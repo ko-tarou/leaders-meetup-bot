@@ -14,17 +14,28 @@ export function MeetingDetail({ meetingId }: Props) {
     "schedule",
   );
   const [refreshKey, setRefreshKey] = useState(0);
+  const [channelName, setChannelName] = useState("");
 
   useEffect(() => {
     api.getMeeting(meetingId).then(setMeeting);
   }, [meetingId]);
+
+  useEffect(() => {
+    if (!meeting?.channelId) return;
+    api
+      .getChannelName(meeting.channelId)
+      .then((res) => setChannelName(res.name))
+      .catch(() => {});
+  }, [meeting?.channelId]);
 
   if (!meeting) return <p>読み込み中...</p>;
 
   return (
     <div>
       <h2>{meeting.name}</h2>
-      <p style={{ color: "#666" }}>チャンネル: #{meeting.channelId}</p>
+      <p style={{ color: "#666" }}>
+        チャンネル: #{channelName || meeting.channelId}
+      </p>
 
       <StatusIndicator meetingId={meetingId} refreshKey={refreshKey} />
 

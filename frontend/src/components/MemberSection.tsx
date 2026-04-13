@@ -8,6 +8,7 @@ export function MemberSection({ meetingId }: Props) {
   const [members, setMembers] = useState<MeetingMember[]>([]);
   const [slackUserId, setSlackUserId] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
 
   const load = () => {
     api.getMembers(meetingId).then(setMembers);
@@ -15,6 +16,22 @@ export function MemberSection({ meetingId }: Props) {
   useEffect(() => {
     load();
   }, [meetingId]);
+
+  useEffect(() => {
+    if (members.length === 0) {
+      setNameMap({});
+      return;
+    }
+    const ids = members.map((m) => m.slackUserId);
+    api
+      .getUserNamesBatch(ids)
+      .then((list) => {
+        const map: Record<string, string> = {};
+        for (const u of list) map[u.id] = u.name;
+        setNameMap(map);
+      })
+      .catch(() => {});
+  }, [members]);
 
   const handleAdd = async () => {
     if (!slackUserId) return;
@@ -109,11 +126,19 @@ export function MemberSection({ meetingId }: Props) {
           style={{
             display: "flex",
             justifyContent: "space-between",
+            alignItems: "center",
             padding: "8px 0",
             borderBottom: "1px solid #eee",
           }}
         >
-          <span>{m.slackUserId}</span>
+          <div>
+            <span style={{ fontWeight: 500 }}>
+              {nameMap[m.slackUserId] || m.slackUserId}
+            </span>
+            <span style={{ color: "#999", fontSize: 11, marginLeft: 8 }}>
+              {m.slackUserId}
+            </span>
+          </div>
           <button
             onClick={() => handleRemove(m.id)}
             style={{ ...dangerButtonStyle, padding: "4px 8px", fontSize: 12 }}
