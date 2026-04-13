@@ -803,15 +803,12 @@ api.get("/slack/channels", async (c) => {
   );
   const result = await client.getChannelList(200);
   if (!result.ok) return c.json({ error: result.error }, 400);
+  // users.conversations は bot 参加中のチャンネルのみ返すので is_member フィルタは不要
   const channels = (result.channels as Array<{
     id: string;
     name: string;
-    is_member?: boolean;
   }>) ?? [];
-  const filtered = channels
-    .filter((ch) => ch.is_member)
-    .map((ch) => ({ id: ch.id, name: ch.name }));
-  return c.json(filtered);
+  return c.json(channels.map((ch) => ({ id: ch.id, name: ch.name })));
 });
 
 // --- Scheduled Jobs ---
