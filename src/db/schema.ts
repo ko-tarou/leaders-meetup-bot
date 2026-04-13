@@ -102,6 +102,20 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   reminders: text("reminders").notNull().default("[]"),
   // 有効/無効
   enabled: integer("enabled").notNull().default(1),
+  // 自動応答 ON/OFF
+  autoRespondEnabled: integer("auto_respond_enabled").notNull().default(0),
+  // 自動応答メッセージテンプレート（NULLならデフォルト文言）
+  autoRespondTemplate: text("auto_respond_template"),
+  createdAt: text("created_at").notNull(),
+});
+
+// 自動応答のレスポンダー（メンション対象）
+export const meetingResponders = sqliteTable("meeting_responders", {
+  id: text("id").primaryKey(),
+  meetingId: text("meeting_id")
+    .notNull()
+    .references(() => meetings.id),
+  slackUserId: text("slack_user_id").notNull(),
   createdAt: text("created_at").notNull(),
 });
 

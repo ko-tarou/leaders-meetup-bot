@@ -12,6 +12,13 @@ export type MeetingMember = {
   createdAt: string;
 };
 
+export type MeetingResponder = {
+  id: string;
+  meetingId: string;
+  slackUserId: string;
+  createdAt: string;
+};
+
 export type Poll = {
   id: string;
   meetingId: string;
@@ -86,6 +93,8 @@ export type AutoSchedule = {
   // 新形式: トリガー型リマインダー配列
   reminders?: ReminderItem[];
   enabled: number;
+  autoRespondEnabled?: number;
+  autoRespondTemplate?: string | null;
   createdAt: string;
 };
 
