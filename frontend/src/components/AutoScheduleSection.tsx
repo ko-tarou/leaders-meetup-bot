@@ -1,18 +1,17 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
-import type { AutoSchedule } from "../types";
+import type { AutoSchedule, ReminderItem, Trigger } from "../types";
 import { MentionPicker } from "./MentionPicker";
 import { AutoTextarea } from "./AutoTextarea";
+import { TriggerSelector } from "./TriggerSelector";
 
 type Props = { meetingId: string };
-
-type ReminderItem = { daysBefore: number; message: string };
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
 const DEFAULT_REMINDERS: ReminderItem[] = [
-  { daysBefore: 3, message: "" },
-  { daysBefore: 0, message: "" },
+  { trigger: { type: "before_event", daysBefore: 3 }, time: "09:00", message: "" },
+  { trigger: { type: "before_event", daysBefore: 0 }, time: "09:00", message: "" },
 ];
 
 export function AutoScheduleSection({ meetingId }: Props) {
@@ -25,7 +24,6 @@ export function AutoScheduleSection({ meetingId }: Props) {
   const [pollStartDay, setPollStartDay] = useState(1);
   const [pollCloseDay, setPollCloseDay] = useState(10);
   const [reminders, setReminders] = useState<ReminderItem[]>(DEFAULT_REMINDERS);
-  const [reminderTime, setReminderTime] = useState("09:00");
   const [messageTemplate, setMessageTemplate] = useState("");
 
   const load = async () => {
@@ -39,23 +37,46 @@ export function AutoScheduleSection({ meetingId }: Props) {
         }
         setPollStartDay(data.pollStartDay);
         setPollCloseDay(data.pollCloseDay);
-        if (data.reminderDaysBefore && Array.isArray(data.reminderDaysBefore)) {
-          const parsed: ReminderItem[] = data.reminderDaysBefore
+
+        // 新形式: reminders 優先
+        if (Array.isArray(data.reminders) && data.reminders.length > 0) {
+          // message が null のときはフォーム上は "" として扱う
+          setReminders(
+            data.reminders.map((r) => ({
+              trigger: r.trigger,
+              time: r.time,
+              message: r.message ?? "",
+            })),
+          );
+        } else if (
+          data.reminderDaysBefore &&
+          Array.isArray(data.reminderDaysBefore)
+        ) {
+          // 旧形式から変換
+          const migrated: ReminderItem[] = data.reminderDaysBefore
             .map((item): ReminderItem | null => {
               if (typeof item === "number") {
-                return { daysBefore: item, message: "" };
+                return {
+                  trigger: { type: "before_event", daysBefore: item },
+                  time: data.reminderTime ?? "09:00",
+                  message: data.reminderMessageTemplate ?? "",
+                };
               }
               if (item && typeof item === "object") {
                 const daysBefore = Number(item.daysBefore);
                 if (isNaN(daysBefore)) return null;
-                return { daysBefore, message: item.message ?? "" };
+                return {
+                  trigger: { type: "before_event", daysBefore },
+                  time: data.reminderTime ?? "09:00",
+                  message: item.message ?? data.reminderMessageTemplate ?? "",
+                };
               }
               return null;
             })
             .filter((r): r is ReminderItem => r !== null);
-          if (parsed.length > 0) setReminders(parsed);
+          if (migrated.length > 0) setReminders(migrated);
         }
-        setReminderTime(data.reminderTime);
+
         if (data.messageTemplate) setMessageTemplate(data.messageTemplate);
       }
     } catch {
@@ -70,51 +91,58 @@ export function AutoScheduleSection({ meetingId }: Props) {
 
   const toggleWeek = (w: number) => {
     setWeeks((prev) =>
-      prev.includes(w)
-        ? prev.filter((x) => x !== w)
-        : [...prev, w].sort(),
+      prev.includes(w) ? prev.filter((x) => x !== w) : [...prev, w].sort(),
     );
   };
 
   const addReminder = () => {
-    setReminders((prev) => [...prev, { daysBefore: 1, message: "" }]);
+    setReminders((prev) => [
+      ...prev,
+      { trigger: { type: "before_event", daysBefore: 1 }, time: "09:00", message: "" },
+    ]);
   };
 
   const removeReminder = (i: number) => {
     setReminders((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const updateReminder = (
-    i: number,
-    key: "daysBefore" | "message",
-    value: string | number,
-  ) => {
+  const updateReminder = (i: number, patch: Partial<ReminderItem>) => {
     setReminders((prev) =>
-      prev.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)),
+      prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)),
     );
+  };
+
+  const updateTrigger = (i: number, trigger: Trigger) => {
+    updateReminder(i, { trigger });
   };
 
   const insertMentionIntoReminder = (i: number, text: string) => {
     setReminders((prev) =>
       prev.map((r, idx) => {
         if (idx !== i) return r;
-        const base = r.message;
+        const base = r.message ?? "";
         const glue = base === "" || base.endsWith(" ") ? "" : " ";
         return { ...r, message: base + glue + text + " " };
       }),
     );
   };
 
+  const needsTime = (t: Trigger) =>
+    t.type !== "on_poll_start" && t.type !== "on_poll_close";
+
   const handleSave = async () => {
+    // 保存前に、message の空文字列は null に正規化
+    const normalized: ReminderItem[] = reminders.map((r) => ({
+      trigger: r.trigger,
+      time: r.time,
+      message: r.message && r.message.trim() !== "" ? r.message : null,
+    }));
+
     const data = {
       candidateRule: { type: "weekday" as const, weekday, weeks },
       pollStartDay,
       pollCloseDay,
-      reminderDaysBefore: reminders.map((r) => ({
-        daysBefore: Number(r.daysBefore),
-        message: r.message.trim() ? r.message : null,
-      })),
-      reminderTime,
+      reminders: normalized,
       messageTemplate: messageTemplate.trim() ? messageTemplate : null,
     };
 
@@ -216,7 +244,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
           </div>
         </div>
 
-        {/* リマインド設定（リピーター） */}
+        {/* リマインド設定 */}
         <div style={{ marginBottom: 16 }}>
           <label style={labelStyle}>リマインド設定</label>
           {reminders.map((r, i) => (
@@ -225,7 +253,7 @@ export function AutoScheduleSection({ meetingId }: Props) {
               style={{
                 border: "1px solid #eee",
                 borderRadius: 4,
-                padding: 8,
+                padding: 12,
                 marginBottom: 8,
                 background: "#fff",
               }}
@@ -233,23 +261,19 @@ export function AutoScheduleSection({ meetingId }: Props) {
               <div
                 style={{
                   display: "flex",
-                  gap: 8,
                   alignItems: "center",
-                  marginBottom: 4,
+                  marginBottom: 8,
+                  gap: 8,
+                  flexWrap: "wrap",
                 }}
               >
-                <input
-                  type="number"
-                  min={0}
-                  value={r.daysBefore}
-                  onChange={(e) =>
-                    updateReminder(i, "daysBefore", Number(e.target.value))
-                  }
-                  style={{ ...inputStyle, width: 60 }}
-                />
-                <span style={{ fontSize: 14, color: "#666" }}>
-                  日前（0=当日）
+                <span style={{ fontSize: 13, color: "#666", minWidth: 56 }}>
+                  トリガー
                 </span>
+                <TriggerSelector
+                  trigger={r.trigger}
+                  onChange={(t) => updateTrigger(i, t)}
+                />
                 <button
                   type="button"
                   onClick={() => removeReminder(i)}
@@ -267,14 +291,34 @@ export function AutoScheduleSection({ meetingId }: Props) {
                   削除
                 </button>
               </div>
+              {needsTime(r.trigger) && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    marginBottom: 8,
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: "#666", minWidth: 56 }}>
+                    時刻
+                  </span>
+                  <input
+                    type="time"
+                    value={r.time}
+                    onChange={(e) => updateReminder(i, { time: e.target.value })}
+                    style={{ ...inputStyle, width: 120 }}
+                  />
+                </div>
+              )}
               <MentionPicker
                 meetingId={meetingId}
                 onInsert={(text) => insertMentionIntoReminder(i, text)}
               />
               <AutoTextarea
-                value={r.message}
-                onChange={(e) => updateReminder(i, "message", e.target.value)}
-                placeholder="メッセージ本文（空欄でデフォルト）例: :bell: {date} のリーダー雑談会まで {daysBefore} 日！"
+                value={r.message ?? ""}
+                onChange={(e) => updateReminder(i, { message: e.target.value })}
+                placeholder=":bell: メッセージ本文（空欄でデフォルト）"
                 style={{
                   ...inputStyle,
                   width: "100%",
@@ -284,7 +328,8 @@ export function AutoScheduleSection({ meetingId }: Props) {
                 }}
               />
               <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
-                使えるプレースホルダ: <code>{"{date}"}</code>（決定日）, <code>{"{meetingName}"}</code>, <code>{"{daysBefore}"}</code>
+                プレースホルダ: <code>{"{date}"}</code>, <code>{"{meetingName}"}</code>,{" "}
+                <code>{"{daysBefore}"}</code>, <code>{"{daysAfter}"}</code>
               </p>
             </div>
           ))}
@@ -304,19 +349,9 @@ export function AutoScheduleSection({ meetingId }: Props) {
           </button>
         </div>
 
+        {/* 投票メッセージ本文 */}
         <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle}>リマインド時刻（全リマインド共通）</label>
-          <input
-            type="time"
-            value={reminderTime}
-            onChange={(e) => setReminderTime(e.target.value)}
-            style={{ ...inputStyle, width: 120 }}
-          />
-        </div>
-
-        {/* メッセージ本文 */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle}>メッセージ本文（任意）</label>
+          <label style={labelStyle}>投票メッセージ本文（任意）</label>
           <MentionPicker meetingId={meetingId} onInsert={handleInsertMention} />
           <AutoTextarea
             value={messageTemplate}

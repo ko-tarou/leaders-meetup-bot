@@ -93,6 +93,9 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   messageTemplate: text("message_template"),
   // リマインドメッセージの本文テンプレート（NULLならデフォルト文言）
   reminderMessageTemplate: text("reminder_message_template"),
+  // 新形式: トリガー型リマインダー配列（JSON文字列）
+  // 例: [{"trigger":{"type":"before_event","daysBefore":3},"time":"09:00","message":"..."}]
+  reminders: text("reminders").notNull().default("[]"),
   // 有効/無効
   enabled: integer("enabled").notNull().default(1),
   createdAt: text("created_at").notNull(),
@@ -108,5 +111,7 @@ export const scheduledJobs = sqliteTable("scheduled_jobs", {
   // ジョブ固有データ（JSON文字列）
   // 例（reminder）: {"message": "..."}
   payload: text("payload"),
+  // 冪等性のための一意キー（同じキーのINSERTはUNIQUE違反で弾かれる）
+  dedupKey: text("dedup_key").unique(),
   createdAt: text("created_at").notNull(),
 });

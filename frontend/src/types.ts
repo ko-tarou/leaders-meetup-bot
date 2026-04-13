@@ -52,6 +52,20 @@ export type ReminderConfig = {
   message: string | null;
 };
 
+export type Trigger =
+  | { type: "before_event"; daysBefore: number }
+  | { type: "after_event"; daysAfter: number }
+  | { type: "day_of_month"; day: number }
+  | { type: "on_poll_start" }
+  | { type: "on_poll_close" }
+  | { type: "after_poll_close"; daysAfter: number };
+
+export type ReminderItem = {
+  trigger: Trigger;
+  time: string;
+  message: string | null;
+};
+
 export type AutoSchedule = {
   id: string;
   meetingId: string;
@@ -67,6 +81,8 @@ export type AutoSchedule = {
   reminderTime: string;
   messageTemplate?: string | null;
   reminderMessageTemplate?: string | null;
+  // 新形式: トリガー型リマインダー配列
+  reminders?: ReminderItem[];
   enabled: number;
   createdAt: string;
 };

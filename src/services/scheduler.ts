@@ -74,3 +74,35 @@ export async function createReminderJob(
 
   return jobId;
 }
+
+/**
+ * 冪等なリマインドジョブ登録。
+ * dedupKey が既存なら UNIQUE 違反で silent skip する。
+ */
+export async function insertReminderJob(
+  db: D1Database,
+  meetingId: string,
+  runAt: string,
+  payload: string | null,
+  dedupKey: string,
+): Promise<void> {
+  const d1 = drizzle(db);
+  try {
+    await d1.insert(scheduledJobs).values({
+      id: crypto.randomUUID(),
+      type: "reminder",
+      referenceId: meetingId,
+      nextRunAt: runAt,
+      status: "pending",
+      payload,
+      dedupKey,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // UNIQUE 違反 = 既にスケジュール済み。それ以外はログ出力。
+    const msg = String(e);
+    if (!msg.includes("UNIQUE") && !msg.includes("constraint")) {
+      console.error("Failed to insert reminder job:", e);
+    }
+  }
+}

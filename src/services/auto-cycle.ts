@@ -3,13 +3,34 @@ import { eq, and, like } from "drizzle-orm";
 import { autoSchedules, meetings, polls, pollOptions, pollVotes } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createPoll, closePoll } from "./poll";
-import { createReminderJob } from "./scheduler";
-import { parseReminderDaysBefore } from "./reminder-schedule";
+import { insertReminderJob } from "./scheduler";
+import {
+  loadReminders,
+  dedupKey,
+  processPlaceholders,
+  type Reminder,
+} from "./reminder-triggers";
+import { sendReminder } from "./reminder";
 
 type CandidateRule = {
   type: "weekday";
   weekday: number; // 0=日, 1=月, ..., 6=土
   weeks: number[]; // [2, 3, 4] = 第2〜4週
+};
+
+type ScheduleRow = {
+  id: string;
+  meetingId: string;
+  candidateRule: string;
+  pollStartDay: number;
+  pollCloseDay: number;
+  reminderDaysBefore: string;
+  reminderTime: string;
+  messageTemplate: string | null;
+  reminderMessageTemplate: string | null;
+  reminders: string;
+  enabled: number;
+  createdAt: string;
 };
 
 /**
@@ -23,6 +44,7 @@ export async function processAutoCycles(
   const d1 = drizzle(db);
   const now = new Date();
   const today = now.getUTCDate();
+  const todayStr = now.toISOString().split("T")[0];
   const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 
   const schedules = await d1
@@ -43,8 +65,11 @@ export async function processAutoCycles(
       await autoStartPoll(d1, db, slackClient, meeting, schedule, currentMonth);
     }
     if (today === schedule.pollCloseDay) {
-      await autoClosePoll(d1, db, slackClient, meeting, schedule);
+      await autoClosePoll(d1, db, slackClient, meeting, schedule, todayStr);
     }
+
+    // day_of_month トリガーの処理
+    await handleDayOfMonthTriggers(db, meeting, schedule, today, todayStr);
   }
 }
 
@@ -54,7 +79,7 @@ async function autoStartPoll(
   db: D1Database,
   slackClient: SlackClient,
   meeting: { id: string; name: string; channelId: string },
-  schedule: { candidateRule: string; messageTemplate?: string | null },
+  schedule: ScheduleRow,
   currentMonth: string,
 ): Promise<void> {
   const existingPolls = await d1
@@ -78,6 +103,21 @@ async function autoStartPoll(
 
   await createPoll(db, slackClient, meeting.channelId, meeting.name, dates, schedule.messageTemplate);
   console.log(`Auto-created poll for ${meeting.name} with dates: ${dates.join(", ")}`);
+
+  // on_poll_start トリガーを即時発火
+  const reminders = loadReminders(schedule);
+  for (const rem of reminders) {
+    if (rem.trigger.type !== "on_poll_start") continue;
+    const processed = processPlaceholders(rem.message, {
+      meetingName: meeting.name,
+      trigger: rem.trigger,
+    });
+    try {
+      await sendReminder(db, slackClient, meeting.id, processed);
+    } catch (e) {
+      console.error(`Failed to send on_poll_start reminder for ${meeting.name}:`, e);
+    }
+  }
 }
 
 /** 投票を自動締切。冪等: オープンなpollがなければスキップ */
@@ -86,7 +126,8 @@ async function autoClosePoll(
   db: D1Database,
   slackClient: SlackClient,
   meeting: { id: string; name: string; channelId: string },
-  schedule: { reminderDaysBefore: string; reminderTime: string },
+  schedule: ScheduleRow,
+  todayStr: string,
 ): Promise<void> {
   const openPoll = await d1
     .select()
@@ -107,7 +148,22 @@ async function autoClosePoll(
     return;
   }
 
-  await scheduleRemindersForWinner(d1, db, meeting, schedule);
+  // on_poll_close トリガーを即時発火
+  const reminders = loadReminders(schedule);
+  for (const rem of reminders) {
+    if (rem.trigger.type !== "on_poll_close") continue;
+    const processed = processPlaceholders(rem.message, {
+      meetingName: meeting.name,
+      trigger: rem.trigger,
+    });
+    try {
+      await sendReminder(db, slackClient, meeting.id, processed);
+    } catch (e) {
+      console.error(`Failed to send on_poll_close reminder for ${meeting.name}:`, e);
+    }
+  }
+
+  await scheduleRemindersForWinner(d1, db, meeting, schedule, reminders, todayStr);
 }
 
 /** 最多得票日に対してリマインドジョブを登録 */
@@ -115,7 +171,9 @@ async function scheduleRemindersForWinner(
   d1: ReturnType<typeof drizzle>,
   db: D1Database,
   meeting: { id: string; name: string },
-  schedule: { reminderDaysBefore: string; reminderTime: string },
+  schedule: ScheduleRow,
+  reminders: Reminder[],
+  pollCloseDate: string,
 ): Promise<void> {
   const closedPolls = await d1
     .select()
@@ -146,28 +204,70 @@ async function scheduleRemindersForWinner(
   }
   if (!winnerDate) return;
 
-  const configs = parseReminderDaysBefore(schedule.reminderDaysBefore);
-  const eventDate = new Date(`${winnerDate}T00:00:00Z`);
+  const winnerDateFormatted = formatDateJa(winnerDate);
+  const nowMs = Date.now();
 
-  for (const config of configs) {
-    const reminderDate = new Date(eventDate);
-    reminderDate.setUTCDate(reminderDate.getUTCDate() - config.daysBefore);
-    const runAt = `${reminderDate.toISOString().split("T")[0]}T${schedule.reminderTime}:00.000Z`;
+  for (let idx = 0; idx < reminders.length; idx++) {
+    const rem = reminders[idx];
+    let targetDate: string | null = null;
 
-    if (new Date(runAt) > new Date()) {
-      let message = config.message;
-      if (message) {
-        const formattedDate = formatDateJa(winnerDate);
-        message = message
-          .replaceAll("{date}", formattedDate)
-          .replaceAll("{dateISO}", winnerDate)
-          .replaceAll("{meetingName}", meeting.name)
-          .replaceAll("{daysBefore}", String(config.daysBefore));
-      }
-      const payload = message ? JSON.stringify({ message }) : null;
-      await createReminderJob(db, meeting.id, runAt, payload);
-      console.log(`Scheduled reminder for ${meeting.name} at ${runAt}`);
+    if (rem.trigger.type === "before_event") {
+      const d = new Date(`${winnerDate}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - rem.trigger.daysBefore);
+      targetDate = d.toISOString().split("T")[0];
+    } else if (rem.trigger.type === "after_event") {
+      const d = new Date(`${winnerDate}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + rem.trigger.daysAfter);
+      targetDate = d.toISOString().split("T")[0];
+    } else if (rem.trigger.type === "after_poll_close") {
+      const d = new Date(`${pollCloseDate}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + rem.trigger.daysAfter);
+      targetDate = d.toISOString().split("T")[0];
+    } else {
+      continue; // day_of_month と on_poll_* は別経路
     }
+
+    const runAt = `${targetDate}T${rem.time}:00.000Z`;
+    if (new Date(runAt).getTime() <= nowMs) continue; // 過去はスキップ
+
+    const processed = processPlaceholders(rem.message, {
+      winnerDate,
+      winnerDateFormatted,
+      meetingName: meeting.name,
+      trigger: rem.trigger,
+    });
+
+    const payload = processed ? JSON.stringify({ message: processed }) : null;
+    const key = dedupKey(meeting.id, idx, targetDate);
+    await insertReminderJob(db, meeting.id, runAt, payload, key);
+    console.log(`Scheduled reminder for ${meeting.name} at ${runAt} (idx=${idx})`);
+  }
+}
+
+/** day_of_month トリガーを処理 */
+async function handleDayOfMonthTriggers(
+  db: D1Database,
+  meeting: { id: string; name: string },
+  schedule: ScheduleRow,
+  today: number,
+  todayStr: string,
+): Promise<void> {
+  const reminders = loadReminders(schedule);
+  for (let idx = 0; idx < reminders.length; idx++) {
+    const rem = reminders[idx];
+    if (rem.trigger.type !== "day_of_month") continue;
+    if (today !== rem.trigger.day) continue;
+
+    const runAt = `${todayStr}T${rem.time}:00.000Z`;
+    const processed = processPlaceholders(rem.message, {
+      meetingName: meeting.name,
+      trigger: rem.trigger,
+    });
+    const payload = processed ? JSON.stringify({ message: processed }) : null;
+    const key = dedupKey(meeting.id, idx, todayStr);
+    // dedup_key UNIQUE で重複防止。過去の時刻でも scheduled_jobs に積んで
+    // processScheduledJobs が即時実行する。
+    await insertReminderJob(db, meeting.id, runAt, payload, key);
   }
 }
 

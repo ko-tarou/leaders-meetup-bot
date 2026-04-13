@@ -5,6 +5,7 @@ import type {
   MeetingMember,
   Poll,
   Reminder,
+  ReminderItem,
 } from "./types";
 
 const BASE = "/api";
@@ -96,9 +97,11 @@ export const api = {
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
       pollCloseDay: number;
-      reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
-      reminderTime: string;
+      reminders: ReminderItem[];
       messageTemplate?: string | null;
+      // 互換性のため残す
+      reminderDaysBefore?: Array<{ daysBefore: number; message: string | null }>;
+      reminderTime?: string;
       reminderMessageTemplate?: string | null;
     },
   ) =>
@@ -112,6 +115,7 @@ export const api = {
       candidateRule: { type: string; weekday: number; weeks: number[] };
       pollStartDay: number;
       pollCloseDay: number;
+      reminders: ReminderItem[];
       reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
       reminderTime: string;
       messageTemplate: string | null;
