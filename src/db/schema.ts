@@ -91,6 +91,8 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   reminderTime: text("reminder_time").notNull().default("09:00"),
   // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
   messageTemplate: text("message_template"),
+  // リマインドメッセージの本文テンプレート（NULLならデフォルト文言）
+  reminderMessageTemplate: text("reminder_message_template"),
   // 有効/無効
   enabled: integer("enabled").notNull().default(1),
   createdAt: text("created_at").notNull(),

@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { meetings } from "../db/schema";
+import { meetings, autoSchedules } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createReminderBlocks } from "./slack-blocks";
 
@@ -21,8 +21,16 @@ export async function sendReminder(
     throw new Error(`Meeting not found: ${meetingId}`);
   }
 
+  // カスタムテンプレートを取得（あれば）
+  const autoSchedule = await d1
+    .select()
+    .from(autoSchedules)
+    .where(eq(autoSchedules.meetingId, meetingId))
+    .get();
+  const customTemplate = autoSchedule?.reminderMessageTemplate ?? null;
+
   const today = new Date().toISOString().split("T")[0];
-  const blocks = createReminderBlocks(meeting.name, today);
+  const blocks = createReminderBlocks(meeting.name, today, undefined, customTemplate);
 
   await slackClient.postMessage(
     meeting.channelId,

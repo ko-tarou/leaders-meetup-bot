@@ -342,6 +342,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderDaysBefore?: number[];
     reminderTime?: string;
     messageTemplate?: string | null;
+    reminderMessageTemplate?: string | null;
   }>();
 
   if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
@@ -362,6 +363,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderDaysBefore: JSON.stringify(body.reminderDaysBefore ?? [3, 0]),
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
+    reminderMessageTemplate: body.reminderMessageTemplate ?? null,
     enabled: 1,
     createdAt,
   };
@@ -382,6 +384,7 @@ api.put("/auto-schedules/:id", async (c) => {
     reminderDaysBefore?: number[];
     reminderTime?: string;
     messageTemplate?: string | null;
+    reminderMessageTemplate?: string | null;
     enabled?: number;
   }>();
 
@@ -405,6 +408,10 @@ api.put("/auto-schedules/:id", async (c) => {
       reminderTime: body.reminderTime ?? existing.reminderTime,
       messageTemplate:
         body.messageTemplate === undefined ? existing.messageTemplate : body.messageTemplate,
+      reminderMessageTemplate:
+        body.reminderMessageTemplate === undefined
+          ? existing.reminderMessageTemplate
+          : body.reminderMessageTemplate,
       enabled: body.enabled ?? existing.enabled,
     })
     .where(eq(autoSchedules.id, id));
