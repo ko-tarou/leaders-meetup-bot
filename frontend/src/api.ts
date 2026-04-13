@@ -3,6 +3,7 @@ import type {
   Meeting,
   MeetingDetail,
   MeetingMember,
+  MeetingResponder,
   MeetingStatus,
   Poll,
   Reminder,
@@ -58,6 +59,19 @@ export const api = {
       error?: string;
     }>(`/meetings/${meetingId}/members/sync-channel`, { method: "POST" }),
 
+  getResponders: (meetingId: string) =>
+    request<MeetingResponder[]>(`/meetings/${meetingId}/responders`),
+  addResponder: (meetingId: string, slackUserId: string) =>
+    request<MeetingResponder>(`/meetings/${meetingId}/responders`, {
+      method: "POST",
+      body: JSON.stringify({ slackUserId }),
+    }),
+  removeResponder: (meetingId: string, responderId: string) =>
+    request<{ ok: boolean }>(
+      `/meetings/${meetingId}/responders/${responderId}`,
+      { method: "DELETE" },
+    ),
+
   getPolls: (meetingId: string) =>
     request<Poll[]>(`/meetings/${meetingId}/polls`),
   createPoll: (
@@ -108,6 +122,8 @@ export const api = {
       reminderDaysBefore?: Array<{ daysBefore: number; message: string | null }>;
       reminderTime?: string;
       reminderMessageTemplate?: string | null;
+      autoRespondEnabled?: boolean | number;
+      autoRespondTemplate?: string | null;
     },
   ) =>
     request<AutoSchedule>(`/meetings/${meetingId}/auto-schedule`, {
@@ -128,6 +144,8 @@ export const api = {
       messageTemplate: string | null;
       reminderMessageTemplate: string | null;
       enabled: number;
+      autoRespondEnabled: boolean | number;
+      autoRespondTemplate: string | null;
     }>,
   ) =>
     request<{ ok: boolean }>(`/auto-schedules/${id}`, {

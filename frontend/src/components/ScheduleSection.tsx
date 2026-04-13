@@ -4,6 +4,7 @@ import type { ReminderItem, Trigger, AutoSchedule } from "../types";
 import { MentionPicker } from "./MentionPicker";
 import { AutoTextarea } from "./AutoTextarea";
 import { TriggerSelector } from "./TriggerSelector";
+import { AutoRespondSection } from "./AutoRespondSection";
 
 type Props = { meetingId: string; onChange?: () => void };
 
@@ -35,6 +36,9 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
   const [messageTemplate, setMessageTemplate] = useState("");
   const [reminders, setReminders] = useState<ReminderItem[]>(DEFAULT_REMINDERS);
 
+  const [autoRespondEnabled, setAutoRespondEnabled] = useState(false);
+  const [autoRespondTemplate, setAutoRespondTemplate] = useState("");
+
   const [instantDates, setInstantDates] = useState("");
 
   const load = async () => {
@@ -52,6 +56,8 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
         setPollCloseDay(data.pollCloseDay);
         setPollCloseTime(data.pollCloseTime || "00:00");
         setMessageTemplate(data.messageTemplate ?? "");
+        setAutoRespondEnabled(data.autoRespondEnabled === 1);
+        setAutoRespondTemplate(data.autoRespondTemplate ?? "");
         if (Array.isArray(data.reminders) && data.reminders.length > 0) {
           setReminders(
             data.reminders.map((r) => ({
@@ -170,6 +176,10 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
       pollCloseTime,
       reminders: normalized,
       messageTemplate: messageTemplate.trim() ? messageTemplate : null,
+      autoRespondEnabled: autoRespondEnabled ? 1 : 0,
+      autoRespondTemplate: autoRespondTemplate.trim()
+        ? autoRespondTemplate
+        : null,
     };
 
     try {
@@ -391,6 +401,15 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
           自動投票・手動投票の両方で使われます。空欄ならデフォルト文言。
         </p>
       </div>
+
+      {/* 自動応答設定 */}
+      <AutoRespondSection
+        meetingId={meetingId}
+        enabled={autoRespondEnabled}
+        template={autoRespondTemplate}
+        onEnabledChange={setAutoRespondEnabled}
+        onTemplateChange={setAutoRespondTemplate}
+      />
 
       {/* リマインド設定（共通） */}
       <div style={cardStyle}>
