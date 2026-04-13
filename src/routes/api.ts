@@ -184,7 +184,7 @@ api.post("/meetings/:meetingId/polls", async (c) => {
   const meeting = await db.select().from(meetings).where(eq(meetings.id, meetingId)).get();
   if (!meeting) return c.json({ error: "Meeting not found" }, 404);
 
-  const body = await c.req.json<{ dates: string[] }>();
+  const body = await c.req.json<{ dates: string[]; messageTemplate?: string | null }>();
   if (!body.dates || body.dates.length === 0) {
     return c.json({ error: "dates array is required" }, 400);
   }
@@ -196,7 +196,14 @@ api.post("/meetings/:meetingId/polls", async (c) => {
   }
 
   const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
-  const result = await createPoll(c.env.DB, client, meeting.channelId, meeting.name, body.dates);
+  const result = await createPoll(
+    c.env.DB,
+    client,
+    meeting.channelId,
+    meeting.name,
+    body.dates,
+    body.messageTemplate ?? null,
+  );
   return c.json({ ok: true, pollId: result.pollId }, 201);
 });
 
@@ -334,6 +341,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     pollCloseDay: number;
     reminderDaysBefore?: number[];
     reminderTime?: string;
+    messageTemplate?: string | null;
   }>();
 
   if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
@@ -353,6 +361,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     pollCloseDay: body.pollCloseDay,
     reminderDaysBefore: JSON.stringify(body.reminderDaysBefore ?? [3, 0]),
     reminderTime: body.reminderTime ?? "09:00",
+    messageTemplate: body.messageTemplate ?? null,
     enabled: 1,
     createdAt,
   };
@@ -372,6 +381,7 @@ api.put("/auto-schedules/:id", async (c) => {
     pollCloseDay?: number;
     reminderDaysBefore?: number[];
     reminderTime?: string;
+    messageTemplate?: string | null;
     enabled?: number;
   }>();
 
@@ -393,6 +403,8 @@ api.put("/auto-schedules/:id", async (c) => {
       pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
       reminderDaysBefore: body.reminderDaysBefore ? JSON.stringify(body.reminderDaysBefore) : existing.reminderDaysBefore,
       reminderTime: body.reminderTime ?? existing.reminderTime,
+      messageTemplate:
+        body.messageTemplate === undefined ? existing.messageTemplate : body.messageTemplate,
       enabled: body.enabled ?? existing.enabled,
     })
     .where(eq(autoSchedules.id, id));

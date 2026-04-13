@@ -27,6 +27,8 @@ export const polls = sqliteTable("polls", {
     .references(() => meetings.id),
   status: text("status").notNull().default("open"),
   slackMessageTs: text("slack_message_ts"),
+  // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
+  messageTemplate: text("message_template"),
   createdAt: text("created_at").notNull(),
   closedAt: text("closed_at"),
 });
@@ -87,6 +89,8 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   reminderDaysBefore: text("reminder_days_before").notNull().default("[3, 0]"),
   // リマインド時刻 "09:00"
   reminderTime: text("reminder_time").notNull().default("09:00"),
+  // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
+  messageTemplate: text("message_template"),
   // 有効/無効
   enabled: integer("enabled").notNull().default(1),
   createdAt: text("created_at").notNull(),

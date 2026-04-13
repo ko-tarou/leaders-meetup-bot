@@ -2,11 +2,18 @@ type PollOption = { id: string; date: string; time?: string };
 type PollResult = { date: string; time?: string; count: number; voters: string[] };
 type Block = Record<string, unknown>;
 
-export function createPollBlocks(title: string, options: PollOption[]): Block[] {
+export function createPollBlocks(
+  title: string,
+  options: PollOption[],
+  messageTemplate?: string | null,
+): Block[] {
+  const body = messageTemplate && messageTemplate.trim().length > 0
+    ? messageTemplate
+    : "参加できる日程を選んでください:";
   const blocks: Block[] = [
     {
       type: "section",
-      text: { type: "mrkdwn", text: `*${title}*\n参加できる日程を選んでください:` },
+      text: { type: "mrkdwn", text: `*${title}*\n${body}` },
     },
     { type: "divider" },
   ];
