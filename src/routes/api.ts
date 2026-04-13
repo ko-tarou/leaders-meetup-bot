@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { processScheduledJobs } from "../services/scheduler";
 import { processAutoCycles } from "../services/auto-cycle";
@@ -74,6 +74,126 @@ api.get("/meetings/:id", async (c) => {
     .all();
 
   return c.json({ ...meeting, members, polls: latestPoll });
+});
+
+api.get("/meetings/:id/status", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "Not found" }, 404);
+
+  const autoSchedule = await db
+    .select()
+    .from(autoSchedules)
+    .where(eq(autoSchedules.meetingId, id))
+    .get();
+
+  const openPoll = await db
+    .select()
+    .from(polls)
+    .where(and(eq(polls.meetingId, id), eq(polls.status, "open")))
+    .get();
+
+  if (openPoll) {
+    return c.json({
+      status: "voting",
+      label: "投票実施中",
+      color: "green",
+      nextDate: null,
+      pollStartDate: null,
+      pollCloseDate: null,
+    });
+  }
+
+  if (!autoSchedule || autoSchedule.enabled === 0) {
+    return c.json({
+      status: "manual",
+      label: "手動モード（自動OFF）",
+      color: "gray",
+      nextDate: null,
+      pollStartDate: null,
+      pollCloseDate: null,
+    });
+  }
+
+  const closedPolls = await db
+    .select()
+    .from(polls)
+    .where(and(eq(polls.meetingId, id), eq(polls.status, "closed")))
+    .all();
+
+  let winnerDate: string | null = null;
+  if (closedPolls.length > 0) {
+    const latest = closedPolls
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const options = await db
+      .select()
+      .from(pollOptions)
+      .where(eq(pollOptions.pollId, latest.id))
+      .all();
+    let maxVotes = 0;
+    for (const opt of options) {
+      const votes = await db
+        .select()
+        .from(pollVotes)
+        .where(eq(pollVotes.pollOptionId, opt.id))
+        .all();
+      if (votes.length > maxVotes) {
+        maxVotes = votes.length;
+        winnerDate = opt.date;
+      }
+    }
+  }
+
+  const now = new Date();
+
+  if (winnerDate && new Date(`${winnerDate}T00:00:00Z`) > now) {
+    return c.json({
+      status: "closed",
+      label: "締切後・開催待ち",
+      color: "red",
+      nextDate: winnerDate,
+      pollStartDate: null,
+      pollCloseDate: null,
+    });
+  }
+
+  if (winnerDate) {
+    return c.json({
+      status: "past",
+      label: "開催済み",
+      color: "gray",
+      nextDate: winnerDate,
+      pollStartDate: null,
+      pollCloseDate: null,
+    });
+  }
+
+  const today = now.getUTCDate();
+  const startDay = autoSchedule.pollStartDay;
+  const closeDay = autoSchedule.pollCloseDay;
+  let year = now.getUTCFullYear();
+  let month = now.getUTCMonth() + 1; // 1-12
+  if (today >= startDay) {
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  const pollStartDate = `${year}-${String(month).padStart(2, "0")}-${String(startDay).padStart(2, "0")}`;
+  const pollCloseDate = `${year}-${String(month).padStart(2, "0")}-${String(closeDay).padStart(2, "0")}`;
+
+  return c.json({
+    status: "before_poll",
+    label: "投票実施前",
+    color: "blue",
+    nextDate: null,
+    pollStartDate,
+    pollCloseDate,
+  });
 });
 
 api.post("/meetings", async (c) => {
