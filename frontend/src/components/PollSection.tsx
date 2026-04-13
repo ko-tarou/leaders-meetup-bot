@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { Poll } from "../types";
 import { MentionPicker } from "./MentionPicker";
+import { AutoTextarea } from "./AutoTextarea";
 
 type Props = { meetingId: string };
 
@@ -84,11 +85,10 @@ export function PollSection({ meetingId }: Props) {
         <div style={{ marginTop: 8 }}>
           <MentionPicker meetingId={meetingId} onInsert={handleInsertMention} />
         </div>
-        <textarea
+        <AutoTextarea
           value={messageTemplate}
           onChange={(e) => setMessageTemplate(e.target.value)}
           placeholder="メッセージ本文（任意）例: :tada: 今月もよろしく！"
-          rows={2}
           style={{
             ...inputStyle,
             width: "100%",
