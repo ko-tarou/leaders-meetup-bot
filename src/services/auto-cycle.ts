@@ -4,6 +4,7 @@ import { autoSchedules, meetings, polls, pollOptions, pollVotes } from "../db/sc
 import type { SlackClient } from "./slack-api";
 import { createPoll, closePoll } from "./poll";
 import { createReminderJob } from "./scheduler";
+import { parseReminderDaysBefore } from "./reminder-schedule";
 
 type CandidateRule = {
   type: "weekday";
@@ -145,16 +146,17 @@ async function scheduleRemindersForWinner(
   }
   if (!winnerDate) return;
 
-  const daysBefore: number[] = JSON.parse(schedule.reminderDaysBefore);
+  const configs = parseReminderDaysBefore(schedule.reminderDaysBefore);
   const eventDate = new Date(`${winnerDate}T00:00:00Z`);
 
-  for (const days of daysBefore) {
+  for (const config of configs) {
     const reminderDate = new Date(eventDate);
-    reminderDate.setUTCDate(reminderDate.getUTCDate() - days);
+    reminderDate.setUTCDate(reminderDate.getUTCDate() - config.daysBefore);
     const runAt = `${reminderDate.toISOString().split("T")[0]}T${schedule.reminderTime}:00.000Z`;
 
     if (new Date(runAt) > new Date()) {
-      await createReminderJob(db, meeting.id, runAt);
+      const payload = config.message ? JSON.stringify({ message: config.message }) : null;
+      await createReminderJob(db, meeting.id, runAt, payload);
       console.log(`Scheduled reminder for ${meeting.name} at ${runAt}`);
     }
   }

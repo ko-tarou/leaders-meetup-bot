@@ -328,6 +328,18 @@ api.get("/meetings/:meetingId/auto-schedule", async (c) => {
   });
 });
 
+type ReminderDaysBeforeItem = number | { daysBefore: number; message?: string | null };
+
+function validateReminderDaysBefore(value: unknown): ReminderDaysBeforeItem[] | null {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    if (typeof item === "number") continue;
+    if (item && typeof item === "object" && typeof (item as { daysBefore?: unknown }).daysBefore === "number") continue;
+    return null;
+  }
+  return value as ReminderDaysBeforeItem[];
+}
+
 api.post("/meetings/:meetingId/auto-schedule", async (c) => {
   const db = drizzle(c.env.DB);
   const meetingId = c.req.param("meetingId");
@@ -339,7 +351,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     candidateRule: { type: string; weekday: number; weeks: number[] };
     pollStartDay: number;
     pollCloseDay: number;
-    reminderDaysBefore?: number[];
+    reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -352,6 +364,18 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     return c.json({ error: "pollStartDay and pollCloseDay must be between 1 and 28" }, 400);
   }
 
+  let reminderDaysBefore: ReminderDaysBeforeItem[] = [
+    { daysBefore: 3, message: null },
+    { daysBefore: 0, message: null },
+  ];
+  if (body.reminderDaysBefore !== undefined) {
+    const validated = validateReminderDaysBefore(body.reminderDaysBefore);
+    if (validated === null) {
+      return c.json({ error: "reminderDaysBefore must be an array of numbers or {daysBefore, message}" }, 400);
+    }
+    reminderDaysBefore = validated;
+  }
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   const record = {
@@ -360,7 +384,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     candidateRule: JSON.stringify(body.candidateRule),
     pollStartDay: body.pollStartDay,
     pollCloseDay: body.pollCloseDay,
-    reminderDaysBefore: JSON.stringify(body.reminderDaysBefore ?? [3, 0]),
+    reminderDaysBefore: JSON.stringify(reminderDaysBefore),
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
@@ -368,7 +392,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     createdAt,
   };
   await db.insert(autoSchedules).values(record);
-  return c.json({ ...record, candidateRule: body.candidateRule, reminderDaysBefore: body.reminderDaysBefore ?? [3, 0] }, 201);
+  return c.json({ ...record, candidateRule: body.candidateRule, reminderDaysBefore }, 201);
 });
 
 api.put("/auto-schedules/:id", async (c) => {
@@ -381,7 +405,7 @@ api.put("/auto-schedules/:id", async (c) => {
     candidateRule?: { type: string; weekday: number; weeks: number[] };
     pollStartDay?: number;
     pollCloseDay?: number;
-    reminderDaysBefore?: number[];
+    reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -398,13 +422,22 @@ api.put("/auto-schedules/:id", async (c) => {
     return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
   }
 
+  let reminderDaysBeforeStr: string = existing.reminderDaysBefore;
+  if (body.reminderDaysBefore !== undefined) {
+    const validated = validateReminderDaysBefore(body.reminderDaysBefore);
+    if (validated === null) {
+      return c.json({ error: "reminderDaysBefore must be an array of numbers or {daysBefore, message}" }, 400);
+    }
+    reminderDaysBeforeStr = JSON.stringify(validated);
+  }
+
   await db
     .update(autoSchedules)
     .set({
       candidateRule: body.candidateRule ? JSON.stringify(body.candidateRule) : existing.candidateRule,
       pollStartDay: body.pollStartDay ?? existing.pollStartDay,
       pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
-      reminderDaysBefore: body.reminderDaysBefore ? JSON.stringify(body.reminderDaysBefore) : existing.reminderDaysBefore,
+      reminderDaysBefore: reminderDaysBeforeStr,
       reminderTime: body.reminderTime ?? existing.reminderTime,
       messageTemplate:
         body.messageTemplate === undefined ? existing.messageTemplate : body.messageTemplate,
