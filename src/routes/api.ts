@@ -17,6 +17,7 @@ import {
   scheduledJobs,
   autoSchedules,
 } from "../db/schema";
+import { validateReminders } from "../services/reminder-triggers";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -372,10 +373,17 @@ api.get("/meetings/:meetingId/auto-schedule", async (c) => {
     .where(eq(autoSchedules.meetingId, meetingId))
     .get();
   if (!schedule) return c.json({ error: "Not found" }, 404);
+  let parsedReminders: unknown = [];
+  try {
+    parsedReminders = JSON.parse(schedule.reminders || "[]");
+  } catch {
+    parsedReminders = [];
+  }
   return c.json({
     ...schedule,
     candidateRule: JSON.parse(schedule.candidateRule),
     reminderDaysBefore: JSON.parse(schedule.reminderDaysBefore),
+    reminders: parsedReminders,
   });
 });
 
@@ -406,6 +414,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
+    reminders?: unknown;
   }>();
 
   if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
@@ -427,6 +436,15 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderDaysBefore = validated;
   }
 
+  let remindersStr = "[]";
+  if (body.reminders !== undefined) {
+    const validated = validateReminders(body.reminders);
+    if (validated === null) {
+      return c.json({ error: "reminders must be an array of {trigger, time, message}" }, 400);
+    }
+    remindersStr = JSON.stringify(validated);
+  }
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   const record = {
@@ -439,11 +457,20 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
+    reminders: remindersStr,
     enabled: 1,
     createdAt,
   };
   await db.insert(autoSchedules).values(record);
-  return c.json({ ...record, candidateRule: body.candidateRule, reminderDaysBefore }, 201);
+  return c.json(
+    {
+      ...record,
+      candidateRule: body.candidateRule,
+      reminderDaysBefore,
+      reminders: JSON.parse(remindersStr),
+    },
+    201,
+  );
 });
 
 api.put("/auto-schedules/:id", async (c) => {
@@ -460,6 +487,7 @@ api.put("/auto-schedules/:id", async (c) => {
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
+    reminders?: unknown;
     enabled?: number;
   }>();
 
@@ -482,6 +510,15 @@ api.put("/auto-schedules/:id", async (c) => {
     reminderDaysBeforeStr = JSON.stringify(validated);
   }
 
+  let remindersStr: string = existing.reminders;
+  if (body.reminders !== undefined) {
+    const validated = validateReminders(body.reminders);
+    if (validated === null) {
+      return c.json({ error: "reminders must be an array of {trigger, time, message}" }, 400);
+    }
+    remindersStr = JSON.stringify(validated);
+  }
+
   await db
     .update(autoSchedules)
     .set({
@@ -496,6 +533,7 @@ api.put("/auto-schedules/:id", async (c) => {
         body.reminderMessageTemplate === undefined
           ? existing.reminderMessageTemplate
           : body.reminderMessageTemplate,
+      reminders: remindersStr,
       enabled: body.enabled ?? existing.enabled,
     })
     .where(eq(autoSchedules.id, id));
