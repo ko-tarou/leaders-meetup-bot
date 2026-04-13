@@ -45,6 +45,14 @@ export const api = {
       `/meetings/${meetingId}/members/${memberId}`,
       { method: "DELETE" },
     ),
+  syncChannelMembers: (meetingId: string) =>
+    request<{
+      ok: boolean;
+      added: number;
+      skipped: number;
+      totalInChannel?: number;
+      error?: string;
+    }>(`/meetings/${meetingId}/members/sync-channel`, { method: "POST" }),
 
   getPolls: (meetingId: string) =>
     request<Poll[]>(`/meetings/${meetingId}/polls`),
