@@ -87,6 +87,8 @@ export const api = {
     request<{ ok: boolean }>(`/meetings/${meetingId}/polls/close`, {
       method: "POST",
     }),
+  deletePoll: (pollId: string) =>
+    request<{ ok: boolean }>(`/polls/${pollId}`, { method: "DELETE" }),
 
   getReminders: (meetingId: string) =>
     request<Reminder[]>(`/meetings/${meetingId}/reminders`),
