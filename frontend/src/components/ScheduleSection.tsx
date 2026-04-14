@@ -211,11 +211,10 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
   const handleGenerateDates = () => {
     const now = new Date();
     // monthOffset に従って対象月を計算 (0=今月, 1=来月, ...)
-    const target = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1),
-    );
-    const year = target.getUTCFullYear();
-    const month = target.getUTCMonth() + 1;
+    // ローカル時間（管理者のブラウザは JST 想定）で月判定する
+    const target = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+    const year = target.getFullYear();
+    const month = target.getMonth() + 1;
     const daysInMonth = new Date(year, month, 0).getDate();
     const dates: string[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
@@ -372,7 +371,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
                 />
               </div>
               <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
-                UTC時刻（JSTは+9時間）
+                日本時間 (JST)
               </p>
             </div>
             <div>
@@ -395,7 +394,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
                 />
               </div>
               <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
-                UTC時刻（JSTは+9時間）
+                日本時間 (JST)
               </p>
             </div>
           </div>
