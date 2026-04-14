@@ -11,12 +11,7 @@ import {
   type Reminder,
 } from "./reminder-triggers";
 import { sendReminder } from "./reminder";
-
-/** HH:MM → HH:MM:00, HH:MM:SS → そのまま */
-function normalizeTime(time: string): string {
-  if (/^\d{2}:\d{2}$/.test(time)) return `${time}:00`;
-  return time;
-}
+import { getJstNow, jstToUtcIso } from "./time-utils";
 
 type CandidateRule = {
   type: "weekday";
@@ -51,11 +46,11 @@ export async function processAutoCycles(
   slackClient: SlackClient,
 ): Promise<void> {
   const d1 = drizzle(db);
-  const now = new Date();
-  const today = now.getUTCDate();
-  const todayStr = now.toISOString().split("T")[0];
-  const currentHM = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
-  const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const jst = getJstNow();
+  const today = jst.day;
+  const todayStr = jst.ymd;
+  const currentHM = jst.hm;
+  const currentMonth = jst.ym;
 
   const schedules = await d1
     .select()
@@ -240,7 +235,8 @@ async function scheduleRemindersForWinner(
       continue; // day_of_month と on_poll_* は別経路
     }
 
-    const runAt = `${targetDate}T${normalizeTime(rem.time)}.000Z`;
+    // targetDate は JST の日付。rem.time も JST。両者を UTC ISO に変換して保存。
+    const runAt = jstToUtcIso(targetDate, rem.time);
     if (new Date(runAt).getTime() <= nowMs) continue; // 過去はスキップ
 
     const processed = processPlaceholders(rem.message, {
@@ -271,7 +267,8 @@ async function handleDayOfMonthTriggers(
     if (rem.trigger.type !== "day_of_month") continue;
     if (today !== rem.trigger.day) continue;
 
-    const runAt = `${todayStr}T${normalizeTime(rem.time)}.000Z`;
+    // todayStr は JST の日付。rem.time も JST。UTC ISO に変換して保存。
+    const runAt = jstToUtcIso(todayStr, rem.time);
     const processed = processPlaceholders(rem.message, {
       meetingName: meeting.name,
       trigger: rem.trigger,
