@@ -80,6 +80,7 @@ export type AutoSchedule = {
     type: "weekday";
     weekday: number;
     weeks: number[];
+    monthOffset?: number;
   };
   pollStartDay: number;
   pollStartTime: string; // HH:MM UTC

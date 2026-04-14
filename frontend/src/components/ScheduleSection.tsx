@@ -28,6 +28,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
   const [enabled, setEnabled] = useState(true);
   const [weekday, setWeekday] = useState(6);
   const [weeks, setWeeks] = useState<number[]>([2, 3, 4]);
+  const [monthOffset, setMonthOffset] = useState(0);
   const [pollStartDay, setPollStartDay] = useState(1);
   const [pollStartTime, setPollStartTime] = useState("00:00");
   const [pollCloseDay, setPollCloseDay] = useState(10);
@@ -50,6 +51,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
         if (data.candidateRule) {
           setWeekday(data.candidateRule.weekday);
           setWeeks(data.candidateRule.weeks);
+          setMonthOffset(data.candidateRule.monthOffset ?? 0);
         }
         setPollStartDay(data.pollStartDay);
         setPollStartTime(data.pollStartTime || "00:00");
@@ -169,7 +171,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
     }));
 
     const data = {
-      candidateRule: { type: "weekday" as const, weekday, weeks },
+      candidateRule: { type: "weekday" as const, weekday, weeks, monthOffset },
       pollStartDay,
       pollStartTime,
       pollCloseDay,
@@ -208,9 +210,12 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
 
   const handleGenerateDates = () => {
     const now = new Date();
-    const isDecember = now.getUTCMonth() === 11;
-    const year = isDecember ? now.getUTCFullYear() + 1 : now.getUTCFullYear();
-    const month = isDecember ? 1 : now.getUTCMonth() + 2; // 来月 (1-12)
+    // monthOffset に従って対象月を計算 (0=今月, 1=来月, ...)
+    const target = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1),
+    );
+    const year = target.getUTCFullYear();
+    const month = target.getUTCMonth() + 1;
     const daysInMonth = new Date(year, month, 0).getDate();
     const dates: string[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
@@ -304,6 +309,23 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={labelStyle}>対象月</label>
+            <select
+              value={monthOffset}
+              onChange={(e) => setMonthOffset(Number(e.target.value))}
+              style={inputStyle}
+            >
+              <option value={0}>今月</option>
+              <option value={1}>来月</option>
+              <option value={2}>再来月</option>
+              <option value={3}>3ヶ月先</option>
+            </select>
+            <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+              投票開始日を起点に、何ヶ月先のイベント日程を候補にするか
+            </p>
           </div>
 
           <div style={{ marginBottom: 12 }}>
