@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { meetings, autoSchedules } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createReminderBlocks } from "./slack-blocks";
+import { getJstNow } from "./time-utils";
 
 export async function sendReminder(
   db: D1Database,
@@ -33,7 +34,7 @@ export async function sendReminder(
     template = autoSchedule?.reminderMessageTemplate ?? null;
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = getJstNow().ymd;
   const blocks = createReminderBlocks(meeting.name, today, undefined, template);
 
   await slackClient.postMessage(

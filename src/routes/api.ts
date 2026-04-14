@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { processScheduledJobs } from "../services/scheduler";
 import { processAutoCycles } from "../services/auto-cycle";
+import { getJstNow } from "../services/time-utils";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, closePoll } from "../services/poll";
 import {
@@ -177,11 +178,12 @@ api.get("/meetings/:id/status", async (c) => {
     });
   }
 
-  const today = now.getUTCDate();
+  const jst = getJstNow();
+  const today = jst.day;
   const startDay = autoSchedule.pollStartDay;
   const closeDay = autoSchedule.pollCloseDay;
-  let year = now.getUTCFullYear();
-  let month = now.getUTCMonth() + 1; // 1-12
+  let year = jst.year;
+  let month = jst.month; // 1-12
   if (today >= startDay) {
     month += 1;
     if (month > 12) {

@@ -15,7 +15,7 @@ export type Trigger =
 
 export type Reminder = {
   trigger: Trigger;
-  time: string; // "HH:MM" または "HH:MM:SS"
+  time: string; // "HH:MM" または "HH:MM:SS" (JST)
   message: string | null;
 };
 
