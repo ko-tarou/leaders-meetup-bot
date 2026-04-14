@@ -582,7 +582,7 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
   if (!meeting) return c.json({ error: "Meeting not found" }, 404);
 
   const body = await c.req.json<{
-    candidateRule: { type: string; weekday: number; weeks: number[] };
+    candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
     pollStartDay: number;
     pollStartTime?: string;
     pollCloseDay: number;
@@ -598,6 +598,14 @@ api.post("/meetings/:meetingId/auto-schedule", async (c) => {
 
   if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
     return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
+  }
+  if (
+    body.candidateRule.monthOffset !== undefined &&
+    (!Number.isInteger(body.candidateRule.monthOffset) ||
+      body.candidateRule.monthOffset < 0 ||
+      body.candidateRule.monthOffset > 12)
+  ) {
+    return c.json({ error: "candidateRule.monthOffset must be an integer between 0 and 12" }, 400);
   }
   if (!body.pollStartDay || !body.pollCloseDay || body.pollStartDay < 1 || body.pollStartDay > 28 || body.pollCloseDay < 1 || body.pollCloseDay > 28) {
     return c.json({ error: "pollStartDay and pollCloseDay must be between 1 and 28" }, 400);
@@ -669,7 +677,7 @@ api.put("/auto-schedules/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   const body = await c.req.json<{
-    candidateRule?: { type: string; weekday: number; weeks: number[] };
+    candidateRule?: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
     pollStartDay?: number;
     pollStartTime?: string;
     pollCloseDay?: number;
@@ -698,6 +706,14 @@ api.put("/auto-schedules/:id", async (c) => {
   }
   if (body.candidateRule && (!body.candidateRule.type || body.candidateRule.weekday == null || !body.candidateRule.weeks)) {
     return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
+  }
+  if (
+    body.candidateRule?.monthOffset !== undefined &&
+    (!Number.isInteger(body.candidateRule.monthOffset) ||
+      body.candidateRule.monthOffset < 0 ||
+      body.candidateRule.monthOffset > 12)
+  ) {
+    return c.json({ error: "candidateRule.monthOffset must be an integer between 0 and 12" }, 400);
   }
 
   let reminderDaysBeforeStr: string = existing.reminderDaysBefore;
