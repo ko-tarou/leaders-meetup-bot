@@ -22,6 +22,7 @@ type CandidateRule = {
   type: "weekday";
   weekday: number; // 0=日, 1=月, ..., 6=土
   weeks: number[]; // [2, 3, 4] = 第2〜4週
+  monthOffset?: number; // 0=今月, 1=来月, 2=再来月 (default 0)
 };
 
 type ScheduleRow = {
@@ -106,7 +107,7 @@ async function autoStartPoll(
   }
 
   const rule: CandidateRule = JSON.parse(schedule.candidateRule);
-  const dates = generateCandidateDates(rule, currentMonth);
+  const dates = generateCandidateDatesWithOffset(rule, currentMonth);
 
   if (dates.length === 0) {
     console.error(`No candidate dates generated for ${meeting.name}`);
@@ -310,4 +311,21 @@ export function generateCandidateDates(rule: CandidateRule, yearMonth: string): 
   }
 
   return dates;
+}
+
+/** baseYearMonth ("YYYY-MM") に offset ヶ月を加算した YYYY-MM を返す */
+function applyMonthOffset(baseYearMonth: string, offset: number): string {
+  const [year, month] = baseYearMonth.split("-").map(Number);
+  const d = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** rule.monthOffset を考慮して候補日を生成する */
+export function generateCandidateDatesWithOffset(
+  rule: CandidateRule,
+  baseYearMonth: string,
+): string[] {
+  const offset = rule.monthOffset ?? 0;
+  const targetYearMonth = applyMonthOffset(baseYearMonth, offset);
+  return generateCandidateDates(rule, targetYearMonth);
 }

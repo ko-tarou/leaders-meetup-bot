@@ -111,7 +111,7 @@ export const api = {
   createAutoSchedule: (
     meetingId: string,
     data: {
-      candidateRule: { type: string; weekday: number; weeks: number[] };
+      candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
       pollStartDay: number;
       pollStartTime?: string;
       pollCloseDay: number;
@@ -133,7 +133,7 @@ export const api = {
   updateAutoSchedule: (
     id: string,
     data: Partial<{
-      candidateRule: { type: string; weekday: number; weeks: number[] };
+      candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
       pollStartDay: number;
       pollStartTime: string;
       pollCloseDay: number;
