@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { processScheduledJobs } from "../services/scheduler";
 import { processAutoCycles } from "../services/auto-cycle";
@@ -450,6 +450,41 @@ api.post("/meetings/:meetingId/polls/close", async (c) => {
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : "Unknown error" }, 400);
   }
+});
+
+api.delete("/polls/:pollId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const pollId = c.req.param("pollId");
+
+  const poll = await db.select().from(polls).where(eq(polls.id, pollId)).get();
+  if (!poll) return c.json({ error: "Not found" }, 404);
+
+  const options = await db
+    .select()
+    .from(pollOptions)
+    .where(eq(pollOptions.pollId, pollId))
+    .all();
+  const optionIds = options.map((o) => o.id);
+
+  if (optionIds.length > 0) {
+    await db.delete(pollVotes).where(inArray(pollVotes.pollOptionId, optionIds));
+  }
+  await db.delete(pollOptions).where(eq(pollOptions.pollId, pollId));
+  await db.delete(polls).where(eq(polls.id, pollId));
+
+  // 対象 meeting の pending リマインダージョブも削除
+  // （古い投票由来のリマインドが発火しないようにする）
+  await db
+    .delete(scheduledJobs)
+    .where(
+      and(
+        eq(scheduledJobs.type, "reminder"),
+        eq(scheduledJobs.referenceId, poll.meetingId),
+        eq(scheduledJobs.status, "pending"),
+      ),
+    );
+
+  return c.json({ ok: true });
 });
 
 api.get("/polls/:pollId", async (c) => {

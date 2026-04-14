@@ -11,6 +11,22 @@ export function HistorySection({ meetingId }: Props) {
     api.getPolls(meetingId).then(setPolls);
   }, [meetingId]);
 
+  const handleDelete = async (pollId: string) => {
+    if (
+      !confirm(
+        "この投票を削除しますか？\n投票結果とリマインダーも合わせて削除されます。",
+      )
+    )
+      return;
+    try {
+      await api.deletePoll(pollId);
+      const updated = await api.getPolls(meetingId);
+      setPolls(updated);
+    } catch {
+      alert("削除に失敗しました");
+    }
+  };
+
   const sorted = [...polls].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt),
   );
@@ -28,14 +44,33 @@ export function HistorySection({ meetingId }: Props) {
                 display: "flex",
                 justifyContent: "space-between",
                 marginBottom: 8,
+                alignItems: "center",
               }}
             >
               <span style={{ fontWeight: "bold" }}>
                 {poll.status === "open" ? "🟢 投票中" : "🔴 終了"}
               </span>
-              <span style={{ color: "#666", fontSize: 12 }}>
-                {new Date(poll.createdAt).toLocaleDateString("ja-JP")}
-              </span>
+              <div
+                style={{ display: "flex", gap: 8, alignItems: "center" }}
+              >
+                <span style={{ color: "#666", fontSize: 12 }}>
+                  {new Date(poll.createdAt).toLocaleDateString("ja-JP")}
+                </span>
+                <button
+                  onClick={() => handleDelete(poll.id)}
+                  style={{
+                    padding: "4px 10px",
+                    background: "#E74C3C",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  削除
+                </button>
+              </div>
             </div>
             {poll.options?.map((opt) => (
               <div key={opt.id} style={{ padding: "4px 0" }}>
