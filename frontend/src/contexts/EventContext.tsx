@@ -14,6 +14,7 @@ type EventContextValue = {
   events: Event[];
   currentEvent: Event | null;
   setCurrentEventId: (id: string) => void;
+  refreshEvents: () => Promise<void>;
   loading: boolean;
 };
 
@@ -82,12 +83,22 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // events 作成・削除など外部変更後に手動で再取得するための関数
+  const refreshEvents = async () => {
+    try {
+      const list = await api.events.list();
+      setEvents(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error("refreshEvents failed", e);
+    }
+  };
+
   const currentEvent =
     events.find((e) => e.id === currentEventId) ?? null;
 
   return (
     <EventContext.Provider
-      value={{ events, currentEvent, setCurrentEventId, loading }}
+      value={{ events, currentEvent, setCurrentEventId, refreshEvents, loading }}
     >
       {children}
     </EventContext.Provider>
