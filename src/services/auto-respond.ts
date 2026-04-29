@@ -2,6 +2,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { meetings, autoSchedules, meetingResponders } from "../db/schema";
 import type { SlackClient } from "./slack-api";
+import { createSlackClientForWorkspace } from "./workspace";
+import { repostBoard } from "./sticky-task-board";
+import type { Env } from "../types/env";
 
 export type SlackMessageEvent = {
   type: string;
@@ -71,4 +74,91 @@ export async function handleMessageEvent(
       : `${mentions} 対応をお願いします :pray:`;
 
   await slackClient.postMessage(event.channel, text);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * ADR-0006 sticky task board の repost トリガー。
+ *
+ * message event を受けたら、該当チャンネルの meeting.task_board_ts が set
+ * されている場合に「10秒後に repost を実行する」非同期処理を仕掛ける。
+ *
+ * デバウンス設計（バースト対策）:
+ * - 各 message event ごとに「自分が見た task_board_ts」を記録して 10 秒待つ
+ * - 10 秒後、現在の DB 値と比較して一致していれば repost
+ * - 一致しなければ別の Worker が既に repost 済みなので skip
+ * - これによりバースト時でも実質 10 秒間隔で 1 回だけ発火する（先着優先）
+ *
+ * 失敗時の挙動:
+ * - workspace 復号失敗 / Slack API 失敗は console.error で握りつぶし、
+ *   sticky board が一時的に最下部にならないことより「他の処理が止まる」リスクを避ける（fail-soft）。
+ *
+ * 呼び出し側は ctx.waitUntil を使って待たずに 200 を返すこと。
+ */
+export async function maybeTriggerStickyRepost(
+  env: Env,
+  ctx: ExecutionContext,
+  event: SlackMessageEvent,
+): Promise<void> {
+  // bot 自身のメッセージ・サブタイプは無視（無限 repost ループ防止）
+  if (event.bot_id) return;
+  if (event.subtype) return;
+  if (!event.channel) return;
+
+  const d1 = drizzle(env.DB);
+  const meeting = await d1
+    .select()
+    .from(meetings)
+    .where(eq(meetings.channelId, event.channel))
+    .get();
+  if (!meeting || !meeting.taskBoardTs || !meeting.workspaceId) return;
+
+  // 自分のpost ts と同じ ts のメッセージは scan しない（更に念のため）
+  if (event.ts && event.ts === meeting.taskBoardTs) return;
+
+  const originalTs = meeting.taskBoardTs;
+  const meetingId = meeting.id;
+
+  ctx.waitUntil(
+    (async () => {
+      try {
+        await sleep(10_000);
+
+        // 10秒後の最新状態を再取得して ts 一致チェック
+        const fresh = await d1
+          .select()
+          .from(meetings)
+          .where(eq(meetings.id, meetingId))
+          .get();
+        if (!fresh || !fresh.taskBoardTs || !fresh.workspaceId) return;
+        if (fresh.taskBoardTs !== originalTs) {
+          // 別 Worker が既に repost した → 後発はスキップ
+          return;
+        }
+
+        const client = await createSlackClientForWorkspace(
+          env,
+          fresh.workspaceId,
+        );
+        if (!client) {
+          console.warn(
+            `sticky repost: no SlackClient for workspace ${fresh.workspaceId}`,
+          );
+          return;
+        }
+
+        await repostBoard(env.DB, client, {
+          id: fresh.id,
+          channelId: fresh.channelId,
+          eventId: fresh.eventId,
+          taskBoardTs: fresh.taskBoardTs,
+        });
+      } catch (e) {
+        console.error("Failed to repost sticky board:", e);
+      }
+    })(),
+  );
 }

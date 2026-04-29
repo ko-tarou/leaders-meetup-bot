@@ -35,6 +35,11 @@ import {
   getChannelName,
   getUserNames,
 } from "../services/slack-names";
+import {
+  postInitialBoard,
+  deleteBoard,
+} from "../services/sticky-task-board";
+import { createSlackClientForWorkspace } from "../services/workspace";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -281,6 +286,73 @@ api.delete("/meetings/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   await db.delete(meetings).where(eq(meetings.id, id));
+  return c.json({ ok: true });
+});
+
+// --- Sticky Task Board (ADR-0006) ---
+// 「常に最下部にタスク一覧が見える」 sticky board の有効化/無効化エンドポイント。
+// 有効化後は Slack の message event を契機に repost (auto-respond.ts 経由)。
+
+api.post("/meetings/:id/task-board", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId) {
+    return c.json({ error: "meeting has no workspace_id" }, 400);
+  }
+  if (!meeting.eventId) {
+    return c.json({ error: "meeting has no event_id" }, 400);
+  }
+  // 既に有効化済みの場合は 409。無効化してから再有効化する運用にする
+  // （冪等な再投稿は repost API（後続）で扱う想定）。
+  if (meeting.taskBoardTs) {
+    return c.json(
+      { error: "task board already enabled, delete first to re-enable" },
+      409,
+    );
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await postInitialBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    eventId: meeting.eventId,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
+  return c.json({ ok: true, ts: result.ts });
+});
+
+api.delete("/meetings/:id/task-board", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId) {
+    return c.json({ error: "meeting has no workspace_id" }, 400);
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await deleteBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    taskBoardTs: meeting.taskBoardTs,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
   return c.json({ ok: true });
 });
 
