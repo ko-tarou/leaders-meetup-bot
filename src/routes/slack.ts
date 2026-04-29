@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
@@ -16,6 +16,7 @@ import {
 } from "../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../services/devhub-task-list";
 import { scheduleTaskReminders } from "../services/devhub-task-reminder";
+import { stickyRepostByChannel } from "../services/sticky-task-board";
 import {
   getWorkspaceBySlackTeamId,
   getDecryptedWorkspace,
@@ -461,6 +462,100 @@ slack.post("/interactions", async (c) => {
 
       return c.json({ ok: true });
     }
+
+    // === ADR-0006 sticky board: 担当者トグル ===
+    // sticky_assign_<taskId>: 押した本人を担当者として toggle
+    //   - 既にアサインされていれば解除、なければ追加
+    //   - tasks.updatedAt を必ず更新（並び替えのため）
+    //   - その後 sticky board を即時 repost（10秒デバウンスは message event 専用）
+    if (action.action_id?.startsWith("sticky_assign_")) {
+      const taskId = action.value;
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!taskId || !userId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const existing = await d1
+              .select()
+              .from(taskAssignees)
+              .where(
+                and(
+                  eq(taskAssignees.taskId, taskId),
+                  eq(taskAssignees.slackUserId, userId),
+                ),
+              )
+              .get();
+
+            const now = new Date().toISOString();
+            if (existing) {
+              await d1
+                .delete(taskAssignees)
+                .where(
+                  and(
+                    eq(taskAssignees.taskId, taskId),
+                    eq(taskAssignees.slackUserId, userId),
+                  ),
+                );
+            } else {
+              await d1.insert(taskAssignees).values({
+                id: crypto.randomUUID(),
+                taskId,
+                slackUserId: userId,
+                assignedAt: now,
+              });
+            }
+            await d1
+              .update(tasks)
+              .set({ updatedAt: now })
+              .where(eq(tasks.id, taskId));
+
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_assign:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // === ADR-0006 sticky board: 完了 ===
+    // sticky_done_<taskId>: タスクを done に更新 → 即時 repost
+    if (action.action_id?.startsWith("sticky_done_")) {
+      const taskId = action.value;
+      const channelId = payload.channel?.id;
+      if (!taskId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const now = new Date().toISOString();
+            await d1
+              .update(tasks)
+              .set({ status: "done", updatedAt: now })
+              .where(eq(tasks.id, taskId));
+
+            // pending 中のリマインドジョブも掃除（冪等、devhub_task_done_ と同じ扱い）
+            try {
+              await scheduleTaskReminders(c.env.DB, taskId, null, "", []);
+            } catch (remErr) {
+              console.error("Failed to clear sticky task reminders:", remErr);
+            }
+
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_done:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
   }
 
   if (payload.type === "view_submission") {
