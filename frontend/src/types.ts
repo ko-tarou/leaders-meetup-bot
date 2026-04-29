@@ -147,3 +147,11 @@ export type TaskFilters = {
   parentTaskId?: string | "null";
   assigneeSlackId?: string;
 };
+
+// タスク担当者（ADR-0002）
+export type TaskAssignee = {
+  id: string;
+  taskId: string;
+  slackUserId: string;
+  assignedAt: string; // UTC ISO 8601
+};

@@ -10,6 +10,7 @@ import type {
   Reminder,
   ReminderItem,
   Task,
+  TaskAssignee,
   TaskFilters,
 } from "./types";
 
@@ -248,5 +249,20 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/tasks/${id}`, { method: "DELETE" }),
+
+    assignees: {
+      list: (taskId: string) =>
+        request<TaskAssignee[]>(`/tasks/${taskId}/assignees`),
+      add: (taskId: string, slackUserId: string) =>
+        request<TaskAssignee>(`/tasks/${taskId}/assignees`, {
+          method: "POST",
+          body: JSON.stringify({ slackUserId }),
+        }),
+      remove: (taskId: string, slackUserId: string) =>
+        request<{ ok: boolean }>(
+          `/tasks/${taskId}/assignees/${slackUserId}`,
+          { method: "DELETE" },
+        ),
+    },
   },
 };
