@@ -1,14 +1,12 @@
-import { useState } from "react";
-import { MeetingList } from "./components/MeetingList";
-import { MeetingDetail } from "./components/MeetingDetail";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { EventSwitcher } from "./components/EventSwitcher";
 import { EventProvider } from "./contexts/EventContext";
-
-type Page = { type: "list" } | { type: "detail"; meetingId: string };
+import { EventIndexRedirect } from "./pages/EventIndexRedirect";
+import { EventTabPage } from "./pages/EventTabPage";
+import { HomePage } from "./pages/HomePage";
+import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 
 export function App() {
-  const [page, setPage] = useState<Page>({ type: "list" });
-
   return (
     <EventProvider>
       <div
@@ -35,41 +33,46 @@ export function App() {
               flexWrap: "wrap",
             }}
           >
-            <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
+            <Link to="/" style={titleLinkStyle}>
+              <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
+            </Link>
             <EventSwitcher />
           </div>
-          {page.type === "detail" && (
-            <button
-              onClick={() => setPage({ type: "list" })}
-              style={linkStyle}
-            >
-              &#8592; ミーティング一覧に戻る
-            </button>
-          )}
+          <BackLink />
         </header>
-        {page.type === "list" && (
-          <MeetingList
-            onSelect={(id) => setPage({ type: "detail", meetingId: id })}
-          />
-        )}
-        {page.type === "detail" && (
-          <MeetingDetail
-            meetingId={page.meetingId}
-            onBack={() => setPage({ type: "list" })}
-          />
-        )}
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+          <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
+          <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
+        </Routes>
       </div>
     </EventProvider>
   );
 }
 
+// 詳細表示時のみ「一覧に戻る」を描画 (旧 page.type==="detail" 分岐の URL 化)
+function BackLink() {
+  const { pathname } = useLocation();
+  if (!pathname.startsWith("/meetings/")) return null;
+  return (
+    <Link to="/" style={linkStyle}>
+      &#8592; ミーティング一覧に戻る
+    </Link>
+  );
+}
+
+const titleLinkStyle: React.CSSProperties = {
+  textDecoration: "none",
+  color: "inherit",
+};
+
 const linkStyle: React.CSSProperties = {
-  background: "none",
-  border: "none",
   color: "#4A90D9",
   cursor: "pointer",
   padding: "4px 0",
   fontSize: 14,
   marginTop: 8,
   display: "inline-block",
+  textDecoration: "none",
 };

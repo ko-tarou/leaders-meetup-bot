@@ -1,4 +1,6 @@
+import { useNavigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
+import { DEFAULT_TAB_BY_TYPE } from "../lib/eventTabs";
 
 const labelStyle: React.CSSProperties = {
   color: "#999",
@@ -23,6 +25,7 @@ function eventTypeLabel(type: string): string {
 
 export function EventSwitcher() {
   const { events, currentEvent, setCurrentEventId, loading } = useEvents();
+  const navigate = useNavigate();
 
   if (loading) return <span style={labelStyle}>イベント読み込み中...</span>;
   // 空状態UIは Sprint 2 PR3 で対応するため、ここでは何も描画しない
@@ -32,7 +35,17 @@ export function EventSwitcher() {
     <select
       style={selectStyle}
       value={currentEvent?.id ?? ""}
-      onChange={(e) => setCurrentEventId(e.target.value)}
+      onChange={(e) => {
+        const newId = e.target.value;
+        setCurrentEventId(newId);
+        // URL も同期 (Sprint 2 PR2): 選択した event の既定タブへ遷移
+        const newEvent = events.find((ev) => ev.id === newId);
+        if (newEvent) {
+          navigate(
+            `/events/${newId}/${DEFAULT_TAB_BY_TYPE[newEvent.type]}`,
+          );
+        }
+      }}
       aria-label="イベント切替"
     >
       {events.map((event) => (
