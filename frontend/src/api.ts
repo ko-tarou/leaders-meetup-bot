@@ -22,11 +22,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getMeetings: () => request<Meeting[]>("/meetings"),
+  getMeetings: (eventId?: string) => {
+    const qs = eventId ? `?eventId=${encodeURIComponent(eventId)}` : "";
+    return request<Meeting[]>(`/meetings${qs}`);
+  },
   getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
   getMeetingStatus: (id: string) =>
     request<MeetingStatus>(`/meetings/${id}/status`),
-  createMeeting: (data: { name: string; channelId: string }) =>
+  createMeeting: (data: { name: string; channelId: string; eventId?: string }) =>
     request<Meeting>("/meetings", {
       method: "POST",
       body: JSON.stringify(data),

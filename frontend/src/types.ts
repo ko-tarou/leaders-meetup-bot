@@ -11,6 +11,9 @@ export type Meeting = {
   id: string;
   name: string;
   channelId: string;
+  // ADR-0001: events 配下に従属。PR2 のマイグレーションで全件 default に
+  // バックフィル済み。NULL 許容のままアプリ層で必須化していく。
+  eventId?: string | null;
   createdAt: string;
 };
 
