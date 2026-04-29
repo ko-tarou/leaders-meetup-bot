@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { MeetingList } from "./components/MeetingList";
 import { MeetingDetail } from "./components/MeetingDetail";
+import { EventSwitcher } from "./components/EventSwitcher";
+import { EventProvider } from "./contexts/EventContext";
 
 type Page = { type: "list" } | { type: "detail"; meetingId: string };
 
@@ -8,43 +10,56 @@ export function App() {
   const [page, setPage] = useState<Page>({ type: "list" });
 
   return (
-    <div
-      style={{
-        maxWidth: 800,
-        margin: "0 auto",
-        padding: 20,
-        fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
-      }}
-    >
-      <header
+    <EventProvider>
+      <div
         style={{
-          marginBottom: 24,
-          borderBottom: "1px solid #eee",
-          paddingBottom: 12,
+          maxWidth: 800,
+          margin: "0 auto",
+          padding: 20,
+          fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
-        {page.type === "detail" && (
-          <button
-            onClick={() => setPage({ type: "list" })}
-            style={linkStyle}
+        <header
+          style={{
+            marginBottom: 24,
+            borderBottom: "1px solid #eee",
+            paddingBottom: 12,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
           >
-            &#8592; ミーティング一覧に戻る
-          </button>
+            <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
+            <EventSwitcher />
+          </div>
+          {page.type === "detail" && (
+            <button
+              onClick={() => setPage({ type: "list" })}
+              style={linkStyle}
+            >
+              &#8592; ミーティング一覧に戻る
+            </button>
+          )}
+        </header>
+        {page.type === "list" && (
+          <MeetingList
+            onSelect={(id) => setPage({ type: "detail", meetingId: id })}
+          />
         )}
-      </header>
-      {page.type === "list" && (
-        <MeetingList
-          onSelect={(id) => setPage({ type: "detail", meetingId: id })}
-        />
-      )}
-      {page.type === "detail" && (
-        <MeetingDetail
-          meetingId={page.meetingId}
-          onBack={() => setPage({ type: "list" })}
-        />
-      )}
-    </div>
+        {page.type === "detail" && (
+          <MeetingDetail
+            meetingId={page.meetingId}
+            onBack={() => setPage({ type: "list" })}
+          />
+        )}
+      </div>
+    </EventProvider>
   );
 }
 
