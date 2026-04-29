@@ -18,6 +18,8 @@ import { meetings, tasks, taskAssignees } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { utcToJstFormat } from "./time-utils";
+import { createSlackClientForWorkspace } from "./workspace";
+import type { Env } from "../types/env";
 
 const PRIORITY_EMOJI: Record<string, string> = {
   low: "🟢",
@@ -277,4 +279,43 @@ export async function deleteBoard(
     .where(eq(meetings.id, meeting.id));
 
   return { ok: true };
+}
+
+/**
+ * channel_id 起点で sticky board を即時 repost する。
+ *
+ * block_actions（担当する/解除・完了・新規作成サブミット）は「ボタンを押した瞬間に
+ * 反映される」UX が重要なので、message event の 10 秒デバウンスとは独立して
+ * 即時に実行する。
+ *
+ * fail-soft: meeting / workspace が引けない、Slack API が落ちている等の場合は
+ * console.warn で握りつぶす。block_actions のレスポンス自体は既に 200 を返している
+ * 想定なので、ここで throw しても利点がない。
+ */
+export async function stickyRepostByChannel(
+  env: Env,
+  channelId: string,
+): Promise<void> {
+  const d1 = drizzle(env.DB);
+  const meeting = await d1
+    .select()
+    .from(meetings)
+    .where(eq(meetings.channelId, channelId))
+    .get();
+  if (!meeting || !meeting.workspaceId || !meeting.taskBoardTs) return;
+
+  const client = await createSlackClientForWorkspace(env, meeting.workspaceId);
+  if (!client) {
+    console.warn(
+      `stickyRepostByChannel: no SlackClient for workspace ${meeting.workspaceId}`,
+    );
+    return;
+  }
+
+  await repostBoard(env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    eventId: meeting.eventId,
+    taskBoardTs: meeting.taskBoardTs,
+  });
 }
