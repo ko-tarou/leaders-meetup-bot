@@ -9,6 +9,8 @@ import type {
   Poll,
   Reminder,
   ReminderItem,
+  Task,
+  TaskFilters,
 } from "./types";
 
 const BASE = "/api";
@@ -198,5 +200,53 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(data),
       }),
+  },
+
+  // Tasks (ADR-0002)
+  tasks: {
+    list: (eventId: string, filters?: TaskFilters) => {
+      const params = new URLSearchParams({ eventId });
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.priority) params.set("priority", filters.priority);
+      if (filters?.parentTaskId !== undefined) {
+        params.set("parentTaskId", filters.parentTaskId);
+      }
+      if (filters?.assigneeSlackId) {
+        params.set("assigneeSlackId", filters.assigneeSlackId);
+      }
+      return request<Task[]>(`/tasks?${params.toString()}`);
+    },
+    get: (id: string) => request<Task>(`/tasks/${id}`),
+    create: (data: {
+      eventId: string;
+      title: string;
+      description?: string;
+      dueAt?: string;
+      status?: "todo" | "doing" | "done";
+      priority?: "low" | "mid" | "high";
+      parentTaskId?: string;
+      createdBySlackId: string;
+    }) =>
+      request<Task>("/tasks", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        title?: string;
+        description?: string | null;
+        dueAt?: string | null;
+        status?: "todo" | "doing" | "done";
+        priority?: "low" | "mid" | "high";
+        parentTaskId?: string | null;
+      },
+    ) =>
+      request<Task>(`/tasks/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/tasks/${id}`, { method: "DELETE" }),
   },
 };
