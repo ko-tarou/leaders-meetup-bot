@@ -38,7 +38,7 @@
 | name | TEXT | NOT NULL | 表示名（例: "リーダー雑談会", "HackIt 2026"） |
 | config | TEXT | NOT NULL DEFAULT `'{}'` | type 固有設定の JSON 文字列 |
 | status | TEXT | NOT NULL DEFAULT `'active'` | `'active'` / `'archived'` |
-| createdAt | TEXT | NOT NULL | JST ISO 8601 文字列 |
+| created_at | TEXT | NOT NULL | JST ISO 8601 文字列 |
 
 `meetings` テーブル（変更）
 
@@ -56,7 +56,7 @@ erDiagram
     TEXT name
     TEXT config
     TEXT status
-    TEXT createdAt
+    TEXT created_at
   }
   meetings {
     TEXT id PK
@@ -77,7 +77,7 @@ erDiagram
 
 - `meetings` という名前のエンティティが、本来 meeting ではない HackIt（数ヶ月続くハッカソン）まで保持することになり、意味論が破綻する。
 - type 固有設定を持つ場所が無く、列を増やす／NULL 許容で逃げるなどスキーマ分岐が悪化する。
-- イベントそのもののメタ情報（status、createdAt 等）を保持できず、ライフサイクル管理が不可能。
+- イベントそのもののメタ情報（status、created_at 等）を保持できず、ライフサイクル管理が不可能。
 
 ### 案B: イベントごとに別 Worker をデプロイ
 
