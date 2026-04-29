@@ -25,9 +25,17 @@ HackIt（年次ハッカソン）は別の Slack workspace で運営されてい
 | id | TEXT PK | UUID |
 | name | TEXT NOT NULL | 表示名（"Developers Hub" / "HackIt" 等） |
 | slack_team_id | TEXT NOT NULL UNIQUE | Slack の `team_id`（`T...`） |
-| bot_token | TEXT NOT NULL | `xoxb-...` |
-| signing_secret | TEXT NOT NULL | Slack App の Signing Secret |
+| bot_token | TEXT NOT NULL | `xoxb-...` **(encrypted)** |
+| signing_secret | TEXT NOT NULL | Slack App の Signing Secret **(encrypted)** |
 | created_at | TEXT NOT NULL | UTC ISO 文字列 |
+
+### 暗号化保存
+
+- **暗号化方式**: AES-256-GCM (Web Crypto API、Cloudflare Workers でネイティブサポート)
+- **マスターキー**: 環境変数 `WORKSPACE_TOKEN_KEY` (32 bytes Base64) を Wrangler secrets で管理
+- **保存形式**: `{iv}:{ciphertext}:{tag}` Base64 結合形式
+- **key rotation**: 将来課題として、ローテーションは新キーで再暗号化マイグレーション + 旧キーを一定期間並走させる方式を残置
+- **decrypt のタイミング**: Slack API 呼び出し直前にメモリ展開し、永続化やログ出力はしない
 
 ### 2. meetings に workspace_id 追加
 
@@ -69,9 +77,20 @@ erDiagram
 
 ### 5. Webhook 署名検証のマルチ WS 対応
 
-Slack 署名検証は payload 解析前に行う必要があるため、`team_id` から `signing_secret` を引くことができない。
-**登録済み workspaces 全件の `signing_secret` を順番に試行** し、一致した workspace を request context として使う。
-運用 WS は 2〜4 件規模を想定しており性能上の懸念はない。試行結果は短時間メモリキャッシュ可。
+try-all 方式は登録 WS 数に比例して計算量が増え、DoS / timing attack のリスクがあるため不採用。
+代わりに **生 body から team_id を先に抽出 → 該当 WS のみで HMAC 検証** する方式を採る。
+
+- **Step 1**: 生 body 文字列から最小限の JSON パースで `team_id` を抽出。
+  - スラッシュコマンド / インタラクションは form-encoded のため、`payload` キーを `JSON.parse` してから `team.id` を読む。
+  - イベント API (`/slack/events`) は body 自体が JSON。
+- **Step 2**: 抽出した `team_id` で `workspaces WHERE slack_team_id = ?` を検索。
+- **Step 3**: 該当 WS の `signing_secret`（復号後）で HMAC-SHA256 検証を **1 回のみ** 実行。
+- **Step 4**: 検証成功後に初めて payload を信頼し、後続処理へ受け渡す。
+
+注記:
+- team_id 抽出は **ルーティング目的のみ**。署名検証前なので payload の他の値は信用しない。
+- team_id が登録済み workspaces にない場合は **401 を即返却**。
+- これにより try-all 方式の DoS リスク・timing attack を解消できる。
 
 ### 6. Sticky tasks bot 設計
 
@@ -126,9 +145,9 @@ Slack 署名検証は payload 解析前に行う必要があるため、`team_id
 ### 悪い点
 
 - workspaces 管理画面の実装コストが追加で発生する。
-- 署名検証で workspace 全件試行のオーバーヘッド（小規模なら無視できる）。
-- `bot_token` 平文保存のセキュリティ妥協（暗号化 / KMS は将来課題）。
+- マスターキー (`WORKSPACE_TOKEN_KEY`) を紛失すると bot_token / signing_secret が復号不能となり、全 WS 再登録が必要。
 - sticky bot は rate limit との相性が悪く、10 秒デバウンス + bot 自身無視を必ず守る必要がある。
+- 移行完了後 (Step 6) で物理制約を追加し、長期的なデータ整合性を保証する（中間期間はアプリ層検証に依存）。
 
 ### 影響を受ける ADR / 既存実装
 
@@ -144,5 +163,6 @@ Slack 署名検証は payload 解析前に行う必要があるため、`team_id
 | 1 | `CREATE TABLE workspaces`; `ALTER TABLE meetings ADD workspace_id`; `ALTER TABLE tasks ADD start_at` | 低 | `DROP` / `ADD COLUMN` を取り消す migration |
 | 2 | `INSERT OR IGNORE` default workspace using env tokens | 低 | `DELETE WHERE id='ws_default'` |
 | 3 | `UPDATE meetings SET workspace_id=default` | 中 | `UPDATE` で NULL に戻す（冪等） |
-| 4 | アプリ層: `SlackClient` マルチ WS 対応、webhook 署名 try-all | 中 | feature flag で切替 |
+| 4 | アプリ層: `SlackClient` マルチ WS 対応、webhook 署名検証は team_id 抽出 → 該当 WS のみで HMAC | 中 | feature flag で切替 |
 | 5 | Sticky bot 機能追加 | 中 | feature flag で切替 |
+| 6 | **メンテナンス window 後**: meetings / tasks / workspaces 各テーブル再作成 (CREATE → COPY → DROP → RENAME) で NOT NULL + FOREIGN KEY 制約を追加 | 中（メンテ window 必要、テーブル再作成のため D1 サイズに注意） | 旧テーブルからコピーで戻す |
