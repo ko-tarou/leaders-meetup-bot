@@ -31,7 +31,7 @@ export async function createPoll(
       channelId,
       createdAt: now,
     });
-    meeting = { id: meetingId, name: title, channelId, createdAt: now };
+    meeting = { id: meetingId, name: title, channelId, eventId: null, createdAt: now };
   }
 
   // 2. Poll作成
