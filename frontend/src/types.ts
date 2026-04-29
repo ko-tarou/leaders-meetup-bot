@@ -125,3 +125,25 @@ export type MeetingStatus = {
   pollStartDate: string | null;
   pollCloseDate: string | null;
 };
+
+// タスク（ADR-0002）
+export type Task = {
+  id: string;
+  eventId: string;
+  parentTaskId: string | null;
+  title: string;
+  description: string | null;
+  dueAt: string | null; // UTC ISO 8601 (Z付き)
+  status: "todo" | "doing" | "done";
+  priority: "low" | "mid" | "high";
+  createdBySlackId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskFilters = {
+  status?: "todo" | "doing" | "done";
+  priority?: "low" | "mid" | "high";
+  parentTaskId?: string | "null";
+  assigneeSlackId?: string;
+};
