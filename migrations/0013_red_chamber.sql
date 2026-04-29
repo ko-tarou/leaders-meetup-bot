@@ -1,0 +1,1 @@
+ALTER TABLE `meetings` ADD `task_board_ts` text;
