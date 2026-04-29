@@ -95,6 +95,23 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
   };
 }
 
+/**
+ * ADR-0006 sticky board からタスク作成するためのモーダル view。
+ * 既存 buildTaskAddModalView をベースに、callback_id だけを変える
+ * （UI 構成は完全に同一にすることで保守性を確保）。
+ *
+ * private_metadata は同じ TaskAddModalMetadata 型を使い、channelId に
+ * sticky board 直下のチャンネル ID を渡す。view_submission ハンドラ側で
+ * callback_id を見て分岐し、タスク作成後に sticky board の repost を行う。
+ */
+export function buildStickyTaskAddModal(meta: TaskAddModalMetadata) {
+  const view = buildTaskAddModalView(meta);
+  return {
+    ...view,
+    callback_id: "sticky_task_add_submit",
+  };
+}
+
 // JST の YYYY-MM-DD + HH:mm を UTC ISO 文字列 (Z付き) に変換
 // 時刻未指定時は 09:00 JST を採用
 export function jstDateTimeToUtcIso(
