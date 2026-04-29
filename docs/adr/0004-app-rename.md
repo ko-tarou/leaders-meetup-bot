@@ -25,9 +25,9 @@
 
 ### 変更対象チェックリスト（別PRで実施）
 
-- [ ] `package.json` の `name` フィールド
+- [ ] `package.json` の `name` フィールド および `scripts` 内の旧名称参照（例: `db:migrate:local`, `db:migrate:remote` などで `leaders-meetup-bot` という文字列が直接記述されている可能性）
 - [ ] `frontend/package.json` の `name` フィールド
-- [ ] `wrangler.toml` の `name`（Workers URL 変更を伴う、後述）
+- [ ] `wrangler.toml` の `name` および `database_name`（Workers URL 変更を伴う、後述。なお `database_name` の変更には別途 D1 リソースのマイグレーションが必要）
 - [ ] `README.md` のタイトル・説明
 - [ ] Frontend UI のページタイトル（`<title>`）・ヘッダー表示
 - [ ] GitHub リポジトリの description（Settings から手動更新）
