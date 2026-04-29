@@ -523,6 +523,95 @@ api.delete("/tasks/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Task Assignees (ADR-0002) ---
+
+api.get("/tasks/:taskId/assignees", async (c) => {
+  const db = drizzle(c.env.DB);
+  const taskId = c.req.param("taskId");
+
+  const task = await db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+  if (!task) return c.json({ error: "task not found" }, 404);
+
+  const rows = await db
+    .select()
+    .from(taskAssignees)
+    .where(eq(taskAssignees.taskId, taskId))
+    .all();
+  return c.json(rows);
+});
+
+api.post("/tasks/:taskId/assignees", async (c) => {
+  const db = drizzle(c.env.DB);
+  const taskId = c.req.param("taskId");
+  const body = await c.req.json<{ slackUserId: string }>();
+
+  if (!body.slackUserId) {
+    return c.json({ error: "slackUserId is required" }, 400);
+  }
+
+  const task = await db.select().from(tasks).where(eq(tasks.id, taskId)).get();
+  if (!task) return c.json({ error: "task not found" }, 404);
+
+  // 重複チェック (UNIQUE 制約に依存しつつ、明示的に確認してわかりやすいエラーを返す)
+  const existing = await db
+    .select()
+    .from(taskAssignees)
+    .where(
+      and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.slackUserId, body.slackUserId)),
+    )
+    .get();
+  if (existing) {
+    return c.json({ error: "user is already assigned" }, 409);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const assignee = {
+    id,
+    taskId,
+    slackUserId: body.slackUserId,
+    assignedAt: now,
+  };
+  await db.insert(taskAssignees).values(assignee);
+
+  // tasks.updatedAt も連動更新（担当者変更も task の更新と見なす）
+  await db
+    .update(tasks)
+    .set({ updatedAt: now })
+    .where(eq(tasks.id, taskId));
+
+  return c.json(assignee, 201);
+});
+
+api.delete("/tasks/:taskId/assignees/:slackUserId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const taskId = c.req.param("taskId");
+  const slackUserId = c.req.param("slackUserId");
+
+  const existing = await db
+    .select()
+    .from(taskAssignees)
+    .where(
+      and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.slackUserId, slackUserId)),
+    )
+    .get();
+  if (!existing) return c.json({ error: "assignee not found" }, 404);
+
+  await db
+    .delete(taskAssignees)
+    .where(
+      and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.slackUserId, slackUserId)),
+    );
+
+  // tasks.updatedAt も連動更新
+  await db
+    .update(tasks)
+    .set({ updatedAt: new Date().toISOString() })
+    .where(eq(tasks.id, taskId));
+
+  return c.json({ ok: true });
+});
+
 // --- Members ---
 
 api.get("/meetings/:meetingId/members", async (c) => {
