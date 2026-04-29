@@ -14,6 +14,40 @@ export const events = sqliteTable("events", {
   createdAt: text("created_at").notNull(),
 });
 
+// タスク（HackIt等のハッカソン運営タスク管理用、ADR-0002）
+export const tasks = sqliteTable("tasks", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id),
+  // 1階層のサブタスク。アプリ層で深さ強制（ADR-0002）
+  // self-referential FK は Drizzle の循環参照を避けるため省略し、アプリ層で整合性保証
+  parentTaskId: text("parent_task_id"),
+  title: text("title").notNull(),
+  description: text("description"),
+  // ADR-0002 (Gemini): UTC ISO 8601 (Z付き) で保存、表示時にJST変換
+  dueAt: text("due_at"),
+  status: text("status").notNull().default("todo"), // 'todo' | 'doing' | 'done'
+  priority: text("priority").notNull().default("mid"), // 'low' | 'mid' | 'high'
+  createdBySlackId: text("created_by_slack_id").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+// タスク担当者（多対多、ADR-0002 Geminiレビューで正規化採用）
+export const taskAssignees = sqliteTable(
+  "task_assignees",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    slackUserId: text("slack_user_id").notNull(),
+    assignedAt: text("assigned_at").notNull(), // UTC ISO
+  },
+  (t) => [unique("task_assignees_task_user_uniq").on(t.taskId, t.slackUserId)]
+);
+
 // ミーティング定義
 export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
