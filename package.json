@@ -16,7 +16,8 @@
     "drizzle-orm": "^0.45.2",
     "hono": "latest",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "react-router-dom": "^7.14.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
