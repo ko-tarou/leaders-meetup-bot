@@ -97,6 +97,19 @@ export class SlackClient {
     return this.callApiGet("conversations.info", { channel });
   }
 
+  // ADR-0006: workspace bootstrap で team_id を取得するために使う
+  async authTest(): Promise<
+    SlackResponse & {
+      team_id?: string;
+      team?: string;
+      user_id?: string;
+    }
+  > {
+    return this.callApi("auth.test", {}) as Promise<
+      SlackResponse & { team_id?: string; team?: string; user_id?: string }
+    >;
+  }
+
   async verifySignature(
     signature: string,
     timestamp: string,

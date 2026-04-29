@@ -24,6 +24,7 @@ import {
   taskAssignees,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
+import { ensureDefaultWorkspace } from "../services/workspace-bootstrap";
 import {
   getUserName,
   getChannelName,
@@ -56,6 +57,22 @@ api.post("/trigger-cron", async (c) => {
   ]);
 
   return c.json({ ok: true, processed: jobsResult.processed, timestamp: new Date().toISOString() });
+});
+
+// --- Workspaces (admin) ---
+// ADR-0006: default workspace の bootstrap。Sprint 6 では認証なし（kota 専用想定）。
+// Sprint 7 以降で管理者認証を追加予定。冪等なので複数回呼んでも安全。
+api.post("/workspaces/bootstrap", async (c) => {
+  try {
+    const result = await ensureDefaultWorkspace(c.env);
+    return c.json({ ok: true, ...result });
+  } catch (e) {
+    console.error("Failed to bootstrap default workspace:", e);
+    return c.json(
+      { ok: false, error: e instanceof Error ? e.message : "unknown" },
+      500,
+    );
+  }
 });
 
 // --- Meetings ---
