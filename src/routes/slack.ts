@@ -13,26 +13,121 @@ import {
 } from "../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../services/devhub-task-list";
 import { scheduleTaskReminders } from "../services/devhub-task-reminder";
+import {
+  getWorkspaceBySlackTeamId,
+  getDecryptedWorkspace,
+  type DecryptedWorkspace,
+} from "../services/workspace";
+import { DEFAULT_WORKSPACE_ID } from "../services/workspace-bootstrap";
 
 type Variables = {
   rawBody: string;
+  // ADR-0006 (PR5): 署名検証で確定した workspace。後段ハンドラはこれを正とする。
+  workspace: DecryptedWorkspace;
 };
 
 const slack = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// 署名検証ミドルウェア
+/**
+ * 生 body から Slack team_id を抽出する（署名検証前のルーティング目的）。
+ *
+ * 注意: ここで取り出した team_id はまだ署名検証されていない。
+ * 「どの workspace の signing_secret で検証すべきか」を決めるためだけに使い、
+ * 検証成功後の payload まで信用しない。
+ *
+ * 形式判定:
+ * - JSON (events API): top-level の team_id
+ *   url_verification は team_id を持たないので呼び出し側で別経路 (default ws) を使う
+ * - form-encoded:
+ *   - slash commands: team_id=T...
+ *   - interactions: payload={"team":{"id":"T..."}, ...}
+ */
+function extractTeamId(rawBody: string, contentType: string): string | null {
+  if (contentType.includes("application/json")) {
+    try {
+      const json = JSON.parse(rawBody);
+      if (typeof json?.team_id === "string") return json.team_id;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const params = new URLSearchParams(rawBody);
+    const teamIdDirect = params.get("team_id");
+    if (teamIdDirect) return teamIdDirect;
+    const payloadStr = params.get("payload");
+    if (payloadStr) {
+      try {
+        const payload = JSON.parse(payloadStr);
+        if (typeof payload?.team?.id === "string") return payload.team.id;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
+ * 署名検証ミドルウェア (multi-workspace 対応 / ADR-0006)
+ *
+ * 流れ:
+ *  1. raw body から team_id を抽出
+ *  2. team_id → workspaces 検索 → 該当 WS の signing_secret で HMAC 検証
+ *  3. 該当WSが存在しない or 検証失敗で 401
+ *  4. url_verification (events API のセットアップ) は team_id を持たないため
+ *     default workspace の signing_secret で検証する例外パス
+ */
 slack.use("/*", async (c, next) => {
   const signature = c.req.header("x-slack-signature") || "";
   const timestamp = c.req.header("x-slack-request-timestamp") || "";
+  const contentType = c.req.header("content-type") || "";
   const body = await c.req.text();
 
-  const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
-  const isValid = await client.verifySignature(signature, timestamp, body);
+  const teamId = extractTeamId(body, contentType);
+  let workspace: DecryptedWorkspace | null = null;
+
+  if (teamId) {
+    const ws = await getWorkspaceBySlackTeamId(c.env.DB, teamId);
+    if (!ws) {
+      // 未登録の team からの webhook は即拒否（DoS / timing attack 軽減）
+      return c.json({ error: `unknown team_id: ${teamId}` }, 401);
+    }
+    workspace = await getDecryptedWorkspace(c.env, ws.id);
+    if (!workspace) {
+      return c.json({ error: "failed to decrypt workspace tokens" }, 500);
+    }
+  } else {
+    // team_id 無し: events API の url_verification が該当する。
+    // Slack App セットアップ時のチャレンジは default workspace で検証する。
+    if (contentType.includes("application/json")) {
+      try {
+        const json = JSON.parse(body);
+        if (json?.type === "url_verification") {
+          workspace = await getDecryptedWorkspace(c.env, DEFAULT_WORKSPACE_ID);
+        }
+      } catch {
+        // フォールスルーして 401
+      }
+    }
+    if (!workspace) {
+      return c.json({ error: "team_id not found in payload" }, 401);
+    }
+  }
+
+  // 該当WSの signing_secret で HMAC 検証
+  const verifier = new SlackClient(workspace.botToken, workspace.signingSecret);
+  const isValid = await verifier.verifySignature(signature, timestamp, body);
   if (!isValid) {
     return c.json({ error: "invalid signature" }, 401);
   }
 
   c.set("rawBody", body);
+  c.set("workspace", workspace);
   await next();
 });
 
