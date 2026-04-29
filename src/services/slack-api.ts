@@ -62,6 +62,19 @@ export class SlackClient {
     return this.callApi("reactions.add", { channel, timestamp, name });
   }
 
+  async openView(triggerId: string, view: unknown): Promise<SlackResponse> {
+    return this.callApi("views.open", { trigger_id: triggerId, view });
+  }
+
+  async postEphemeral(
+    channel: string,
+    user: string,
+    text: string,
+    blocks?: unknown[],
+  ): Promise<SlackResponse> {
+    return this.callApi("chat.postEphemeral", { channel, user, text, blocks });
+  }
+
   async getUserInfo(userId: string): Promise<SlackResponse> {
     return this.callApiGet("users.info", { user: userId });
   }
