@@ -1,8 +1,13 @@
 import { useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { MeetingList } from "../components/MeetingList";
-import { TABS_BY_TYPE, TAB_LABELS, type EventTab } from "../lib/eventTabs";
+import {
+  DEFAULT_TAB_BY_TYPE,
+  TABS_BY_TYPE,
+  TAB_LABELS,
+  type EventTab,
+} from "../lib/eventTabs";
 
 const placeholders: Record<EventTab, string> = {
   members: "イベントメンバー管理は今後のスプリントで実装予定です。",
@@ -12,27 +17,45 @@ const placeholders: Record<EventTab, string> = {
 };
 
 // /events/:eventId/:tab — URL → context 同期 + event.type 別タブ表示。
+// Sprint 2 PR3: eventId 不在 → /、tab 不整合 → 既定タブにリダイレクト。
 export function EventTabPage() {
   const { eventId, tab } = useParams<{ eventId: string; tab: string }>();
   const navigate = useNavigate();
   const { events, currentEvent, setCurrentEventId, loading } = useEvents();
 
+  // events が確定し、URLの eventId が現存する場合のみ context に反映
   useEffect(() => {
-    if (!eventId) return;
+    if (loading || !eventId) return;
     if (eventId !== currentEvent?.id && events.some((e) => e.id === eventId)) {
       setCurrentEventId(eventId);
     }
-  }, [eventId, currentEvent?.id, events, setCurrentEventId]);
+  }, [loading, eventId, currentEvent?.id, events, setCurrentEventId]);
 
-  if (loading) return <p>読み込み中...</p>;
+  // ロード完了まで何も描画しない (リダイレクトループ防止)
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: "2rem", color: "#999" }}>
+        読み込み中...
+      </div>
+    );
+  }
+
+  // 1. eventId が events に現存しない (削除/存在しない) → / へ
   const event = events.find((e) => e.id === eventId);
-  // 無効 eventId の本格対応は PR3。本PRでは案内文のみ。
-  if (!event) return <p style={{ color: "#999" }}>イベントが見つかりません</p>;
+  if (!event) return <Navigate to="/" replace />;
 
+  // 2. tab が event.type の有効タブに含まれない → 既定タブへ
   const validTabs = TABS_BY_TYPE[event.type];
-  const activeTab = (validTabs as string[]).includes(tab ?? "")
-    ? (tab as EventTab)
-    : validTabs[0];
+  if (!validTabs.includes(tab as EventTab)) {
+    return (
+      <Navigate
+        to={`/events/${event.id}/${DEFAULT_TAB_BY_TYPE[event.type]}`}
+        replace
+      />
+    );
+  }
+
+  const activeTab = tab as EventTab;
 
   return (
     <div>

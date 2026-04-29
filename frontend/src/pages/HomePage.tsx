@@ -1,23 +1,36 @@
 import { Navigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { DEFAULT_TAB_BY_TYPE } from "../lib/eventTabs";
+import { EmptyEventState } from "../components/EmptyEventState";
 
-// "/" のランディング。本PR (Sprint 2 PR2) は最小実装。
-// 空状態 / 自動選択ロジックの本実装は Sprint 2 PR3。
+// "/" のランディング (Sprint 2 PR3 本実装)。
+// 3段リダイレクト: localStorage(currentEvent) → events[0] → 空状態
 export function HomePage() {
-  const { currentEvent, events, loading } = useEvents();
-  if (loading) return <p>読み込み中...</p>;
-  const fallback = currentEvent ?? events[0] ?? null;
-  if (!fallback) {
+  const { events, currentEvent, loading } = useEvents();
+
+  if (loading) {
     return (
-      <p style={{ color: "#999" }}>
-        イベントがありません。Sprint 2 PR3 でセットアップ動線を実装予定です。
-      </p>
+      <div style={{ textAlign: "center", padding: "2rem", color: "#999" }}>
+        読み込み中...
+      </div>
     );
   }
+  if (events.length === 0) return <EmptyEventState />;
+
+  // localStorage の current_event_id が events に現存する場合: それを優先
+  if (currentEvent) {
+    return (
+      <Navigate
+        to={`/events/${currentEvent.id}/${DEFAULT_TAB_BY_TYPE[currentEvent.type]}`}
+        replace
+      />
+    );
+  }
+  // localStorage 未設定 / 失効: events 一覧の先頭にフォールバック
+  const first = events[0];
   return (
     <Navigate
-      to={`/events/${fallback.id}/${DEFAULT_TAB_BY_TYPE[fallback.type]}`}
+      to={`/events/${first.id}/${DEFAULT_TAB_BY_TYPE[first.type]}`}
       replace
     />
   );
