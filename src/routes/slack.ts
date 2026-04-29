@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
@@ -12,13 +12,16 @@ import {
 import { meetings, tasks, taskAssignees } from "../db/schema";
 import {
   buildTaskAddModalView,
+  buildStickyTaskAddModal,
   jstDateTimeToUtcIso,
 } from "../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../services/devhub-task-list";
 import { scheduleTaskReminders } from "../services/devhub-task-reminder";
+import { stickyRepostByChannel } from "../services/sticky-task-board";
 import {
   getWorkspaceBySlackTeamId,
   getDecryptedWorkspace,
+  createSlackClientForWorkspace,
   type DecryptedWorkspace,
 } from "../services/workspace";
 import { DEFAULT_WORKSPACE_ID } from "../services/workspace-bootstrap";
@@ -461,6 +464,158 @@ slack.post("/interactions", async (c) => {
 
       return c.json({ ok: true });
     }
+
+    // === ADR-0006 sticky board: 担当者トグル ===
+    // sticky_assign_<taskId>: 押した本人を担当者として toggle
+    //   - 既にアサインされていれば解除、なければ追加
+    //   - tasks.updatedAt を必ず更新（並び替えのため）
+    //   - その後 sticky board を即時 repost（10秒デバウンスは message event 専用）
+    if (action.action_id?.startsWith("sticky_assign_")) {
+      const taskId = action.value;
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!taskId || !userId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const existing = await d1
+              .select()
+              .from(taskAssignees)
+              .where(
+                and(
+                  eq(taskAssignees.taskId, taskId),
+                  eq(taskAssignees.slackUserId, userId),
+                ),
+              )
+              .get();
+
+            const now = new Date().toISOString();
+            if (existing) {
+              await d1
+                .delete(taskAssignees)
+                .where(
+                  and(
+                    eq(taskAssignees.taskId, taskId),
+                    eq(taskAssignees.slackUserId, userId),
+                  ),
+                );
+            } else {
+              await d1.insert(taskAssignees).values({
+                id: crypto.randomUUID(),
+                taskId,
+                slackUserId: userId,
+                assignedAt: now,
+              });
+            }
+            await d1
+              .update(tasks)
+              .set({ updatedAt: now })
+              .where(eq(tasks.id, taskId));
+
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_assign:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // === ADR-0006 sticky board: 完了 ===
+    // sticky_done_<taskId>: タスクを done に更新 → 即時 repost
+    if (action.action_id?.startsWith("sticky_done_")) {
+      const taskId = action.value;
+      const channelId = payload.channel?.id;
+      if (!taskId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const now = new Date().toISOString();
+            await d1
+              .update(tasks)
+              .set({ status: "done", updatedAt: now })
+              .where(eq(tasks.id, taskId));
+
+            // pending 中のリマインドジョブも掃除（冪等、devhub_task_done_ と同じ扱い）
+            try {
+              await scheduleTaskReminders(c.env.DB, taskId, null, "", []);
+            } catch (remErr) {
+              console.error("Failed to clear sticky task reminders:", remErr);
+            }
+
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_done:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // === ADR-0006 sticky board: 新規タスク作成モーダルを開く ===
+    // value に meetingId が入っている。trigger_id は 3 秒で失効するため waitUntil
+    // 内でも極力早く openView を叩く。
+    if (action.action_id === "sticky_create") {
+      const meetingId = action.value;
+      const triggerId = payload.trigger_id;
+      if (!meetingId || !triggerId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const meeting = await d1
+              .select()
+              .from(meetings)
+              .where(eq(meetings.id, meetingId))
+              .get();
+            if (
+              !meeting ||
+              !meeting.eventId ||
+              !meeting.workspaceId ||
+              !meeting.channelId
+            ) {
+              console.warn(
+                `sticky_create: meeting ${meetingId} not ready (eventId/workspaceId/channelId missing)`,
+              );
+              return;
+            }
+
+            const client = await createSlackClientForWorkspace(
+              c.env,
+              meeting.workspaceId,
+            );
+            if (!client) {
+              console.warn(
+                `sticky_create: no SlackClient for workspace ${meeting.workspaceId}`,
+              );
+              return;
+            }
+
+            const userId = payload.user?.id || "";
+            const view = buildStickyTaskAddModal({
+              eventId: meeting.eventId,
+              channelId: meeting.channelId,
+              createdBySlackId: userId,
+            });
+            const res = await client.openView(triggerId, view);
+            if (!res.ok) {
+              console.error("sticky_create views.open returned not ok:", res);
+            }
+          } catch (e) {
+            console.error("Failed to open sticky_create modal:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
   }
 
   if (payload.type === "view_submission") {
@@ -593,6 +748,146 @@ slack.post("/interactions", async (c) => {
       );
 
       // モーダルを閉じる
+      return c.json({});
+    }
+
+    // === ADR-0006 sticky board: タスク作成モーダルのサブミット ===
+    // 既存 devhub_task_add_submit の処理ロジックに加え、最後に sticky board を
+    // 即時 repost する（ボードに新しいタスクが見えるようにする）。
+    // 既存ハンドラを共通化はせず、PR スコープを最小化する方針（後続 PR で DRY 化）。
+    if (view?.callback_id === "sticky_task_add_submit") {
+      let meta: {
+        eventId?: string;
+        channelId?: string;
+        createdBySlackId?: string;
+      } = {};
+      try {
+        meta = JSON.parse(view.private_metadata || "{}");
+      } catch {
+        meta = {};
+      }
+      const eventId = meta.eventId;
+      const channelId = meta.channelId || "";
+      const createdBySlackId =
+        meta.createdBySlackId || payload.user?.id || "";
+
+      const values = view.state?.values || {};
+      const title: string | undefined =
+        values.title_block?.title_input?.value;
+      const description: string | null =
+        values.desc_block?.desc_input?.value || null;
+      const assigneeIds: string[] =
+        values.assignees_block?.assignees_input?.selected_users || [];
+      const dueDate: string | null =
+        values.due_date_block?.due_date_input?.selected_date || null;
+      const dueTime: string | null =
+        values.due_time_block?.due_time_input?.selected_time || null;
+      const priority: string =
+        values.priority_block?.priority_input?.selected_option?.value || "mid";
+
+      if (!title || !title.trim()) {
+        return c.json({
+          response_action: "errors",
+          errors: { title_block: "タスク名は必須です" },
+        });
+      }
+      if (!eventId) {
+        return c.json({
+          response_action: "errors",
+          errors: {
+            title_block:
+              "イベント情報が失われています。ボードの新規ボタンを押し直してください。",
+          },
+        });
+      }
+
+      const dueAt: string | null = dueDate
+        ? jstDateTimeToUtcIso(dueDate, dueTime)
+        : null;
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          const client = new SlackClient(
+            c.env.SLACK_BOT_TOKEN,
+            c.env.SLACK_SIGNING_SECRET,
+          );
+          const d1 = drizzle(c.env.DB);
+          try {
+            const taskId = crypto.randomUUID();
+            const now = new Date().toISOString();
+            await d1.insert(tasks).values({
+              id: taskId,
+              eventId,
+              parentTaskId: null,
+              title,
+              description,
+              dueAt,
+              status: "todo",
+              priority,
+              createdBySlackId,
+              createdAt: now,
+              updatedAt: now,
+            });
+
+            for (const slackUserId of assigneeIds) {
+              await d1.insert(taskAssignees).values({
+                id: crypto.randomUUID(),
+                taskId,
+                slackUserId,
+                assignedAt: now,
+              });
+            }
+
+            if (dueAt && assigneeIds.length > 0) {
+              try {
+                await scheduleTaskReminders(
+                  c.env.DB,
+                  taskId,
+                  dueAt,
+                  title,
+                  assigneeIds,
+                );
+              } catch (remErr) {
+                console.error(
+                  "Failed to schedule sticky task reminders:",
+                  remErr,
+                );
+              }
+            }
+
+            // sticky board を即時 repost してボード上に新タスクを反映
+            if (channelId) {
+              try {
+                await stickyRepostByChannel(c.env, channelId);
+              } catch (repErr) {
+                console.error("Failed to repost sticky board after create:", repErr);
+              }
+            }
+
+            const successText = `✅ タスクを作成しました: ${title}`;
+            if (channelId) {
+              await client.postEphemeral(
+                channelId,
+                createdBySlackId,
+                successText,
+              );
+            } else {
+              await client.postMessage(createdBySlackId, successText);
+            }
+          } catch (e) {
+            console.error("Failed to create sticky task from modal:", e);
+            const failText = `⚠️ タスク作成に失敗しました: ${
+              e instanceof Error ? e.message : "unknown"
+            }`;
+            try {
+              await client.postMessage(createdBySlackId, failText);
+            } catch (notifyErr) {
+              console.error("Failed to notify sticky task failure:", notifyErr);
+            }
+          }
+        })(),
+      );
+
       return c.json({});
     }
   }
