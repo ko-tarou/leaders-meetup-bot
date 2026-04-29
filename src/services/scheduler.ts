@@ -34,6 +34,40 @@ export async function processScheduledJobs(
           }
         }
         await sendReminder(db, slackClient, job.referenceId, customMessage);
+      } else if (job.type === "devhub_task_reminder") {
+        // ADR-0002: タスク dueAt の前日/当日 09:00 JST に担当者へ DM 送信
+        let taskTitle = "(タイトル不明)";
+        let assigneeSlackIds: string[] = [];
+        if (job.payload) {
+          try {
+            const payload = JSON.parse(job.payload);
+            taskTitle =
+              typeof payload?.taskTitle === "string"
+                ? payload.taskTitle
+                : taskTitle;
+            assigneeSlackIds = Array.isArray(payload?.assigneeSlackIds)
+              ? payload.assigneeSlackIds.filter(
+                  (s: unknown): s is string => typeof s === "string",
+                )
+              : [];
+          } catch {
+            // payload不正時は何もしない
+          }
+        }
+        for (const slackUserId of assigneeSlackIds) {
+          try {
+            await slackClient.postMessage(
+              slackUserId,
+              `🔔 タスクの期限が近づいています: *${taskTitle}*`,
+            );
+          } catch (e) {
+            // 1人の通知失敗でジョブ全体を failed にすると他担当者にも届かないのでログのみ
+            console.error(
+              `Failed to send devhub_task_reminder DM to ${slackUserId}:`,
+              e,
+            );
+          }
+        }
       }
 
       await d1

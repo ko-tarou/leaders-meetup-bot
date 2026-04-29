@@ -58,3 +58,22 @@ export function jstToUtcIso(ymd: string, time: string): string {
   const d = new Date(`${ymd}T${normalized}+09:00`);
   return d.toISOString();
 }
+
+/**
+ * UTC ISO 8601 文字列を JST 表示用 "YYYY-MM-DD HH:MM" にフォーマットする。
+ * 不正な入力時は元の文字列を返す（壊さない）。
+ *
+ * 例: utcToJstFormat("2026-04-23T00:00:00.000Z") → "2026-04-23 09:00"
+ */
+export function utcToJstFormat(utcIso: string): string {
+  const t = Date.parse(utcIso);
+  if (Number.isNaN(t)) return utcIso;
+  const jst = new Date(t + 9 * 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = jst.getUTCFullYear();
+  const m = pad(jst.getUTCMonth() + 1);
+  const d = pad(jst.getUTCDate());
+  const hh = pad(jst.getUTCHours());
+  const mm = pad(jst.getUTCMinutes());
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
