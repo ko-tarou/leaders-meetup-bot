@@ -1,6 +1,18 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { unique } from "drizzle-orm/sqlite-core";
 
+// Slack ワークスペース登録（ADR-0006）
+// 複数 Slack workspace（Developers Hub / HackIt 等）を一元管理するためのトップレベル登録
+// bot_token / signing_secret は AES-256-GCM 暗号化保存（暗号化ヘルパは Sprint 6 PR2）
+export const workspaces = sqliteTable("workspaces", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slackTeamId: text("slack_team_id").notNull().unique(),
+  botToken: text("bot_token").notNull(),
+  signingSecret: text("signing_secret").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 // イベント（meetup, hackathon 等の単位）
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
@@ -27,6 +39,8 @@ export const tasks = sqliteTable("tasks", {
   description: text("description"),
   // ADR-0002 (Gemini): UTC ISO 8601 (Z付き) で保存、表示時にJST変換
   dueAt: text("due_at"),
+  // ADR-0006: タスク開始日（UTC ISO 8601、Z付き）
+  startAt: text("start_at"),
   status: text("status").notNull().default("todo"), // 'todo' | 'doing' | 'done'
   priority: text("priority").notNull().default("mid"), // 'low' | 'mid' | 'high'
   createdBySlackId: text("created_by_slack_id").notNull(),
@@ -53,6 +67,9 @@ export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   channelId: text("channel_id").notNull(),
+  // ADR-0006: どの workspace の channel_id か。既存全件は default workspace にバックフィル予定（Sprint 6 PR3）。
+  // .notNull() を付けない（Drizzle Kit がテーブル再作成するリスク回避）
+  workspaceId: text("workspace_id").references(() => workspaces.id),
   // ADR-0001/0005: events 配下に従属。NULL許容のままアプリ層 (Zod) で必須化する。
   // .notNull() を付けると drizzle-kit が物理 NOT NULL を生成してテーブル再作成リスク。
   eventId: text("event_id").references(() => events.id),
