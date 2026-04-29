@@ -1,6 +1,19 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { unique } from "drizzle-orm/sqlite-core";
 
+// イベント（meetup, hackathon 等の単位）
+export const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  // 'meetup' | 'hackathon'
+  type: text("type").notNull(),
+  name: text("name").notNull(),
+  // イベント固有設定（JSON文字列）
+  config: text("config").notNull().default("{}"),
+  // 'active' | 'archived'
+  status: text("status").notNull().default("active"),
+  createdAt: text("created_at").notNull(),
+});
+
 // ミーティング定義
 export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),

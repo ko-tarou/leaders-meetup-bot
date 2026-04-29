@@ -64,6 +64,13 @@
       "when": 1776069080195,
       "tag": "0008_famous_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1777448409226,
+      "tag": "0009_greedy_thaddeus_ross",
+      "breakpoints": true
     }
   ]
 }
