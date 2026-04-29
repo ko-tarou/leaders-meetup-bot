@@ -1,0 +1,101 @@
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import type { Event } from "../types";
+import { api } from "../api";
+
+const STORAGE_KEY = "devhub_ops:current_event_id";
+
+type EventContextValue = {
+  events: Event[];
+  currentEvent: Event | null;
+  setCurrentEventId: (id: string) => void;
+  loading: boolean;
+};
+
+const EventContext = createContext<EventContextValue | null>(null);
+
+export function EventProvider({ children }: { children: ReactNode }) {
+  const [events, setEvents] = useState<Event[]>([]);
+  const [currentEventId, _setCurrentEventId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.events
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        const safeList = Array.isArray(list) ? list : [];
+        setEvents(safeList);
+        // ID現存チェック (ADR-0003 修正1):
+        // localStorage に残った ID が events 一覧にない場合は破棄
+        const stored = currentEventId;
+        if (stored && !safeList.some((e) => e.id === stored)) {
+          _setCurrentEventId(null);
+          try {
+            localStorage.removeItem(STORAGE_KEY);
+          } catch {
+            // noop
+          }
+        }
+        // 初回ロード時に未設定なら一覧の先頭にフォールバック
+        if (!stored && safeList.length > 0) {
+          const firstId = safeList[0].id;
+          _setCurrentEventId(firstId);
+          try {
+            localStorage.setItem(STORAGE_KEY, firstId);
+          } catch {
+            // noop
+          }
+        }
+      })
+      .catch(() => {
+        // 失敗時は空のまま。EventSwitcher 側は events.length===0 で表示しない。
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // 初回マウントのみ実行する。currentEventId は内部で参照するだけで依存に含めない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const setCurrentEventId = (id: string) => {
+    _setCurrentEventId(id);
+    try {
+      localStorage.setItem(STORAGE_KEY, id);
+    } catch {
+      // noop (Private mode 等)
+    }
+  };
+
+  const currentEvent =
+    events.find((e) => e.id === currentEventId) ?? null;
+
+  return (
+    <EventContext.Provider
+      value={{ events, currentEvent, setCurrentEventId, loading }}
+    >
+      {children}
+    </EventContext.Provider>
+  );
+}
+
+export function useEvents() {
+  const ctx = useContext(EventContext);
+  if (!ctx) throw new Error("useEvents must be used within EventProvider");
+  return ctx;
+}
