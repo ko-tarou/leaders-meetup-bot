@@ -22,9 +22,7 @@ export function EmptyEventState() {
       const created = await api.events.create({ type, name: trimmed });
       await refreshEvents();
       setCurrentEventId(created.id);
-      navigate(`/events/${created.id}/${DEFAULT_TAB_BY_TYPE[type]}`, {
-        replace: true,
-      });
+      navigate(`/events/${created.id}/${DEFAULT_TAB_BY_TYPE[type]}`, { replace: true });
     } catch (e) {
       console.error("event creation failed", e);
       alert("イベント作成に失敗しました");
@@ -33,22 +31,18 @@ export function EmptyEventState() {
   };
 
   return (
-    <div style={containerStyle}>
-      <h2 style={{ margin: 0, fontSize: 22, color: "#333" }}>
-        イベントがありません
-      </h2>
-      <p style={{ color: "#666", marginTop: 8 }}>
-        最初のイベントを作成して始めましょう
-      </p>
+    <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
+      <h2 style={{ margin: 0, fontSize: 22, color: "#333" }}>イベントがありません</h2>
+      <p style={{ color: "#666", marginTop: 8 }}>最初のイベントを作成して始めましょう</p>
       {!showForm ? (
         <button
           onClick={() => setShowForm(true)}
-          style={primaryButtonStyle}
+          style={{ ...btn, ...primaryBtn, marginTop: 16 }}
         >
           + イベントを作成
         </button>
       ) : (
-        <div style={formStyle}>
+        <div style={{ display: "inline-flex", flexDirection: "column", gap: 8, marginTop: 16, minWidth: 260 }}>
           <input
             placeholder="イベント名 (例: HackIt 2026)"
             value={name}
@@ -68,19 +62,16 @@ export function EmptyEventState() {
           </select>
           <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
             <button
-              onClick={() => {
-                setShowForm(false);
-                setName("");
-              }}
+              onClick={() => { setShowForm(false); setName(""); }}
               disabled={submitting}
-              style={secondaryButtonStyle}
+              style={{ ...btn, background: "#f5f5f5", color: "#333", border: "1px solid #ddd" }}
             >
               キャンセル
             </button>
             <button
               onClick={handleCreate}
               disabled={submitting || !name.trim()}
-              style={primaryButtonStyle}
+              style={{ ...btn, ...primaryBtn }}
             >
               {submitting ? "作成中..." : "作成"}
             </button>
@@ -91,43 +82,10 @@ export function EmptyEventState() {
   );
 }
 
-const containerStyle: React.CSSProperties = {
-  textAlign: "center",
-  padding: "4rem 1rem",
-};
-
-const formStyle: React.CSSProperties = {
-  display: "inline-flex",
-  flexDirection: "column",
-  gap: 8,
-  marginTop: 16,
-  minWidth: 260,
-};
-
 const inputStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  border: "1px solid #ddd",
-  borderRadius: 4,
-  fontSize: 14,
+  padding: "8px 12px", border: "1px solid #ddd", borderRadius: 4, fontSize: 14,
 };
-
-const primaryButtonStyle: React.CSSProperties = {
-  padding: "10px 20px",
-  background: "#4A90D9",
-  color: "#fff",
-  border: "none",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 14,
-  marginTop: 16,
+const btn: React.CSSProperties = {
+  padding: "10px 20px", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 14,
 };
-
-const secondaryButtonStyle: React.CSSProperties = {
-  padding: "10px 20px",
-  background: "#f5f5f5",
-  color: "#333",
-  border: "1px solid #ddd",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 14,
-};
+const primaryBtn: React.CSSProperties = { background: "#4A90D9", color: "#fff" };
