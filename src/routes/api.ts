@@ -9,6 +9,7 @@ import { getJstNow } from "../services/time-utils";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, closePoll } from "../services/poll";
 import {
+  events,
   meetings,
   meetingMembers,
   meetingResponders,
@@ -242,6 +243,90 @@ api.delete("/meetings/:id", async (c) => {
 
   await db.delete(meetings).where(eq(meetings.id, id));
   return c.json({ ok: true });
+});
+
+// --- Events (ADR-0001) ---
+
+api.get("/events", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(events)
+    .where(eq(events.status, "active"))
+    .all();
+  rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return c.json(rows);
+});
+
+api.get("/events/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const event = await db.select().from(events).where(eq(events.id, id)).get();
+  if (!event) return c.json({ error: "Not found" }, 404);
+  return c.json(event);
+});
+
+api.post("/events", async (c) => {
+  const db = drizzle(c.env.DB);
+  const body = await c.req.json<{
+    type: string;
+    name: string;
+    config?: string;
+    status?: string;
+  }>();
+
+  if (!body.type || !body.name) {
+    return c.json({ error: "type and name are required" }, 400);
+  }
+  if (body.type !== "meetup" && body.type !== "hackathon") {
+    return c.json({ error: "type must be 'meetup' or 'hackathon'" }, 400);
+  }
+  if (body.status && body.status !== "active" && body.status !== "archived") {
+    return c.json({ error: "status must be 'active' or 'archived'" }, 400);
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const event = {
+    id,
+    type: body.type,
+    name: body.name,
+    config: body.config ?? "{}",
+    status: body.status ?? "active",
+    createdAt: now,
+  };
+  await db.insert(events).values(event);
+  return c.json(event, 201);
+});
+
+api.put("/events/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    name?: string;
+    config?: string;
+    status?: string;
+  }>();
+
+  const existing = await db.select().from(events).where(eq(events.id, id)).get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  if (body.status && body.status !== "active" && body.status !== "archived") {
+    return c.json({ error: "status must be 'active' or 'archived'" }, 400);
+  }
+
+  const updates: Partial<typeof existing> = {};
+  if (body.name !== undefined) updates.name = body.name;
+  if (body.config !== undefined) updates.config = body.config;
+  if (body.status !== undefined) updates.status = body.status;
+
+  if (Object.keys(updates).length === 0) {
+    return c.json(existing);
+  }
+
+  await db.update(events).set(updates).where(eq(events.id, id));
+  const updated = await db.select().from(events).where(eq(events.id, id)).get();
+  return c.json(updated);
 });
 
 // --- Members ---

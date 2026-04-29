@@ -1,5 +1,6 @@
 import type {
   AutoSchedule,
+  Event,
   Meeting,
   MeetingDetail,
   MeetingMember,
@@ -167,4 +168,32 @@ export const api = {
     ),
   getSlackChannels: () =>
     request<{ id: string; name: string }[]>(`/slack/channels`),
+
+  // Events (ADR-0001)
+  events: {
+    list: () => request<Event[]>("/events"),
+    get: (id: string) => request<Event>(`/events/${id}`),
+    create: (data: {
+      type: "meetup" | "hackathon";
+      name: string;
+      config?: string;
+      status?: "active" | "archived";
+    }) =>
+      request<Event>("/events", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        name?: string;
+        config?: string;
+        status?: "active" | "archived";
+      },
+    ) =>
+      request<Event>(`/events/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+  },
 };

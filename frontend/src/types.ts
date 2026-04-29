@@ -1,3 +1,12 @@
+export type Event = {
+  id: string;
+  type: "meetup" | "hackathon";
+  name: string;
+  config: string; // JSON文字列
+  status: "active" | "archived";
+  createdAt: string;
+};
+
 export type Meeting = {
   id: string;
   name: string;
