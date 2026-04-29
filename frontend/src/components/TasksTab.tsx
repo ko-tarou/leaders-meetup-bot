@@ -1,50 +1,54 @@
 import { useEffect, useState } from "react";
-import type { Task, TaskAssignee } from "../types";
+import type { Task, TaskAssignee, TaskFilters } from "../types";
 import { api } from "../api";
 
 // ADR-0002: hackathon の tasks タブ用のタスク一覧（読み取り専用）。
-// フィルタ UI は PR2、作成/編集モーダルは PR3 で対応する。
+// PR2 で フィルタ UI を追加。作成/編集モーダルは PR3 で対応する。
 
 type TaskWithAssignees = Task & { assignees: TaskAssignee[] };
 
-const STATUS_LABEL: Record<string, string> = {
-  todo: "未着手",
-  doing: "進行中",
-  done: "完了",
-};
+type FilterState = TaskFilters & { showDone: boolean; parentOnly: boolean };
 
-const STATUS_COLOR: Record<string, string> = {
-  todo: "#6b7280",
-  doing: "#2563eb",
-  done: "#16a34a",
-};
+const INITIAL_FILTERS: FilterState = { showDone: false, parentOnly: false };
 
-const PRIORITY_LABEL: Record<string, string> = {
-  low: "低",
-  mid: "中",
-  high: "高",
-};
+const STATUS_LABEL: Record<string, string> = { todo: "未着手", doing: "進行中", done: "完了" };
+const STATUS_COLOR: Record<string, string> = { todo: "#6b7280", doing: "#2563eb", done: "#16a34a" };
+const PRIORITY_LABEL: Record<string, string> = { low: "低", mid: "中", high: "高" };
+const PRIORITY_EMOJI: Record<string, string> = { low: "🟢", mid: "🟡", high: "🔴" };
 
-const PRIORITY_EMOJI: Record<string, string> = {
-  low: "🟢",
-  mid: "🟡",
-  high: "🔴",
-};
+// 担当者ID 入力など連続変化する値の再 fetch を抑制するための簡易デバウンス。
+function useDebounced<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 export function TasksTab({ eventId }: { eventId: string }) {
   const [tasks, setTasks] = useState<TaskWithAssignees[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
+  const debouncedFilters = useDebounced(filters, 300);
+  const update = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-
     (async () => {
       try {
-        const taskList = await api.tasks.list(eventId);
-        // 各タスクの担当者を並列取得（個別失敗は空配列にフォールバック）
+        const apiFilters: TaskFilters = {
+          status: debouncedFilters.status,
+          priority: debouncedFilters.priority,
+          assigneeSlackId: debouncedFilters.assigneeSlackId,
+        };
+        // 親タスクのみ表示は backend 側で parentTaskId="null" で絞り込む
+        if (debouncedFilters.parentOnly) apiFilters.parentTaskId = "null";
+        const taskList = await api.tasks.list(eventId, apiFilters);
         const withAssignees = await Promise.all(
           taskList.map(async (t) => ({
             ...t,
@@ -62,37 +66,135 @@ export function TasksTab({ eventId }: { eventId: string }) {
         }
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [
+    eventId,
+    debouncedFilters.status,
+    debouncedFilters.priority,
+    debouncedFilters.assigneeSlackId,
+    debouncedFilters.parentOnly,
+  ]);
 
-  if (loading) return <div style={{ padding: "1rem" }}>読み込み中...</div>;
-  if (error) {
-    return <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {error}</div>;
-  }
-  if (tasks.length === 0) {
-    return (
-      <div style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}>
-        タスクがまだありません。Slack で <code>/devhub task add</code> で作成してください。
-      </div>
-    );
-  }
-
-  // 親 / 子 を分離
-  const parents = tasks.filter((t) => t.parentTaskId === null);
-  const childrenByParent = new Map<string, TaskWithAssignees[]>();
-  for (const t of tasks) {
-    if (t.parentTaskId) {
-      if (!childrenByParent.has(t.parentTaskId))
-        childrenByParent.set(t.parentTaskId, []);
-      childrenByParent.get(t.parentTaskId)!.push(t);
-    }
-  }
+  // 完了タスク非表示は client-side フィルタ（再 fetch 不要）
+  const displayTasks = filters.showDone ? tasks : tasks.filter((t) => t.status !== "done");
+  const labelStyle = { display: "flex", alignItems: "center", gap: "0.25rem" } as const;
 
   return (
     <div style={{ padding: "1rem" }}>
+      <div
+        style={{
+          padding: "0.75rem",
+          background: "#f9fafb",
+          borderRadius: "0.375rem",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.75rem",
+          alignItems: "center",
+          marginBottom: "1rem",
+        }}
+      >
+        <label style={labelStyle}>
+          ステータス:
+          <select
+            value={filters.status ?? ""}
+            onChange={(e) => update("status", (e.target.value || undefined) as TaskFilters["status"])}
+          >
+            <option value="">全て</option>
+            <option value="todo">未着手</option>
+            <option value="doing">進行中</option>
+            <option value="done">完了</option>
+          </select>
+        </label>
+        <label style={labelStyle}>
+          優先度:
+          <select
+            value={filters.priority ?? ""}
+            onChange={(e) => update("priority", (e.target.value || undefined) as TaskFilters["priority"])}
+          >
+            <option value="">全て</option>
+            <option value="low">低</option>
+            <option value="mid">中</option>
+            <option value="high">高</option>
+          </select>
+        </label>
+        <label style={labelStyle}>
+          担当者ID:
+          <input
+            type="text"
+            placeholder="U..."
+            value={filters.assigneeSlackId ?? ""}
+            onChange={(e) => update("assigneeSlackId", e.target.value || undefined)}
+            style={{ width: "8rem" }}
+          />
+        </label>
+        <label style={labelStyle}>
+          <input
+            type="checkbox"
+            checked={filters.parentOnly}
+            onChange={(e) => update("parentOnly", e.target.checked)}
+          />
+          親タスクのみ
+        </label>
+        <label style={labelStyle}>
+          <input
+            type="checkbox"
+            checked={filters.showDone}
+            onChange={(e) => update("showDone", e.target.checked)}
+          />
+          完了を表示
+        </label>
+        <button type="button" onClick={() => setFilters(INITIAL_FILTERS)} style={{ marginLeft: "auto" }}>
+          クリア
+        </button>
+      </div>
+      <TaskList tasks={displayTasks} loading={loading} error={error} parentOnly={filters.parentOnly} />
+    </div>
+  );
+}
+
+function TaskList({
+  tasks,
+  loading,
+  error,
+  parentOnly,
+}: {
+  tasks: TaskWithAssignees[];
+  loading: boolean;
+  error: string | null;
+  parentOnly: boolean;
+}) {
+  if (loading) return <div>読み込み中...</div>;
+  if (error) return <div style={{ color: "#dc2626" }}>エラー: {error}</div>;
+  if (tasks.length === 0) {
+    return (
+      <div style={{ padding: "1.5rem", textAlign: "center", color: "#6b7280" }}>
+        該当するタスクがありません。
+      </div>
+    );
+  }
+  // 親のみ取得時はフラット表示
+  if (parentOnly) {
+    return (
+      <div>
+        <h2 style={{ marginTop: 0 }}>タスク一覧 ({tasks.length}件)</h2>
+        {tasks.map((t) => <TaskItem key={t.id} task={t} />)}
+      </div>
+    );
+  }
+  // 親 / 子 を分離（親が結果に居ない子はトップレベル扱い）
+  const taskIds = new Set(tasks.map((t) => t.id));
+  const parents = tasks.filter((t) => t.parentTaskId === null || !taskIds.has(t.parentTaskId));
+  const childrenByParent = new Map<string, TaskWithAssignees[]>();
+  for (const t of tasks) {
+    if (t.parentTaskId && taskIds.has(t.parentTaskId)) {
+      if (!childrenByParent.has(t.parentTaskId)) childrenByParent.set(t.parentTaskId, []);
+      childrenByParent.get(t.parentTaskId)!.push(t);
+    }
+  }
+  return (
+    <div>
       <h2 style={{ marginTop: 0 }}>タスク一覧 ({tasks.length}件)</h2>
       {parents.map((parent) => (
         <div key={parent.id}>
@@ -108,13 +210,7 @@ export function TasksTab({ eventId }: { eventId: string }) {
   );
 }
 
-function TaskItem({
-  task,
-  isSubtask,
-}: {
-  task: TaskWithAssignees;
-  isSubtask?: boolean;
-}) {
+function TaskItem({ task, isSubtask }: { task: TaskWithAssignees; isSubtask?: boolean }) {
   const dueLabel = task.dueAt ? formatDueAt(task.dueAt) : "期限なし";
   return (
     <div
@@ -144,9 +240,7 @@ function TaskItem({
         </span>
       </div>
       {task.description && (
-        <div style={{ marginTop: "0.5rem", color: "#4b5563", fontSize: "0.875rem" }}>
-          {task.description}
-        </div>
+        <div style={{ marginTop: "0.5rem", color: "#4b5563", fontSize: "0.875rem" }}>{task.description}</div>
       )}
       <div
         style={{
@@ -161,9 +255,7 @@ function TaskItem({
         <span>📅 {dueLabel}</span>
         <span>優先度: {PRIORITY_LABEL[task.priority]}</span>
         {task.assignees.length > 0 && (
-          <span>
-            👥 {task.assignees.map((a) => `<@${a.slackUserId}>`).join(", ")}
-          </span>
+          <span>👥 {task.assignees.map((a) => `<@${a.slackUserId}>`).join(", ")}</span>
         )}
       </div>
     </div>
