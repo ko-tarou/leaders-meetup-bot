@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { Task, TaskAssignee, TaskFilters } from "../types";
 import { api } from "../api";
+import { TaskFormModal } from "./TaskFormModal";
 
-// ADR-0002: hackathon の tasks タブ用のタスク一覧（読み取り専用）。
-// PR2 で フィルタ UI を追加。作成/編集モーダルは PR3 で対応する。
+// ADR-0002: hackathon の tasks タブ用のタスク一覧。
+// PR2 で フィルタ UI を追加。PR3 で作成/編集/削除モーダルを統合。
 
 type TaskWithAssignees = Task & { assignees: TaskAssignee[] };
 
@@ -32,6 +33,9 @@ export function TasksTab({ eventId }: { eventId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const debouncedFilters = useDebounced(filters, 300);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<TaskWithAssignees | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const update = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -75,6 +79,7 @@ export function TasksTab({ eventId }: { eventId: string }) {
     debouncedFilters.priority,
     debouncedFilters.assigneeSlackId,
     debouncedFilters.parentOnly,
+    refreshKey,
   ]);
 
   // 完了タスク非表示は client-side フィルタ（再 fetch 不要）
@@ -148,8 +153,38 @@ export function TasksTab({ eventId }: { eventId: string }) {
         <button type="button" onClick={() => setFilters(INITIAL_FILTERS)} style={{ marginLeft: "auto" }}>
           クリア
         </button>
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          style={{ background: "#2563eb", color: "white" }}
+        >
+          + 新規タスク
+        </button>
       </div>
-      <TaskList tasks={displayTasks} loading={loading} error={error} parentOnly={filters.parentOnly} />
+      <TaskList
+        tasks={displayTasks}
+        loading={loading}
+        error={error}
+        parentOnly={filters.parentOnly}
+        onSelect={setEditing}
+      />
+      {showCreate && (
+        <TaskFormModal
+          eventId={eventId}
+          parentCandidates={tasks.filter((t) => t.parentTaskId === null)}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+      {editing && (
+        <TaskFormModal
+          eventId={eventId}
+          task={editing}
+          parentCandidates={tasks.filter((t) => t.parentTaskId === null && t.id !== editing.id)}
+          onClose={() => setEditing(null)}
+          onSaved={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
     </div>
   );
 }
@@ -159,11 +194,13 @@ function TaskList({
   loading,
   error,
   parentOnly,
+  onSelect,
 }: {
   tasks: TaskWithAssignees[];
   loading: boolean;
   error: string | null;
   parentOnly: boolean;
+  onSelect: (task: TaskWithAssignees) => void;
 }) {
   if (loading) return <div>読み込み中...</div>;
   if (error) return <div style={{ color: "#dc2626" }}>エラー: {error}</div>;
@@ -179,7 +216,7 @@ function TaskList({
     return (
       <div>
         <h2 style={{ marginTop: 0 }}>タスク一覧 ({tasks.length}件)</h2>
-        {tasks.map((t) => <TaskItem key={t.id} task={t} />)}
+        {tasks.map((t) => <TaskItem key={t.id} task={t} onClick={() => onSelect(t)} />)}
       </div>
     );
   }
@@ -198,10 +235,10 @@ function TaskList({
       <h2 style={{ marginTop: 0 }}>タスク一覧 ({tasks.length}件)</h2>
       {parents.map((parent) => (
         <div key={parent.id}>
-          <TaskItem task={parent} />
+          <TaskItem task={parent} onClick={() => onSelect(parent)} />
           {(childrenByParent.get(parent.id) || []).map((child) => (
             <div key={child.id} style={{ marginLeft: "2rem" }}>
-              <TaskItem task={child} isSubtask />
+              <TaskItem task={child} isSubtask onClick={() => onSelect(child)} />
             </div>
           ))}
         </div>
@@ -210,16 +247,34 @@ function TaskList({
   );
 }
 
-function TaskItem({ task, isSubtask }: { task: TaskWithAssignees; isSubtask?: boolean }) {
+function TaskItem({
+  task,
+  isSubtask,
+  onClick,
+}: {
+  task: TaskWithAssignees;
+  isSubtask?: boolean;
+  onClick?: () => void;
+}) {
   const dueLabel = task.dueAt ? formatDueAt(task.dueAt) : "期限なし";
   return (
     <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       style={{
         border: "1px solid #e5e7eb",
         borderRadius: "0.375rem",
         padding: "0.75rem",
         margin: "0.5rem 0",
         background: isSubtask ? "#f9fafb" : "white",
+        cursor: onClick ? "pointer" : "default",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
