@@ -19,6 +19,9 @@ export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   channelId: text("channel_id").notNull(),
+  // ADR-0001/0005: events 配下に従属。NULL許容のままアプリ層 (Zod) で必須化する。
+  // .notNull() を付けると drizzle-kit が物理 NOT NULL を生成してテーブル再作成リスク。
+  eventId: text("event_id").references(() => events.id),
   createdAt: text("created_at").notNull(),
 });
 
