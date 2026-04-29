@@ -30,6 +30,13 @@ export class SlackClient {
     return this.callApi("chat.update", { channel, ts, text, blocks });
   }
 
+  // ADR-0006: sticky task board が「常に最下部」を維持するため、既存メッセージを
+  // 削除してから新規 post する。既に削除済み (message_not_found) でも fail-soft
+  // で続行できるよう、呼び出し側でエラーを握り潰せるよう SlackResponse をそのまま返す。
+  async deleteMessage(channel: string, ts: string): Promise<SlackResponse> {
+    return this.callApi("chat.delete", { channel, ts });
+  }
+
   async scheduleMessage(
     channel: string,
     postAt: number,
