@@ -34,7 +34,7 @@ export function App() {
             }}
           >
             <Link to="/" style={titleLinkStyle}>
-              <h1 style={{ margin: 0, fontSize: 24 }}>Leaders Meetup Bot</h1>
+              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
             </Link>
             <EventSwitcher />
           </div>
