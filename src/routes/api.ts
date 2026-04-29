@@ -8,6 +8,7 @@ import { processAutoCycles } from "../services/auto-cycle";
 import { getJstNow } from "../services/time-utils";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, closePoll } from "../services/poll";
+import { DEFAULT_MEETUP_EVENT_ID } from "../constants";
 import {
   events,
   meetings,
@@ -59,7 +60,11 @@ api.post("/trigger-cron", async (c) => {
 
 api.get("/meetings", async (c) => {
   const db = drizzle(c.env.DB);
-  const result = await db.select().from(meetings).all();
+  const eventIdQuery = c.req.query("eventId");
+  // eventId 未指定時は全件返す（既存 frontend 互換）
+  const result = eventIdQuery
+    ? await db.select().from(meetings).where(eq(meetings.eventId, eventIdQuery)).all()
+    : await db.select().from(meetings).all();
   return c.json(result);
 });
 
@@ -206,15 +211,25 @@ api.get("/meetings/:id/status", async (c) => {
 });
 
 api.post("/meetings", async (c) => {
-  const body = await c.req.json<{ name: string; channelId: string }>();
+  const body = await c.req.json<{ name: string; channelId: string; eventId?: string }>();
   if (!body.name || !body.channelId) {
     return c.json({ error: "name and channelId are required" }, 400);
   }
   const db = drizzle(c.env.DB);
+
+  // eventId 未指定時は default event にフォールバック（既存運用の後方互換）
+  const eventId = body.eventId ?? DEFAULT_MEETUP_EVENT_ID;
+  const event = await db.select().from(events).where(eq(events.id, eventId)).get();
+  if (!event) {
+    return c.json({ error: `event not found: ${eventId}` }, 400);
+  }
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await db.insert(meetings).values({ id, name: body.name, channelId: body.channelId, createdAt });
-  return c.json({ id, name: body.name, channelId: body.channelId, createdAt }, 201);
+  await db
+    .insert(meetings)
+    .values({ id, name: body.name, channelId: body.channelId, eventId, createdAt });
+  return c.json({ id, name: body.name, channelId: body.channelId, eventId, createdAt }, 201);
 });
 
 api.put("/meetings/:id", async (c) => {
