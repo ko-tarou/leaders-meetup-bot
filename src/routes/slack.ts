@@ -5,7 +5,10 @@ import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
 import { createReminderJob } from "../services/scheduler";
-import { handleMessageEvent } from "../services/auto-respond";
+import {
+  handleMessageEvent,
+  maybeTriggerStickyRepost,
+} from "../services/auto-respond";
 import { meetings, tasks, taskAssignees } from "../db/schema";
 import {
   buildTaskAddModalView,
@@ -148,6 +151,9 @@ slack.post("/events", async (c) => {
         console.error("Failed to handle message event:", e);
       }),
     );
+    // ADR-0006 sticky board repost トリガー（10秒デバウンス）。
+    // handleMessageEvent とは独立して走らせる（auto-respond の成否に関係なく動く）。
+    maybeTriggerStickyRepost(c.env, c.executionCtx, body.event);
   }
 
   return c.json({ ok: true });
