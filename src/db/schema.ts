@@ -73,6 +73,9 @@ export const meetings = sqliteTable("meetings", {
   // ADR-0001/0005: events 配下に従属。NULL許容のままアプリ層 (Zod) で必須化する。
   // .notNull() を付けると drizzle-kit が物理 NOT NULL を生成してテーブル再作成リスク。
   eventId: text("event_id").references(() => events.id),
+  // ADR-0006: sticky bot の現在のメッセージ timestamp（"1234567890.123456" 形式）
+  // NULL なら sticky bot 未起動。set されていれば該当チャンネルで sticky board 有効。
+  taskBoardTs: text("task_board_ts"),
   createdAt: text("created_at").notNull(),
 });
 
