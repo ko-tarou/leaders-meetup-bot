@@ -12,6 +12,7 @@ import type {
   Task,
   TaskAssignee,
   TaskFilters,
+  Workspace,
 } from "./types";
 
 const BASE = "/api";
@@ -264,5 +265,30 @@ export const api = {
           { method: "DELETE" },
         ),
     },
+  },
+
+  // Slack Workspaces (ADR-0006)
+  workspaces: {
+    list: () => request<Workspace[]>("/workspaces"),
+    get: (id: string) => request<Workspace>(`/workspaces/${id}`),
+    create: (data: {
+      name?: string;
+      botToken: string;
+      signingSecret: string;
+    }) =>
+      request<Workspace>("/workspaces", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: { name?: string; botToken?: string; signingSecret?: string },
+    ) =>
+      request<Workspace>(`/workspaces/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/workspaces/${id}`, { method: "DELETE" }),
   },
 };

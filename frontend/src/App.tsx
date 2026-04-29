@@ -5,6 +5,7 @@ import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
 import { HomePage } from "./pages/HomePage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
+import { WorkspacesPage } from "./pages/WorkspacesPage";
 
 export function App() {
   return (
@@ -36,7 +37,19 @@ export function App() {
             <Link to="/" style={titleLinkStyle}>
               <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
             </Link>
-            <EventSwitcher />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <EventSwitcher />
+              <Link to="/workspaces" style={workspacesLinkStyle}>
+                Workspace管理
+              </Link>
+            </div>
           </div>
           <BackLink />
         </header>
@@ -45,6 +58,7 @@ export function App() {
           <Route path="/events/:eventId" element={<EventIndexRedirect />} />
           <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
           <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
         </Routes>
       </div>
     </EventProvider>
@@ -75,4 +89,15 @@ const linkStyle: React.CSSProperties = {
   marginTop: 8,
   display: "inline-block",
   textDecoration: "none",
+};
+
+const workspacesLinkStyle: React.CSSProperties = {
+  color: "#4A90D9",
+  fontSize: 13,
+  textDecoration: "none",
+  padding: "6px 10px",
+  border: "1px solid #ddd",
+  borderRadius: 4,
+  background: "#fff",
+  whiteSpace: "nowrap",
 };
