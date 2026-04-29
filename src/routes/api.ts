@@ -22,9 +22,14 @@ import {
   autoSchedules,
   tasks,
   taskAssignees,
+  workspaces,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
-import { ensureDefaultWorkspace } from "../services/workspace-bootstrap";
+import {
+  DEFAULT_WORKSPACE_ID,
+  ensureDefaultWorkspace,
+} from "../services/workspace-bootstrap";
+import { encryptToken } from "../services/crypto";
 import {
   getUserName,
   getChannelName,
@@ -361,6 +366,200 @@ api.put("/events/:id", async (c) => {
   await db.update(events).set(updates).where(eq(events.id, id));
   const updated = await db.select().from(events).where(eq(events.id, id)).get();
   return c.json(updated);
+});
+
+// --- Workspaces CRUD (ADR-0006) ---
+// bot_token / signing_secret は機微情報のため、レスポンスからは必ず除外する。
+// toWorkspaceMeta を経由しないレスポンスは禁止。
+
+type WorkspaceMeta = {
+  id: string;
+  name: string;
+  slackTeamId: string;
+  createdAt: string;
+};
+
+function toWorkspaceMeta(ws: typeof workspaces.$inferSelect): WorkspaceMeta {
+  return {
+    id: ws.id,
+    name: ws.name,
+    slackTeamId: ws.slackTeamId,
+    createdAt: ws.createdAt,
+  };
+}
+
+api.get("/workspaces", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db.select().from(workspaces).all();
+  rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return c.json(rows.map(toWorkspaceMeta));
+});
+
+api.get("/workspaces/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const ws = await db.select().from(workspaces).where(eq(workspaces.id, id)).get();
+  if (!ws) return c.json({ error: "Not found" }, 404);
+  return c.json(toWorkspaceMeta(ws));
+});
+
+api.post("/workspaces", async (c) => {
+  const db = drizzle(c.env.DB);
+  const body = await c.req.json<{
+    name?: string;
+    botToken: string;
+    signingSecret: string;
+  }>();
+
+  if (!body.botToken || !body.signingSecret) {
+    return c.json({ error: "botToken and signingSecret are required" }, 400);
+  }
+
+  // Slack に問い合わせて team_id を取得（同時に token の有効性検証）
+  const client = new SlackClient(body.botToken, body.signingSecret);
+  const auth = await client.authTest();
+  if (!auth.ok || !auth.team_id) {
+    return c.json(
+      { error: `Slack auth.test failed: ${JSON.stringify(auth)}` },
+      400,
+    );
+  }
+
+  // 重複チェック（slack_team_id UNIQUE）
+  const existing = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.slackTeamId, auth.team_id))
+    .get();
+  if (existing) {
+    return c.json(
+      { error: `workspace already registered for team_id: ${auth.team_id}` },
+      409,
+    );
+  }
+
+  const encryptedBotToken = await encryptToken(
+    body.botToken,
+    c.env.WORKSPACE_TOKEN_KEY,
+  );
+  const encryptedSigningSecret = await encryptToken(
+    body.signingSecret,
+    c.env.WORKSPACE_TOKEN_KEY,
+  );
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const ws = {
+    id,
+    name: body.name || auth.team || "Unnamed Workspace",
+    slackTeamId: auth.team_id,
+    botToken: encryptedBotToken,
+    signingSecret: encryptedSigningSecret,
+    createdAt: now,
+  };
+  await db.insert(workspaces).values(ws);
+  return c.json(toWorkspaceMeta(ws), 201);
+});
+
+api.put("/workspaces/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    name?: string;
+    botToken?: string;
+    signingSecret?: string;
+  }>();
+
+  const existing = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, id))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  const updates: Partial<typeof existing> = {};
+  if (body.name !== undefined) updates.name = body.name;
+
+  // token 更新は両方同時のみ受け付け（片方だけ更新だと整合性が壊れる）
+  if (body.botToken && body.signingSecret) {
+    // 検証: Slack に問い合わせて team_id が一致するか確認
+    const testClient = new SlackClient(body.botToken, body.signingSecret);
+    const auth = await testClient.authTest();
+    if (!auth.ok) {
+      return c.json(
+        { error: `Slack auth.test failed: ${JSON.stringify(auth)}` },
+        400,
+      );
+    }
+    if (auth.team_id !== existing.slackTeamId) {
+      return c.json(
+        {
+          error: `team_id mismatch: existing=${existing.slackTeamId}, new=${auth.team_id}`,
+        },
+        400,
+      );
+    }
+    updates.botToken = await encryptToken(
+      body.botToken,
+      c.env.WORKSPACE_TOKEN_KEY,
+    );
+    updates.signingSecret = await encryptToken(
+      body.signingSecret,
+      c.env.WORKSPACE_TOKEN_KEY,
+    );
+  } else if (body.botToken || body.signingSecret) {
+    return c.json(
+      { error: "botToken and signingSecret must be updated together" },
+      400,
+    );
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return c.json(toWorkspaceMeta(existing));
+  }
+
+  await db.update(workspaces).set(updates).where(eq(workspaces.id, id));
+  const updated = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, id))
+    .get();
+  return c.json(toWorkspaceMeta(updated!));
+});
+
+api.delete("/workspaces/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  // default workspace 保護
+  if (id === DEFAULT_WORKSPACE_ID) {
+    return c.json({ error: "cannot delete default workspace" }, 400);
+  }
+
+  const existing = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, id))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  // 紐付く meetings がある場合は拒否
+  const linkedMeetings = await db
+    .select()
+    .from(meetings)
+    .where(eq(meetings.workspaceId, id))
+    .all();
+  if (linkedMeetings.length > 0) {
+    return c.json(
+      {
+        error: `cannot delete workspace with ${linkedMeetings.length} linked meeting(s); reassign or delete meetings first`,
+      },
+      400,
+    );
+  }
+
+  await db.delete(workspaces).where(eq(workspaces.id, id));
+  return c.json({ ok: true });
 });
 
 // --- Tasks (ADR-0002) ---
