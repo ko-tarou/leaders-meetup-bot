@@ -11,6 +11,8 @@ import {
   buildTaskAddModalView,
   jstDateTimeToUtcIso,
 } from "../services/devhub-task-modal";
+import { buildTaskListBlocks } from "../services/devhub-task-list";
+import { scheduleTaskReminders } from "../services/devhub-task-reminder";
 
 type Variables = {
   rawBody: string;
@@ -163,6 +165,63 @@ slack.post("/commands", async (c) => {
 
   if (command === "/devhub") {
     const trimmed = text.trim();
+
+    // /devhub task list [all] — 自分担当の未完了タスク一覧（"all" で全件）
+    if (trimmed === "task list" || trimmed.startsWith("task list ")) {
+      const userId = params.get("user_id") || "";
+      const d1 = drizzle(c.env.DB);
+
+      const meeting = await d1
+        .select()
+        .from(meetings)
+        .where(eq(meetings.channelId, channelId))
+        .get();
+
+      if (!meeting || !meeting.eventId) {
+        return c.json({
+          response_type: "ephemeral",
+          text: "このチャンネルに紐付いたイベントがありません。",
+        });
+      }
+
+      const filterText = trimmed.replace(/^task list\s*/, "").trim();
+      const showAll = filterText === "all";
+
+      let userTaskIds: Set<string> | null = null;
+      if (!showAll) {
+        const userAssignees = await d1
+          .select()
+          .from(taskAssignees)
+          .where(eq(taskAssignees.slackUserId, userId))
+          .all();
+        userTaskIds = new Set(userAssignees.map((a) => a.taskId));
+      }
+
+      let taskList = await d1
+        .select()
+        .from(tasks)
+        .where(eq(tasks.eventId, meeting.eventId))
+        .all();
+
+      if (!showAll && userTaskIds) {
+        taskList = taskList.filter((t) => userTaskIds!.has(t.id));
+      }
+      taskList = taskList.filter((t) => t.status !== "done");
+      taskList.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+      if (taskList.length === 0) {
+        return c.json({
+          response_type: "ephemeral",
+          text: showAll
+            ? "未完了のタスクはありません。"
+            : "あなた担当の未完了タスクはありません。`/devhub task list all` で全件表示。",
+        });
+      }
+
+      const blocks = buildTaskListBlocks(taskList);
+      return c.json({ response_type: "ephemeral", blocks });
+    }
+
     const isTaskAdd =
       trimmed === "task" ||
       trimmed === "task add" ||
@@ -221,7 +280,7 @@ slack.post("/commands", async (c) => {
 
     return c.json({
       response_type: "ephemeral",
-      text: "使い方:\n`/devhub task add` - タスクを作成",
+      text: "使い方:\n`/devhub task add` - タスクを作成\n`/devhub task list` - 自分担当の未完了タスク一覧\n`/devhub task list all` - チャンネル内の全未完了タスク",
     });
   }
 
@@ -254,6 +313,52 @@ slack.post("/interactions", async (c) => {
       } catch (error) {
         console.error("Failed to handle vote:", error);
       }
+    }
+
+    // /devhub task list の「完了」ボタン: タスクを done に更新（ADR-0002）
+    if (action.action_id?.startsWith("devhub_task_done_")) {
+      const taskId = action.value;
+      const actorId = payload.user?.id;
+      if (!taskId) return c.json({ ok: true });
+
+      // 3秒制限内に応答するため waitUntil でバックグラウンド処理
+      c.executionCtx.waitUntil(
+        (async () => {
+          const d1 = drizzle(c.env.DB);
+          const client = new SlackClient(
+            c.env.SLACK_BOT_TOKEN,
+            c.env.SLACK_SIGNING_SECRET,
+          );
+          try {
+            const now = new Date().toISOString();
+            await d1
+              .update(tasks)
+              .set({ status: "done", updatedAt: now })
+              .where(eq(tasks.id, taskId));
+
+            // タスクの reminder ジョブも pending のまま残る意味が無いので削除（任意・冪等）
+            await scheduleTaskReminders(c.env.DB, taskId, null, "", []);
+
+            if (actorId) {
+              await client.postMessage(actorId, "✅ タスクを完了にしました");
+            }
+          } catch (e) {
+            console.error("Failed to mark devhub task done:", e);
+            if (actorId) {
+              try {
+                await client.postMessage(
+                  actorId,
+                  "⚠️ タスクの完了処理に失敗しました。時間をおいて再度お試しください。",
+                );
+              } catch (notifyErr) {
+                console.error("Failed to notify task done failure:", notifyErr);
+              }
+            }
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
     }
   }
 
@@ -341,6 +446,25 @@ slack.post("/interactions", async (c) => {
                 slackUserId,
                 assignedAt: now,
               });
+            }
+
+            // dueAt があり担当者が居るならリマインドジョブを登録（前日/当日 09:00 JST）
+            if (dueAt && assigneeIds.length > 0) {
+              try {
+                await scheduleTaskReminders(
+                  c.env.DB,
+                  taskId,
+                  dueAt,
+                  title,
+                  assigneeIds,
+                );
+              } catch (remErr) {
+                // リマインド登録の失敗はタスク作成自体の成否を左右しない
+                console.error(
+                  "Failed to schedule devhub task reminders:",
+                  remErr,
+                );
+              }
             }
 
             const successText = `✅ タスクを作成しました: ${title}`;
