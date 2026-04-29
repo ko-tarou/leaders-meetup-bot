@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { MeetingList } from "../components/MeetingList";
+import { TasksTab } from "../components/TasksTab";
 import {
   DEFAULT_TAB_BY_TYPE,
   TABS_BY_TYPE,
@@ -80,6 +81,8 @@ export function EventTabPage() {
 
       {activeTab === "schedule" ? (
         <MeetingList onSelect={(id) => navigate(`/meetings/${id}`)} />
+      ) : activeTab === "tasks" && event.type === "hackathon" ? (
+        <TasksTab eventId={event.id} />
       ) : (
         <p style={{ color: "#999" }}>{placeholders[activeTab]}</p>
       )}
