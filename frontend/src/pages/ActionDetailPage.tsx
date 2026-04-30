@@ -7,13 +7,29 @@ import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
-import { TaskManagementSettings } from "../components/TaskManagementSettings";
+import { ChannelManagementSection } from "../components/ChannelManagementSection";
 
 // Sprint 13 PR1: アクション専用ページ。
-// /events/:eventId/actions/:actionType でマウントされ、メイン/設定 サブタブを持つ。
+// /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
+// Sprint 13 PR3: task_management のみサブタブを 3つに拡張
+//   （メイン / チャンネル管理 / その他設定）。それ以外は従来通り 2タブ。
 // パンくずリスト + 一覧に戻るリンクで現在地と帰還動線を明確化。
 
-type SubTab = "main" | "settings";
+type SubTabDef = { id: string; label: string };
+
+function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
+  if (actionType === "task_management") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "channels", label: "チャンネル管理" },
+      { id: "settings", label: "その他設定" },
+    ];
+  }
+  return [
+    { id: "main", label: "メイン" },
+    { id: "settings", label: "設定" },
+  ];
+}
 
 export function ActionDetailPage() {
   const { eventId, actionType } = useParams<{
@@ -24,7 +40,7 @@ export function ActionDetailPage() {
   const { events } = useEvents();
   const [action, setAction] = useState<EventAction | null>(null);
   const [loading, setLoading] = useState(true);
-  const [subTab, setSubTab] = useState<SubTab>("main");
+  const [subTab, setSubTab] = useState<string>("main");
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -64,6 +80,7 @@ export function ActionDetailPage() {
 
   const event = events.find((e) => e.id === eventId);
   const meta = ACTION_META[actionType as EventActionType];
+  const subTabs = getSubTabs(actionType as EventActionType);
 
   const handleToggle = async () => {
     try {
@@ -171,18 +188,15 @@ export function ActionDetailPage() {
           marginBottom: "1rem",
         }}
       >
-        <button
-          onClick={() => setSubTab("main")}
-          style={subTabBtn(subTab === "main")}
-        >
-          メイン
-        </button>
-        <button
-          onClick={() => setSubTab("settings")}
-          style={subTabBtn(subTab === "settings")}
-        >
-          設定
-        </button>
+        {subTabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSubTab(t.id)}
+            style={subTabBtn(subTab === t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {subTab === "main" && (
@@ -190,6 +204,9 @@ export function ActionDetailPage() {
           eventId={eventId}
           actionType={actionType as EventActionType}
         />
+      )}
+      {subTab === "channels" && actionType === "task_management" && (
+        <ChannelManagementSection eventId={eventId} />
       )}
       {subTab === "settings" && (
         <div>
@@ -273,7 +290,10 @@ function ActionSettingsContent({
         />
       );
     case "task_management":
-      return <TaskManagementSettings eventId={eventId} />;
+      // PR3: チャンネル管理は専用サブタブへ移動。ここは将来の汎用設定枠。
+      return (
+        <PlaceholderContent label="将来の追加設定がここに表示されます。チャンネル管理は「チャンネル管理」タブから行ってください。" />
+      );
     case "pr_review_list":
     case "schedule_polling":
       return (
