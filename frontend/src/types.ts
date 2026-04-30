@@ -28,9 +28,13 @@ export type Meeting = {
   id: string;
   name: string;
   channelId: string;
+  // ADR-0006: どの workspace の channel_id か。
+  workspaceId?: string | null;
   // ADR-0001: events 配下に従属。PR2 のマイグレーションで全件 default に
   // バックフィル済み。NULL 許容のままアプリ層で必須化していく。
   eventId?: string | null;
+  // ADR-0006: sticky bot の現在のメッセージ timestamp。NULL なら無効。
+  taskBoardTs?: string | null;
   createdAt: string;
 };
 

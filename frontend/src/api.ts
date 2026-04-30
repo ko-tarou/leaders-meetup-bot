@@ -55,6 +55,18 @@ export const api = {
   deleteMeeting: (id: string) =>
     request<{ ok: boolean }>(`/meetings/${id}`, { method: "DELETE" }),
 
+  // ADR-0006: sticky task board の有効化/無効化
+  enableTaskBoard: (meetingId: string) =>
+    request<{ ok: boolean; ts?: string; error?: string }>(
+      `/meetings/${meetingId}/task-board`,
+      { method: "POST" },
+    ),
+  disableTaskBoard: (meetingId: string) =>
+    request<{ ok: boolean; error?: string }>(
+      `/meetings/${meetingId}/task-board`,
+      { method: "DELETE" },
+    ),
+
   getMembers: (meetingId: string) =>
     request<MeetingMember[]>(`/meetings/${meetingId}/members`),
   addMember: (meetingId: string, slackUserId: string) =>
