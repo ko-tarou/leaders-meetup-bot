@@ -495,8 +495,9 @@ api.post("/events", async (c) => {
   if (!body.type || !body.name) {
     return c.json({ error: "type and name are required" }, 400);
   }
-  if (body.type !== "meetup" && body.type !== "hackathon") {
-    return c.json({ error: "type must be 'meetup' or 'hackathon'" }, 400);
+  const VALID_EVENT_TYPES = ["meetup", "hackathon", "project"];
+  if (!VALID_EVENT_TYPES.includes(body.type)) {
+    return c.json({ error: `type must be one of: ${VALID_EVENT_TYPES.join(", ")}` }, 400);
   }
   if (body.status && body.status !== "active" && body.status !== "archived") {
     return c.json({ error: "status must be 'active' or 'archived'" }, 400);
