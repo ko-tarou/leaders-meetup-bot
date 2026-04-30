@@ -1,39 +1,65 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
+import { api } from "../api";
+import type { EventAction } from "../types";
+import {
+  buildTabsFromActions,
+  getDefaultTabId,
+} from "../lib/eventTabs";
 import { MeetingList } from "../components/MeetingList";
 import { TasksTab } from "../components/TasksTab";
-import {
-  DEFAULT_TAB_BY_TYPE,
-  TABS_BY_TYPE,
-  TAB_LABELS,
-  type EventTab,
-} from "../lib/eventTabs";
+import { ActionsTab } from "../components/ActionsTab";
 
-const placeholders: Record<EventTab, string> = {
-  members: "イベントメンバー管理は今後のスプリントで実装予定です。",
-  schedule: "",
-  history: "履歴ビューは今後のスプリントで実装予定です。",
-  tasks: "タスク機能は Sprint 3 で実装予定です。",
-};
-
-// /events/:eventId/:tab — URL → context 同期 + event.type 別タブ表示。
-// Sprint 2 PR3: eventId 不在 → /、tab 不整合 → 既定タブにリダイレクト。
+// ADR-0008 / Sprint 10 PR4:
+// event_actions を fetch して動的にタブ一覧を生成する。
+// schedule / tasks タブは既存コンポーネントをそのまま流用。
+// member_welcome / pr_review はプレースホルダ (Sprint 11/12 で本実装)。
 export function EventTabPage() {
   const { eventId, tab } = useParams<{ eventId: string; tab: string }>();
   const navigate = useNavigate();
-  const { events, currentEvent, setCurrentEventId, loading } = useEvents();
+  const {
+    events,
+    currentEvent,
+    setCurrentEventId,
+    loading: eventsLoading,
+  } = useEvents();
 
-  // events が確定し、URLの eventId が現存する場合のみ context に反映
+  const [actions, setActions] = useState<EventAction[]>([]);
+  const [actionsLoading, setActionsLoading] = useState(true);
+  const [actionsRefreshKey, setActionsRefreshKey] = useState(0);
+
+  // URL → context 同期
   useEffect(() => {
-    if (loading || !eventId) return;
+    if (eventsLoading || !eventId) return;
     if (eventId !== currentEvent?.id && events.some((e) => e.id === eventId)) {
       setCurrentEventId(eventId);
     }
-  }, [loading, eventId, currentEvent?.id, events, setCurrentEventId]);
+  }, [eventsLoading, eventId, currentEvent?.id, events, setCurrentEventId]);
 
-  // ロード完了まで何も描画しない (リダイレクトループ防止)
-  if (loading) {
+  // event_actions 取得
+  useEffect(() => {
+    if (!eventId) return;
+    let cancelled = false;
+    setActionsLoading(true);
+    api.events.actions
+      .list(eventId)
+      .then((list) => {
+        if (cancelled) return;
+        setActions(Array.isArray(list) ? list : []);
+        setActionsLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActions([]);
+        setActionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, actionsRefreshKey]);
+
+  if (eventsLoading || actionsLoading) {
     return (
       <div style={{ textAlign: "center", padding: "2rem", color: "#999" }}>
         読み込み中...
@@ -41,51 +67,112 @@ export function EventTabPage() {
     );
   }
 
-  // 1. eventId が events に現存しない (削除/存在しない) → / へ
+  // eventId が events に現存しない (削除/存在しない) → / へ
   const event = events.find((e) => e.id === eventId);
-  if (!event) return <Navigate to="/" replace />;
+  if (!event || !eventId) return <Navigate to="/" replace />;
 
-  // 2. tab が event.type の有効タブに含まれない → 既定タブへ
-  const validTabs = TABS_BY_TYPE[event.type];
-  if (!validTabs.includes(tab as EventTab)) {
-    return (
-      <Navigate
-        to={`/events/${event.id}/${DEFAULT_TAB_BY_TYPE[event.type]}`}
-        replace
-      />
-    );
+  const tabs = buildTabsFromActions(actions);
+
+  // tab 不整合時はデフォルトタブへリダイレクト
+  if (!tab || !tabs.some((t) => t.tabId === tab)) {
+    const def = getDefaultTabId(actions);
+    return <Navigate to={`/events/${eventId}/${def}`} replace />;
   }
-
-  const activeTab = tab as EventTab;
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {validTabs.map((t) => (
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        {tabs.map((t) => (
           <button
-            key={t}
-            onClick={() => navigate(`/events/${event.id}/${t}`)}
+            key={t.tabId}
+            onClick={() => navigate(`/events/${eventId}/${t.tabId}`)}
             style={{
               padding: "8px 16px",
               border: "none",
               borderRadius: "4px 4px 0 0",
-              background: activeTab === t ? "#4A90D9" : "#eee",
-              color: activeTab === t ? "#fff" : "#333",
+              background: t.tabId === tab ? "#4A90D9" : "#eee",
+              color: t.tabId === tab ? "#fff" : "#333",
               cursor: "pointer",
             }}
           >
-            {TAB_LABELS[t]}
+            {t.label}
           </button>
         ))}
       </div>
 
-      {activeTab === "schedule" ? (
-        <MeetingList onSelect={(id) => navigate(`/meetings/${id}`)} />
-      ) : activeTab === "tasks" && event.type === "hackathon" ? (
-        <TasksTab eventId={event.id} />
-      ) : (
-        <p style={{ color: "#999" }}>{placeholders[activeTab]}</p>
-      )}
+      {renderTabContent({
+        tab,
+        eventId,
+        actions,
+        navigate,
+        refreshActions: () => setActionsRefreshKey((k) => k + 1),
+      })}
     </div>
+  );
+}
+
+function renderTabContent({
+  tab,
+  eventId,
+  actions,
+  navigate,
+  refreshActions,
+}: {
+  tab: string;
+  eventId: string;
+  actions: EventAction[];
+  navigate: ReturnType<typeof useNavigate>;
+  refreshActions: () => void;
+}) {
+  // アクション系
+  if (tab === "schedule") {
+    return <MeetingList onSelect={(id) => navigate(`/meetings/${id}`)} />;
+  }
+  if (tab === "tasks") {
+    return <TasksTab eventId={eventId} />;
+  }
+  if (tab === "member_welcome") {
+    return (
+      <PlaceholderTab label="新メンバー対応は Sprint 11 で実装予定です。" />
+    );
+  }
+  if (tab === "pr_review") {
+    return (
+      <PlaceholderTab label="PRレビュー一覧は Sprint 12 で実装予定です。" />
+    );
+  }
+  // 共通タブ
+  if (tab === "members") {
+    return (
+      <PlaceholderTab label="メンバー一覧は今後のスプリントで実装予定です。" />
+    );
+  }
+  if (tab === "history") {
+    return (
+      <PlaceholderTab label="履歴ビューは今後のスプリントで実装予定です。" />
+    );
+  }
+  if (tab === "actions") {
+    return (
+      <ActionsTab
+        eventId={eventId}
+        actions={actions}
+        onChange={refreshActions}
+      />
+    );
+  }
+  return <PlaceholderTab label={`未知のタブ: ${tab}`} />;
+}
+
+function PlaceholderTab({ label }: { label: string }) {
+  return (
+    <p style={{ color: "#999", padding: "1rem" }}>{label}</p>
   );
 }
