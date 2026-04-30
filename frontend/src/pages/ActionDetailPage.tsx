@@ -7,6 +7,7 @@ import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
+import { TaskManagementSettings } from "../components/TaskManagementSettings";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、メイン/設定 サブタブを持つ。
@@ -272,6 +273,7 @@ function ActionSettingsContent({
         />
       );
     case "task_management":
+      return <TaskManagementSettings eventId={eventId} />;
     case "pr_review_list":
     case "schedule_polling":
       return (
