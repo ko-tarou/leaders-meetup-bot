@@ -23,6 +23,7 @@ import {
   autoSchedules,
   tasks,
   taskAssignees,
+  prReviews,
   workspaces,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
@@ -1737,6 +1738,105 @@ api.get("/jobs", async (c) => {
   }
   const result = await db.select().from(scheduledJobs).all();
   return c.json(result);
+});
+
+// --- PR Reviews (ADR-0008 pr_review_list) ---
+// タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加していく。
+
+api.get("/events/:eventId/pr-reviews", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const status = c.req.query("status");
+
+  let rows = await db.select().from(prReviews).where(eq(prReviews.eventId, eventId)).all();
+  if (status) rows = rows.filter((r) => r.status === status);
+
+  // updatedAt 降順
+  rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return c.json(rows);
+});
+
+api.get("/pr-reviews/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const row = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(row);
+});
+
+api.post("/events/:eventId/pr-reviews", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const body = await c.req.json<{
+    title: string;
+    url?: string;
+    description?: string;
+    requesterSlackId: string;
+    reviewerSlackId?: string;
+  }>();
+
+  if (!body.title || !body.requesterSlackId) {
+    return c.json({ error: "title and requesterSlackId are required" }, 400);
+  }
+
+  const event = await db.select().from(events).where(eq(events.id, eventId)).get();
+  if (!event) return c.json({ error: `event not found: ${eventId}` }, 400);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const review = {
+    id,
+    eventId,
+    title: body.title,
+    url: body.url ?? null,
+    description: body.description ?? null,
+    status: "open",
+    requesterSlackId: body.requesterSlackId,
+    reviewerSlackId: body.reviewerSlackId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(prReviews).values(review);
+  return c.json(review, 201);
+});
+
+api.put("/pr-reviews/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    title?: string;
+    url?: string | null;
+    description?: string | null;
+    status?: "open" | "in_review" | "merged" | "closed";
+    reviewerSlackId?: string | null;
+  }>();
+
+  const existing = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  if (body.status && !["open", "in_review", "merged", "closed"].includes(body.status)) {
+    return c.json({ error: "invalid status" }, 400);
+  }
+
+  const updates: Partial<typeof existing> = { updatedAt: new Date().toISOString() };
+  if (body.title !== undefined) updates.title = body.title;
+  if (body.url !== undefined) updates.url = body.url;
+  if (body.description !== undefined) updates.description = body.description;
+  if (body.status !== undefined) updates.status = body.status;
+  if (body.reviewerSlackId !== undefined) updates.reviewerSlackId = body.reviewerSlackId;
+
+  await db.update(prReviews).set(updates).where(eq(prReviews.id, id));
+  const updated = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
+  return c.json(updated);
+});
+
+api.delete("/pr-reviews/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const existing = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  await db.delete(prReviews).where(eq(prReviews.id, id));
+  return c.json({ ok: true });
 });
 
 export { api };

@@ -91,6 +91,24 @@ export const taskAssignees = sqliteTable(
   (t) => [unique("task_assignees_task_user_uniq").on(t.taskId, t.slackUserId)]
 );
 
+// ADR-0008: PR レビュー依頼一覧（pr_review_list アクション用）
+// タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加
+export const prReviews = sqliteTable("pr_reviews", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id),
+  title: text("title").notNull(),
+  url: text("url"),
+  description: text("description"),
+  // 'open' | 'in_review' | 'merged' | 'closed'
+  status: text("status").notNull().default("open"),
+  requesterSlackId: text("requester_slack_id").notNull(),
+  reviewerSlackId: text("reviewer_slack_id"), // 担当レビュアー（任意）
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 // ミーティング定義
 export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
