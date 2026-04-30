@@ -13,12 +13,23 @@ import { ChannelManagementSection } from "../components/ChannelManagementSection
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
 // Sprint 13 PR3: task_management のみサブタブを 3つに拡張
 //   （メイン / チャンネル管理 / その他設定）。それ以外は従来通り 2タブ。
+// Sprint 15 PR2: pr_review_list も同じ 3タブ構成に拡張。
 // パンくずリスト + 一覧に戻るリンクで現在地と帰還動線を明確化。
 
 type SubTabDef = { id: string; label: string };
 
+// channel 管理サブタブを持つ action 種別
+const ACTION_TYPES_WITH_CHANNELS: EventActionType[] = [
+  "task_management",
+  "pr_review_list",
+];
+
+function hasChannelsTab(actionType: EventActionType | undefined): boolean {
+  return !!actionType && ACTION_TYPES_WITH_CHANNELS.includes(actionType);
+}
+
 function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
-  if (actionType === "task_management") {
+  if (hasChannelsTab(actionType)) {
     return [
       { id: "main", label: "メイン" },
       { id: "channels", label: "チャンネル管理" },
@@ -205,8 +216,11 @@ export function ActionDetailPage() {
           actionType={actionType as EventActionType}
         />
       )}
-      {subTab === "channels" && actionType === "task_management" && (
-        <ChannelManagementSection eventId={eventId} />
+      {subTab === "channels" && hasChannelsTab(actionType as EventActionType) && (
+        <ChannelManagementSection
+          eventId={eventId}
+          actionType={actionType as EventActionType}
+        />
       )}
       {subTab === "settings" && (
         <div>
@@ -290,11 +304,12 @@ function ActionSettingsContent({
         />
       );
     case "task_management":
-      // PR3: チャンネル管理は専用サブタブへ移動。ここは将来の汎用設定枠。
+    case "pr_review_list":
+      // PR3 / Sprint 15 PR2: チャンネル管理は専用サブタブへ移動。
+      // ここは将来の汎用設定枠。
       return (
         <PlaceholderContent label="将来の追加設定がここに表示されます。チャンネル管理は「チャンネル管理」タブから行ってください。" />
       );
-    case "pr_review_list":
     case "schedule_polling":
       return (
         <PlaceholderContent label="このアクションには専用設定がまだありません" />
