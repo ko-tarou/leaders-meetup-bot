@@ -9,6 +9,8 @@ import type {
   MeetingResponder,
   MeetingStatus,
   Poll,
+  PRReview,
+  PRReviewStatus,
   Reminder,
   ReminderItem,
   Task,
@@ -320,6 +322,45 @@ export const api = {
           { method: "DELETE" },
         ),
     },
+  },
+
+  // PR Reviews (ADR-0008 / Sprint 12)
+  prReviews: {
+    list: (eventId: string, status?: PRReviewStatus) => {
+      const qs = status ? `?status=${status}` : "";
+      return request<PRReview[]>(`/events/${eventId}/pr-reviews${qs}`);
+    },
+    get: (id: string) => request<PRReview>(`/pr-reviews/${id}`),
+    create: (
+      eventId: string,
+      data: {
+        title: string;
+        url?: string;
+        description?: string;
+        requesterSlackId: string;
+        reviewerSlackId?: string;
+      },
+    ) =>
+      request<PRReview>(`/events/${eventId}/pr-reviews`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      id: string,
+      data: {
+        title?: string;
+        url?: string | null;
+        description?: string | null;
+        status?: PRReviewStatus;
+        reviewerSlackId?: string | null;
+      },
+    ) =>
+      request<PRReview>(`/pr-reviews/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/pr-reviews/${id}`, { method: "DELETE" }),
   },
 
   // Slack Workspaces (ADR-0006)

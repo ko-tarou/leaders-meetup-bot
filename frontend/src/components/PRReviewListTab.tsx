@@ -1,0 +1,440 @@
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import type { PRReview, PRReviewStatus } from "../types";
+import { api } from "../api";
+
+// ADR-0008 / Sprint 12 PR2:
+// PR レビュー依頼の一覧 + 新規作成 + 編集 + 削除を行うタブコンポーネント。
+// タスク UI に近いカード一覧スタイルで、完了/クローズはトグルで非表示にできる。
+
+const STATUS_LABEL: Record<PRReviewStatus, string> = {
+  open: "未着手",
+  in_review: "レビュー中",
+  merged: "マージ済",
+  closed: "クローズ",
+};
+
+const STATUS_COLOR: Record<PRReviewStatus, string> = {
+  open: "#6b7280",
+  in_review: "#2563eb",
+  merged: "#16a34a",
+  closed: "#dc2626",
+};
+
+const styles = {
+  container: { padding: "1rem" } as CSSProperties,
+  header: {
+    display: "flex",
+    alignItems: "center",
+    marginBottom: "1rem",
+    gap: "0.75rem",
+    flexWrap: "wrap",
+  } as CSSProperties,
+  primaryBtn: {
+    background: "#2563eb",
+    color: "white",
+    border: "none",
+    padding: "0.5rem 1rem",
+    borderRadius: "0.25rem",
+    cursor: "pointer",
+  } as CSSProperties,
+  empty: {
+    padding: "2rem",
+    textAlign: "center",
+    color: "#6b7280",
+  } as CSSProperties,
+  card: {
+    border: "1px solid #e5e7eb",
+    borderRadius: "0.375rem",
+    padding: "0.75rem",
+    margin: "0.5rem 0",
+    background: "white",
+    cursor: "pointer",
+  } as CSSProperties,
+  cardHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  } as CSSProperties,
+  badge: {
+    fontSize: "0.75rem",
+    padding: "0.125rem 0.5rem",
+    borderRadius: "0.25rem",
+    color: "white",
+  } as CSSProperties,
+  cardMeta: {
+    marginTop: "0.5rem",
+    fontSize: "0.75rem",
+    color: "#6b7280",
+    display: "flex",
+    gap: "1rem",
+    flexWrap: "wrap",
+  } as CSSProperties,
+  desc: {
+    marginTop: "0.5rem",
+    color: "#4b5563",
+    fontSize: "0.875rem",
+  } as CSSProperties,
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  } as CSSProperties,
+  modal: {
+    background: "white",
+    padding: "1.5rem",
+    borderRadius: "0.5rem",
+    width: "min(500px, 90vw)",
+    maxHeight: "90vh",
+    overflow: "auto",
+  } as CSSProperties,
+  formActions: {
+    display: "flex",
+    gap: "0.5rem",
+    marginTop: "1rem",
+    justifyContent: "flex-end",
+  } as CSSProperties,
+  fullInput: { width: "100%" } as CSSProperties,
+};
+
+export function PRReviewListTab({ eventId }: { eventId: string }) {
+  const [reviews, setReviews] = useState<PRReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<PRReview | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [showClosed, setShowClosed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.prReviews
+      .list(eventId)
+      .then((list) => {
+        if (cancelled) return;
+        setReviews(Array.isArray(list) ? list : []);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "読み込みに失敗");
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, refreshKey]);
+
+  if (loading) return <div style={styles.container}>読み込み中...</div>;
+  if (error)
+    return <div style={{ ...styles.container, color: "#dc2626" }}>エラー: {error}</div>;
+
+  const displayed = showClosed
+    ? reviews
+    : reviews.filter((r) => r.status !== "merged" && r.status !== "closed");
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <h2 style={{ margin: 0 }}>PRレビュー依頼 ({displayed.length}件)</h2>
+        <label style={{ fontSize: "0.875rem" }}>
+          <input
+            type="checkbox"
+            checked={showClosed}
+            onChange={(e) => setShowClosed(e.target.checked)}
+          />
+          {" "}完了/クローズも表示
+        </label>
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          style={{ ...styles.primaryBtn, marginLeft: "auto" }}
+        >
+          + 新規レビュー依頼
+        </button>
+      </div>
+
+      {displayed.length === 0 && (
+        <div style={styles.empty}>
+          {reviews.length === 0
+            ? "レビュー依頼はまだありません。"
+            : "該当するレビュー依頼はありません。"}
+        </div>
+      )}
+
+      {displayed.map((r) => (
+        <ReviewCard key={r.id} review={r} onSelect={() => setEditing(r)} />
+      ))}
+
+      {showCreate && (
+        <PRReviewForm
+          eventId={eventId}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => {
+            setShowCreate(false);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+      {editing && (
+        <PRReviewForm
+          eventId={eventId}
+          review={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReviewCard({
+  review: r,
+  onSelect,
+}: {
+  review: PRReview;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      style={styles.card}
+    >
+      <div style={styles.cardHeader}>
+        <strong style={{ flex: 1 }}>{r.title}</strong>
+        <span style={{ ...styles.badge, background: STATUS_COLOR[r.status] }}>
+          {STATUS_LABEL[r.status]}
+        </span>
+      </div>
+      {r.url && (
+        <div style={{ marginTop: "0.25rem", fontSize: "0.875rem" }}>
+          <a
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{ color: "#2563eb" }}
+          >
+            {r.url}
+          </a>
+        </div>
+      )}
+      {r.description && <div style={styles.desc}>{r.description}</div>}
+      <div style={styles.cardMeta}>
+        <span>依頼者: {r.requesterSlackId}</span>
+        {r.reviewerSlackId && <span>レビュアー: {r.reviewerSlackId}</span>}
+      </div>
+    </div>
+  );
+}
+
+function PRReviewForm({
+  eventId,
+  review,
+  onClose,
+  onSaved,
+}: {
+  eventId: string;
+  review?: PRReview;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = !!review;
+  const [title, setTitle] = useState(review?.title ?? "");
+  const [url, setUrl] = useState(review?.url ?? "");
+  const [description, setDescription] = useState(review?.description ?? "");
+  const [status, setStatus] = useState<PRReviewStatus>(review?.status ?? "open");
+  const [requesterSlackId, setRequesterSlackId] = useState(
+    review?.requesterSlackId ??
+      localStorage.getItem("devhub_ops:my_slack_id") ??
+      "",
+  );
+  const [reviewerSlackId, setReviewerSlackId] = useState(
+    review?.reviewerSlackId ?? "",
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const canSubmit = !!title.trim() && !!requesterSlackId.trim() && !submitting;
+
+  const handleSubmit = async () => {
+    if (!title.trim() || !requesterSlackId.trim()) {
+      setError("タイトルと依頼者は必須です");
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (isEdit && review) {
+        await api.prReviews.update(review.id, {
+          title: title.trim(),
+          url: url.trim() || null,
+          description: description.trim() || null,
+          status,
+          reviewerSlackId: reviewerSlackId.trim() || null,
+        });
+      } else {
+        await api.prReviews.create(eventId, {
+          title: title.trim(),
+          url: url.trim() || undefined,
+          description: description.trim() || undefined,
+          requesterSlackId: requesterSlackId.trim(),
+          reviewerSlackId: reviewerSlackId.trim() || undefined,
+        });
+      }
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存に失敗");
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!review) return;
+    if (!confirm(`「${review.title}」を削除しますか？`)) return;
+    setSubmitting(true);
+    try {
+      await api.prReviews.delete(review.id);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "削除に失敗");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={styles.modalOverlay} onClick={onClose}>
+      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>
+          {isEdit ? "レビュー依頼を編集" : "新規レビュー依頼"}
+        </h3>
+        {error && (
+          <div style={{ color: "#dc2626", marginBottom: "0.5rem" }}>{error}</div>
+        )}
+
+        <Field label="タイトル *">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={submitting}
+            style={styles.fullInput}
+          />
+        </Field>
+        <Field label="URL（任意、PR/Issue リンク等）">
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            disabled={submitting}
+            placeholder="https://github.com/..."
+            style={styles.fullInput}
+          />
+        </Field>
+        <Field label="説明">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={submitting}
+            rows={3}
+            style={styles.fullInput}
+          />
+        </Field>
+        <Field label="依頼者 Slack ID *">
+          <input
+            value={requesterSlackId}
+            onChange={(e) => setRequesterSlackId(e.target.value)}
+            disabled={submitting}
+            placeholder="U..."
+            style={styles.fullInput}
+          />
+        </Field>
+        <Field label="レビュアー Slack ID（任意）">
+          <input
+            value={reviewerSlackId}
+            onChange={(e) => setReviewerSlackId(e.target.value)}
+            disabled={submitting}
+            placeholder="U..."
+            style={styles.fullInput}
+          />
+        </Field>
+        {isEdit && (
+          <Field label="ステータス">
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as PRReviewStatus)}
+              disabled={submitting}
+            >
+              <option value="open">未着手</option>
+              <option value="in_review">レビュー中</option>
+              <option value="merged">マージ済</option>
+              <option value="closed">クローズ</option>
+            </select>
+          </Field>
+        )}
+
+        <div style={styles.formActions}>
+          {isEdit && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={submitting}
+              style={{ background: "#dc2626", color: "white", marginRight: "auto" }}
+            >
+              削除
+            </button>
+          )}
+          <button type="button" onClick={onClose} disabled={submitting}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            style={{ background: "#2563eb", color: "white" }}
+          >
+            {submitting ? "保存中..." : isEdit ? "更新" : "作成"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: "0.75rem" }}>
+      <label
+        style={{
+          display: "block",
+          marginBottom: "0.25rem",
+          fontSize: "0.875rem",
+        }}
+      >
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
