@@ -4,21 +4,25 @@ import { api } from "../api";
 type Props = {
   value: string;
   onChange: (channelId: string, channelName: string) => void;
+  // ADR-0006: 任意 workspace の channel を取得する。未指定時は default WS（後方互換）
+  workspaceId?: string;
 };
 
-export function ChannelSelector({ value, onChange }: Props) {
+export function ChannelSelector({ value, onChange, workspaceId }: Props) {
   const [channels, setChannels] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     api
-      .getSlackChannels()
+      .getSlackChannels(workspaceId)
       .then((list) => {
         if (Array.isArray(list)) setChannels(list);
+        else setChannels([]);
       })
-      .catch(() => {})
+      .catch(() => setChannels([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [workspaceId]);
 
   if (loading) {
     return <span style={{ color: "#999" }}>チャンネル取得中...</span>;

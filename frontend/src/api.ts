@@ -33,7 +33,12 @@ export const api = {
   getMeeting: (id: string) => request<MeetingDetail>(`/meetings/${id}`),
   getMeetingStatus: (id: string) =>
     request<MeetingStatus>(`/meetings/${id}/status`),
-  createMeeting: (data: { name: string; channelId: string; eventId?: string }) =>
+  createMeeting: (data: {
+    name: string;
+    channelId: string;
+    eventId?: string;
+    workspaceId?: string;
+  }) =>
     request<Meeting>("/meetings", {
       method: "POST",
       body: JSON.stringify(data),
@@ -173,8 +178,12 @@ export const api = {
     request<{ id: string; name: string }[]>(
       `/slack/users/batch?ids=${ids.join(",")}`,
     ),
-  getSlackChannels: () =>
-    request<{ id: string; name: string }[]>(`/slack/channels`),
+  getSlackChannels: (workspaceId?: string) => {
+    const qs = workspaceId
+      ? `?workspaceId=${encodeURIComponent(workspaceId)}`
+      : "";
+    return request<{ id: string; name: string }[]>(`/slack/channels${qs}`);
+  },
 
   // Events (ADR-0001)
   events: {
