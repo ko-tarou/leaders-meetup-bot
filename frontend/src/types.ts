@@ -173,6 +173,22 @@ export type TaskAssignee = {
   assignedAt: string; // UTC ISO 8601
 };
 
+// PR レビュー (ADR-0008 / Sprint 12)
+export type PRReviewStatus = "open" | "in_review" | "merged" | "closed";
+
+export type PRReview = {
+  id: string;
+  eventId: string;
+  title: string;
+  url: string | null;
+  description: string | null;
+  status: PRReviewStatus;
+  requesterSlackId: string;
+  reviewerSlackId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 // Slack workspace（ADR-0006）
 // bot_token / signing_secret は backend が返さないため型にも含めない
 export type Workspace = {
