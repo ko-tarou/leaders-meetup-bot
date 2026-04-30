@@ -1,6 +1,8 @@
 import type {
   AutoSchedule,
   Event,
+  EventAction,
+  EventActionType,
   Meeting,
   MeetingDetail,
   MeetingMember,
@@ -190,7 +192,7 @@ export const api = {
     list: () => request<Event[]>("/events"),
     get: (id: string) => request<Event>(`/events/${id}`),
     create: (data: {
-      type: "meetup" | "hackathon";
+      type: "meetup" | "hackathon" | "project";
       name: string;
       config?: string;
       status?: "active" | "archived";
@@ -211,6 +213,50 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(data),
       }),
+
+    // EventActions (ADR-0008)
+    actions: {
+      list: (eventId: string) =>
+        request<EventAction[]>(`/events/${eventId}/actions`),
+      create: (
+        eventId: string,
+        data: {
+          actionType: EventActionType;
+          config?: string;
+          enabled?: number;
+        },
+      ) =>
+        request<EventAction>(`/events/${eventId}/actions`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      update: (
+        eventId: string,
+        actionId: string,
+        data: { config?: string; enabled?: number },
+      ) =>
+        request<EventAction>(
+          `/events/${eventId}/actions/${actionId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(data),
+          },
+        ),
+      delete: (eventId: string, actionId: string) =>
+        request<{ ok: boolean }>(
+          `/events/${eventId}/actions/${actionId}`,
+          { method: "DELETE" },
+        ),
+    },
+
+    // bootstrap (ADR-0008): default action 投入
+    bootstrapActions: () =>
+      request<{
+        ok: boolean;
+        scanned: number;
+        inserted: number;
+        skipped: number;
+      }>(`/events/bootstrap-actions`, { method: "POST" }),
   },
 
   // Tasks (ADR-0002)
