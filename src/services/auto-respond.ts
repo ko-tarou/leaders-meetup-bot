@@ -4,6 +4,7 @@ import { meetings, autoSchedules, meetingResponders } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createSlackClientForWorkspace } from "./workspace";
 import { repostBoard } from "./sticky-task-board";
+import { repostPRReviewBoard } from "./sticky-pr-review-board";
 import type { Env } from "../types/env";
 
 export type SlackMessageEvent = {
@@ -81,20 +82,24 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * ADR-0006 sticky task board の repost トリガー。
+ * ADR-0006 / ADR-0008 sticky board の repost トリガー（task と PR review 両方）。
  *
- * message event を受けたら、該当チャンネルの meeting.task_board_ts が set
- * されている場合に「10秒後に repost を実行する」非同期処理を仕掛ける。
+ * message event を受けたら、該当チャンネルの
+ *   - meeting.task_board_ts (task_management の sticky)
+ *   - meeting.pr_review_board_ts (pr_review_list の sticky)
+ * のどちらか一方でも set されている場合に「10秒後に repost を実行する」非同期
+ * 処理を仕掛ける。両方有効な場合は両方を 1 回ずつ repost する。
  *
  * デバウンス設計（バースト対策）:
- * - 各 message event ごとに「自分が見た task_board_ts」を記録して 10 秒待つ
+ * - 各 message event ごとに「自分が見た board_ts」を記録して 10 秒待つ
  * - 10 秒後、現在の DB 値と比較して一致していれば repost
  * - 一致しなければ別の Worker が既に repost 済みなので skip
- * - これによりバースト時でも実質 10 秒間隔で 1 回だけ発火する（先着優先）
+ * - task / PR review 各々独立に判定する（片方だけ更新済みでも他方は repost する）
  *
  * 失敗時の挙動:
  * - workspace 復号失敗 / Slack API 失敗は console.error で握りつぶし、
  *   sticky board が一時的に最下部にならないことより「他の処理が止まる」リスクを避ける（fail-soft）。
+ * - task 側で例外が出ても PR review 側の repost は実行する（独立 try/catch）。
  *
  * 呼び出し側は ctx.waitUntil を使って待たずに 200 を返すこと。
  */
@@ -114,12 +119,19 @@ export async function maybeTriggerStickyRepost(
     .from(meetings)
     .where(eq(meetings.channelId, event.channel))
     .get();
-  if (!meeting || !meeting.taskBoardTs || !meeting.workspaceId) return;
+  if (!meeting || !meeting.workspaceId) return;
 
-  // 自分のpost ts と同じ ts のメッセージは scan しない（更に念のため）
-  if (event.ts && event.ts === meeting.taskBoardTs) return;
+  const taskOriginalTs = meeting.taskBoardTs;
+  const prOriginalTs = meeting.prReviewBoardTs;
 
-  const originalTs = meeting.taskBoardTs;
+  if (!taskOriginalTs && !prOriginalTs) return;
+
+  // 自分が今 post した sticky と同じ ts は scan しない（無限ループ防止）
+  // どちらかと一致する場合だけ「その board」をスキップ対象にし、もう片方は通常通り処理
+  const skipTask = !!(event.ts && event.ts === taskOriginalTs);
+  const skipPR = !!(event.ts && event.ts === prOriginalTs);
+  if ((!taskOriginalTs || skipTask) && (!prOriginalTs || skipPR)) return;
+
   const meetingId = meeting.id;
 
   ctx.waitUntil(
@@ -133,11 +145,7 @@ export async function maybeTriggerStickyRepost(
           .from(meetings)
           .where(eq(meetings.id, meetingId))
           .get();
-        if (!fresh || !fresh.taskBoardTs || !fresh.workspaceId) return;
-        if (fresh.taskBoardTs !== originalTs) {
-          // 別 Worker が既に repost した → 後発はスキップ
-          return;
-        }
+        if (!fresh || !fresh.workspaceId) return;
 
         const client = await createSlackClientForWorkspace(
           env,
@@ -150,14 +158,43 @@ export async function maybeTriggerStickyRepost(
           return;
         }
 
-        await repostBoard(env.DB, client, {
-          id: fresh.id,
-          channelId: fresh.channelId,
-          eventId: fresh.eventId,
-          taskBoardTs: fresh.taskBoardTs,
-        });
+        // task sticky: ts 一致時のみ実行（先着優先デバウンス）
+        if (
+          !skipTask &&
+          taskOriginalTs &&
+          fresh.taskBoardTs === taskOriginalTs
+        ) {
+          try {
+            await repostBoard(env.DB, client, {
+              id: fresh.id,
+              channelId: fresh.channelId,
+              eventId: fresh.eventId,
+              taskBoardTs: fresh.taskBoardTs,
+            });
+          } catch (e) {
+            console.error("Failed to repost task sticky board:", e);
+          }
+        }
+
+        // pr review sticky: ts 一致時のみ実行（独立判定）
+        if (
+          !skipPR &&
+          prOriginalTs &&
+          fresh.prReviewBoardTs === prOriginalTs
+        ) {
+          try {
+            await repostPRReviewBoard(env.DB, client, {
+              id: fresh.id,
+              channelId: fresh.channelId,
+              eventId: fresh.eventId,
+              prReviewBoardTs: fresh.prReviewBoardTs,
+            });
+          } catch (e) {
+            console.error("Failed to repost pr review sticky board:", e);
+          }
+        }
       } catch (e) {
-        console.error("Failed to repost sticky board:", e);
+        console.error("Failed to repost sticky boards:", e);
       }
     })(),
   );

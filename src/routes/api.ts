@@ -43,6 +43,10 @@ import {
   deleteBoard,
 } from "../services/sticky-task-board";
 import {
+  postInitialPRReviewBoard,
+  deletePRReviewBoard,
+} from "../services/sticky-pr-review-board";
+import {
   createSlackClientForWorkspace,
   getDecryptedWorkspace,
 } from "../services/workspace";
@@ -388,6 +392,69 @@ api.delete("/meetings/:id/task-board", async (c) => {
     id: meeting.id,
     channelId: meeting.channelId,
     taskBoardTs: meeting.taskBoardTs,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
+  return c.json({ ok: true });
+});
+
+// ADR-0008: PR レビュー sticky board の有効化
+// task-board と同じ契約: 既に有効なら 409、必要 FK が無ければ 400。
+api.post("/meetings/:id/pr-review-board", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId) {
+    return c.json({ error: "meeting has no workspace_id" }, 400);
+  }
+  if (!meeting.eventId) {
+    return c.json({ error: "meeting has no event_id" }, 400);
+  }
+  if (meeting.prReviewBoardTs) {
+    return c.json(
+      { error: "pr review board already enabled, delete first to re-enable" },
+      409,
+    );
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await postInitialPRReviewBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    eventId: meeting.eventId,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
+  return c.json({ ok: true, ts: result.ts });
+});
+
+api.delete("/meetings/:id/pr-review-board", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId) {
+    return c.json({ error: "meeting has no workspace_id" }, 400);
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await deletePRReviewBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    prReviewBoardTs: meeting.prReviewBoardTs,
   });
   if ("error" in result) {
     return c.json({ ok: false, error: result.error }, 500);
