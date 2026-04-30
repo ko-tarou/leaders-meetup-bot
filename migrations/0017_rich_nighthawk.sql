@@ -1,0 +1,1 @@
+ALTER TABLE `meetings` ADD `task_board_show_unstarted` integer DEFAULT 0 NOT NULL;
