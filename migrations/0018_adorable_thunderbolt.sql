@@ -1,0 +1,1 @@
+ALTER TABLE `meetings` ADD `pr_review_board_ts` text;

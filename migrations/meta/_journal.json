@@ -127,6 +127,13 @@
       "when": 1777533518245,
       "tag": "0017_rich_nighthawk",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1777534469521,
+      "tag": "0018_adorable_thunderbolt",
+      "breakpoints": true
     }
   ]
 }
