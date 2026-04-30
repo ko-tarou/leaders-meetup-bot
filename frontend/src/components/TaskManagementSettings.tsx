@@ -7,9 +7,7 @@ import { ChannelSelector } from "./ChannelSelector";
 // この event に紐づく meetings (= 影響するチャンネル) を一覧/追加/削除し、
 // それぞれで sticky task board を ON/OFF できるようにする。
 
-type Props = {
-  eventId: string;
-};
+type Props = { eventId: string };
 
 export function TaskManagementSettings({ eventId }: Props) {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -64,13 +62,10 @@ export function TaskManagementSettings({ eventId }: Props) {
   const handleToggleSticky = async (meeting: Meeting) => {
     setPendingId(meeting.id);
     try {
-      if (meeting.taskBoardTs) {
-        const r = await api.disableTaskBoard(meeting.id);
-        if (!r.ok) throw new Error(r.error ?? "無効化に失敗しました");
-      } else {
-        const r = await api.enableTaskBoard(meeting.id);
-        if (!r.ok) throw new Error(r.error ?? "有効化に失敗しました");
-      }
+      const r = meeting.taskBoardTs
+        ? await api.disableTaskBoard(meeting.id)
+        : await api.enableTaskBoard(meeting.id);
+      if (!r.ok) throw new Error(r.error ?? "切替に失敗しました");
       setRefreshKey((k) => k + 1);
     } catch (e) {
       alert(e instanceof Error ? e.message : "切替に失敗しました");
@@ -99,20 +94,11 @@ export function TaskManagementSettings({ eventId }: Props) {
 
   if (loading) return <div style={{ padding: "1rem" }}>読み込み中...</div>;
   if (error)
-    return (
-      <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {error}</div>
-    );
+    return <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {error}</div>;
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          marginBottom: "0.5rem",
-          gap: "0.5rem",
-        }}
-      >
+      <div style={headerRowStyle}>
         <h3 style={{ margin: 0, fontSize: "1rem" }}>
           影響するチャンネル ({meetings.length})
         </h3>
@@ -125,13 +111,7 @@ export function TaskManagementSettings({ eventId }: Props) {
         </button>
       </div>
 
-      <p
-        style={{
-          fontSize: "0.875rem",
-          color: "#6b7280",
-          margin: "0 0 1rem",
-        }}
-      >
+      <p style={descStyle}>
         ここに登録された各チャンネルでタスク管理機能（タスク作成・sticky bot）が動作します。
       </p>
 
@@ -148,32 +128,16 @@ export function TaskManagementSettings({ eventId }: Props) {
             const chName = channelNames[m.channelId];
             return (
               <div key={m.id} style={rowStyle}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.75rem",
-                    flexWrap: "wrap",
-                  }}
-                >
+                <div style={rowInnerStyle}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <strong>{m.name}</strong>
-                    <div
-                      style={{
-                        fontSize: "0.75rem",
-                        color: "#6b7280",
-                        marginTop: "0.125rem",
-                      }}
-                    >
+                    <div style={metaStyle}>
                       {wsName(m.workspaceId)} / #{chName || m.channelId}
                     </div>
                   </div>
                   <label
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.25rem",
-                      fontSize: "0.875rem",
+                      ...toggleLabelStyle,
                       color: isEnabled ? "#16a34a" : "#6b7280",
                     }}
                   >
@@ -225,9 +189,7 @@ function AddChannelModal({
   onClose: () => void;
   onAdded: () => void;
 }) {
-  const [workspaceId, setWorkspaceId] = useState<string>(
-    workspaces[0]?.id ?? "",
-  );
+  const [workspaceId, setWorkspaceId] = useState<string>(workspaces[0]?.id ?? "");
   const [channelId, setChannelId] = useState<string>("");
   const [channelName, setChannelName] = useState<string>("");
   const [name, setName] = useState<string>("");
@@ -235,20 +197,9 @@ function AddChannelModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleChannelChange = (id: string, chName: string) => {
-    setChannelId(id);
-    setChannelName(chName);
-  };
-
   const handleSubmit = async () => {
-    if (!workspaceId) {
-      setError("ワークスペースを選択してください");
-      return;
-    }
-    if (!channelId.trim()) {
-      setError("チャンネルを選択してください");
-      return;
-    }
+    if (!workspaceId) return setError("ワークスペースを選択してください");
+    if (!channelId.trim()) return setError("チャンネルを選択してください");
     setError(null);
     setSubmitting(true);
     try {
@@ -277,18 +228,7 @@ function AddChannelModal({
     <div style={modalBackdrop} onClick={onClose}>
       <div style={modalBody} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>チャンネル追加</h3>
-
-        {error && (
-          <div
-            style={{
-              color: "#dc2626",
-              marginBottom: "0.5rem",
-              fontSize: "0.875rem",
-            }}
-          >
-            {error}
-          </div>
-        )}
+        {error && <div style={errorStyle}>{error}</div>}
 
         <Field label="ワークスペース">
           <select
@@ -311,7 +251,10 @@ function AddChannelModal({
         <Field label="チャンネル">
           <ChannelSelector
             value={channelId}
-            onChange={handleChannelChange}
+            onChange={(id, n) => {
+              setChannelId(id);
+              setChannelName(n);
+            }}
             workspaceId={workspaceId || undefined}
           />
         </Field>
@@ -336,19 +279,8 @@ function AddChannelModal({
           </label>
         </Field>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            justifyContent: "flex-end",
-            marginTop: "1rem",
-          }}
-        >
-          <button
-            onClick={onClose}
-            disabled={submitting}
-            style={secondaryBtnStyle}
-          >
+        <div style={modalActionsStyle}>
+          <button onClick={onClose} disabled={submitting} style={secondaryBtnStyle}>
             キャンセル
           </button>
           <button
@@ -364,32 +296,97 @@ function AddChannelModal({
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: "0.75rem" }}>
-      {label && (
-        <label
-          style={{
-            display: "block",
-            marginBottom: "0.25rem",
-            fontSize: "0.875rem",
-            color: "#374151",
-          }}
-        >
-          {label}
-        </label>
-      )}
+      {label && <label style={fieldLabelStyle}>{label}</label>}
       {children}
     </div>
   );
 }
 
+const headerRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  marginBottom: "0.5rem",
+  gap: "0.5rem",
+};
+const descStyle: React.CSSProperties = {
+  fontSize: "0.875rem",
+  color: "#6b7280",
+  margin: "0 0 1rem",
+};
+const rowStyle: React.CSSProperties = {
+  padding: "0.75rem",
+  border: "1px solid #e5e7eb",
+  borderRadius: "0.375rem",
+  background: "white",
+};
+const rowInnerStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.75rem",
+  flexWrap: "wrap",
+};
+const metaStyle: React.CSSProperties = {
+  fontSize: "0.75rem",
+  color: "#6b7280",
+  marginTop: "0.125rem",
+};
+const toggleLabelStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.25rem",
+  fontSize: "0.875rem",
+};
+const emptyStyle: React.CSSProperties = {
+  padding: "2rem",
+  textAlign: "center",
+  color: "#6b7280",
+  border: "1px dashed #d1d5db",
+  borderRadius: "0.5rem",
+  fontSize: "0.875rem",
+};
+const errorStyle: React.CSSProperties = {
+  color: "#dc2626",
+  marginBottom: "0.5rem",
+  fontSize: "0.875rem",
+};
+const fieldLabelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: "0.25rem",
+  fontSize: "0.875rem",
+  color: "#374151",
+};
+const fieldStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "0.4rem 0.6rem",
+  border: "1px solid #d1d5db",
+  borderRadius: "0.25rem",
+  fontSize: "0.875rem",
+  boxSizing: "border-box",
+};
+const modalBackdrop: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
+};
+const modalBody: React.CSSProperties = {
+  background: "white",
+  padding: "1.5rem",
+  borderRadius: "0.5rem",
+  width: "min(500px, 90vw)",
+};
+const modalActionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: "0.5rem",
+  justifyContent: "flex-end",
+  marginTop: "1rem",
+};
 const primaryBtnStyle: React.CSSProperties = {
   marginLeft: "auto",
   background: "#2563eb",
@@ -400,7 +397,6 @@ const primaryBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: "0.875rem",
 };
-
 const secondaryBtnStyle: React.CSSProperties = {
   padding: "0.4rem 0.9rem",
   border: "1px solid #d1d5db",
@@ -409,7 +405,6 @@ const secondaryBtnStyle: React.CSSProperties = {
   cursor: "pointer",
   fontSize: "0.875rem",
 };
-
 const dangerBtnStyle: React.CSSProperties = {
   padding: "0.25rem 0.6rem",
   border: "1px solid #fecaca",
@@ -418,46 +413,4 @@ const dangerBtnStyle: React.CSSProperties = {
   borderRadius: "0.25rem",
   cursor: "pointer",
   fontSize: "0.8125rem",
-};
-
-const rowStyle: React.CSSProperties = {
-  padding: "0.75rem",
-  border: "1px solid #e5e7eb",
-  borderRadius: "0.375rem",
-  background: "white",
-};
-
-const emptyStyle: React.CSSProperties = {
-  padding: "2rem",
-  textAlign: "center",
-  color: "#6b7280",
-  border: "1px dashed #d1d5db",
-  borderRadius: "0.5rem",
-  fontSize: "0.875rem",
-};
-
-const modalBackdrop: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
-
-const modalBody: React.CSSProperties = {
-  background: "white",
-  padding: "1.5rem",
-  borderRadius: "0.5rem",
-  width: "min(500px, 90vw)",
-};
-
-const fieldStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.4rem 0.6rem",
-  border: "1px solid #d1d5db",
-  borderRadius: "0.25rem",
-  fontSize: "0.875rem",
-  boxSizing: "border-box",
 };
