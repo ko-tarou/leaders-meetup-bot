@@ -878,6 +878,7 @@ api.post("/tasks", async (c) => {
     title: string;
     description?: string;
     dueAt?: string;
+    startAt?: string;
     status?: "todo" | "doing" | "done";
     priority?: "low" | "mid" | "high";
     parentTaskId?: string;
@@ -910,6 +911,10 @@ api.post("/tasks", async (c) => {
   if (body.dueAt && !body.dueAt.endsWith("Z")) {
     return c.json({ error: "dueAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
   }
+  // ADR-0006: startAt も同様の UTC ISO 検証
+  if (body.startAt && !body.startAt.endsWith("Z")) {
+    return c.json({ error: "startAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
+  }
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -920,6 +925,7 @@ api.post("/tasks", async (c) => {
     title: body.title,
     description: body.description ?? null,
     dueAt: body.dueAt ?? null,
+    startAt: body.startAt ?? null,
     status: body.status ?? "todo",
     priority: body.priority ?? "mid",
     createdBySlackId: body.createdBySlackId,
@@ -937,6 +943,7 @@ api.put("/tasks/:id", async (c) => {
     title?: string;
     description?: string | null;
     dueAt?: string | null;
+    startAt?: string | null;
     status?: "todo" | "doing" | "done";
     priority?: "low" | "mid" | "high";
     parentTaskId?: string | null;
@@ -954,6 +961,9 @@ api.put("/tasks/:id", async (c) => {
   }
   if (body.dueAt !== undefined && body.dueAt !== null && !body.dueAt.endsWith("Z")) {
     return c.json({ error: "dueAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
+  }
+  if (body.startAt !== undefined && body.startAt !== null && !body.startAt.endsWith("Z")) {
+    return c.json({ error: "startAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
   }
   if (body.parentTaskId !== undefined && body.parentTaskId !== null) {
     if (body.parentTaskId === id) return c.json({ error: "task cannot be its own parent" }, 400);
@@ -975,6 +985,7 @@ api.put("/tasks/:id", async (c) => {
   if (body.title !== undefined) updates.title = body.title;
   if (body.description !== undefined) updates.description = body.description;
   if (body.dueAt !== undefined) updates.dueAt = body.dueAt;
+  if (body.startAt !== undefined) updates.startAt = body.startAt;
   if (body.status !== undefined) updates.status = body.status;
   if (body.priority !== undefined) updates.priority = body.priority;
   if (body.parentTaskId !== undefined) updates.parentTaskId = body.parentTaskId;
