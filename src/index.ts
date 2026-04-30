@@ -18,6 +18,13 @@ app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
 
+// SPA fallback: /api, /slack 以外で Hono にマッチしないパス（例: /events/.../actions）は
+// ASSETS バインディング経由で index.html を返し、React Router にクライアント側で処理させる。
+// not_found_handling = "single-page-application" を wrangler.toml で有効化済み。
+app.notFound(async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
 export default {
   fetch: app.fetch,
 

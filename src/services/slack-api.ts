@@ -86,10 +86,13 @@ export class SlackClient {
     return this.callApiGet("users.info", { user: userId });
   }
 
-  async getChannelList(limit = 100): Promise<SlackResponse> {
-    // users.conversations を使う（bot自身が参加中のチャンネルだけ返る）
-    // conversations.list は is_member: false で返ることがあるため使わない
-    return this.callApiGet("users.conversations", {
+  async getChannelList(limit = 200): Promise<SlackResponse> {
+    // conversations.list で workspace の全 public/private チャンネルを取得する。
+    // 以前は users.conversations を使っていたが、bot 参加済みチャンネルしか
+    // 返らず一覧が欠ける問題があったため切替。private_channel を含めるには
+    // bot に groups:read scope が必要（既存付与済み）。
+    // 戻り値の channels[].is_member で参加状態は呼び出し側が判定可能。
+    return this.callApiGet("conversations.list", {
       limit,
       types: "public_channel,private_channel",
       exclude_archived: "true",
