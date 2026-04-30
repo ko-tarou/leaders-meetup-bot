@@ -10,7 +10,7 @@ export function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -99,7 +99,6 @@ export function WorkspacesPage() {
         >
           + Slack でインストール
         </a>
-        <button onClick={() => setShowForm(true)}>+ 新規追加</button>
       </div>
 
       {successMsg && (
@@ -119,7 +118,7 @@ export function WorkspacesPage() {
 
       {workspaces.length === 0 && (
         <div style={{ color: "#6b7280" }}>
-          ワークスペースが登録されていません。
+          ワークスペースが登録されていません。「+ Slack でインストール」から追加してください。
         </div>
       )}
 
@@ -156,11 +155,43 @@ export function WorkspacesPage() {
         </div>
       ))}
 
-      {showForm && (
+      {/* 手動登録は fallback として温存 (ADR-0007) — ページ下部に小さく配置 */}
+      <div
+        style={{
+          marginTop: "2rem",
+          paddingTop: "1rem",
+          borderTop: "1px solid #e5e7eb",
+        }}
+      >
+        <button
+          onClick={() => setShowManualForm(true)}
+          style={{
+            background: "transparent",
+            color: "#6b7280",
+            border: "1px solid #d1d5db",
+            padding: "0.375rem 0.75rem",
+            borderRadius: "0.25rem",
+            fontSize: "0.875rem",
+          }}
+        >
+          手動登録（上級者向け）
+        </button>
+        <p
+          style={{
+            fontSize: "0.75rem",
+            color: "#9ca3af",
+            marginTop: "0.5rem",
+          }}
+        >
+          通常は「Slack でインストール」を使用してください。OAuth が使えない場合のみ手動登録を利用します。
+        </p>
+      </div>
+
+      {showManualForm && (
         <WorkspaceCreateForm
-          onClose={() => setShowForm(false)}
+          onClose={() => setShowManualForm(false)}
           onCreated={() => {
-            setShowForm(false);
+            setShowManualForm(false);
             setRefreshKey((k) => k + 1);
           }}
         />
@@ -226,7 +257,11 @@ function WorkspaceCreateForm({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ marginTop: 0 }}>ワークスペース登録</h3>
+        <h3 style={{ marginTop: 0 }}>ワークスペース手動登録</h3>
+        <p style={{ fontSize: "0.8rem", color: "#6b7280", marginTop: 0 }}>
+          通常は OAuth フロー（「Slack でインストール」ボタン）を使用してください。
+          既存 App の Bot Token / Signing Secret を直接登録する場合のみこちらを利用します。
+        </p>
 
         {error && (
           <div style={{ color: "#dc2626", marginBottom: "0.5rem" }}>
