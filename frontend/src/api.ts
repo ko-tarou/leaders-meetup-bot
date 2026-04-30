@@ -67,6 +67,18 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  // Sprint 15 PR1/PR2: sticky PR review board の有効化/無効化
+  enablePRReviewBoard: (meetingId: string) =>
+    request<{ ok: boolean; ts?: string; error?: string }>(
+      `/meetings/${meetingId}/pr-review-board`,
+      { method: "POST" },
+    ),
+  disablePRReviewBoard: (meetingId: string) =>
+    request<{ ok: boolean; error?: string }>(
+      `/meetings/${meetingId}/pr-review-board`,
+      { method: "DELETE" },
+    ),
+
   getMembers: (meetingId: string) =>
     request<MeetingMember[]>(`/meetings/${meetingId}/members`),
   addMember: (meetingId: string, slackUserId: string) =>

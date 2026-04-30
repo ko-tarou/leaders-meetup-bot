@@ -35,6 +35,8 @@ export type Meeting = {
   eventId?: string | null;
   // ADR-0006: sticky bot の現在のメッセージ timestamp。NULL なら無効。
   taskBoardTs?: string | null;
+  // Sprint 15 PR1/PR2: PR review sticky bot の現在のメッセージ timestamp。NULL なら無効。
+  prReviewBoardTs?: string | null;
   createdAt: string;
 };
 
