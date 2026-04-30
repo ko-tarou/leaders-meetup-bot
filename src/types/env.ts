@@ -17,4 +17,7 @@ export type Env = {
   // 例: https://<your-worker-domain>/slack/oauth/callback
   // wrangler.toml の vars または secret で設定
   OAUTH_REDIRECT_URL: string;
+
+  // Cloudflare Workers Assets binding（SPA fallback で env.ASSETS.fetch から index.html を返す）
+  ASSETS: Fetcher;
 };
