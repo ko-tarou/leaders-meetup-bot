@@ -21,6 +21,8 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
   const [parentTaskId, setParentTaskId] = useState<string>(task?.parentTaskId ?? "");
   const [dueDate, setDueDate] = useState<string>("");
   const [dueTime, setDueTime] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [startTime, setStartTime] = useState<string>("");
   const [assigneeInput, setAssigneeInput] = useState<string>(
     task?.assignees.map((a) => a.slackUserId).join(", ") ?? "",
   );
@@ -37,6 +39,16 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
     );
   }, [task]);
 
+  // 編集モードで startAt がある場合、JST に変換して入力欄に反映
+  useEffect(() => {
+    if (!task?.startAt) return;
+    const jst = new Date(new Date(task.startAt).getTime() + 9 * 60 * 60 * 1000);
+    setStartDate(jst.toISOString().slice(0, 10));
+    setStartTime(
+      `${String(jst.getUTCHours()).padStart(2, "0")}:${String(jst.getUTCMinutes()).padStart(2, "0")}`,
+    );
+  }, [task]);
+
   const handleSubmit = async () => {
     if (!title.trim()) return setError("タスク名は必須です");
     setSubmitting(true);
@@ -47,6 +59,13 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
       const [y, mo, d] = dueDate.split("-").map(Number);
       const [h, mi] = (dueTime || "09:00").split(":").map(Number);
       dueAt = new Date(Date.UTC(y, mo - 1, d, h - 9, mi, 0)).toISOString();
+    }
+
+    let startAt: string | null = null;
+    if (startDate) {
+      const [y, mo, d] = startDate.split("-").map(Number);
+      const [h, mi] = (startTime || "09:00").split(":").map(Number);
+      startAt = new Date(Date.UTC(y, mo - 1, d, h - 9, mi, 0)).toISOString();
     }
 
     const assigneeIds = assigneeInput
@@ -61,6 +80,7 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
           title: title.trim(),
           description: description.trim() || null,
           dueAt,
+          startAt,
           priority,
           parentTaskId: parentTaskId || null,
         });
@@ -81,6 +101,7 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
           title: title.trim(),
           description: description.trim() || undefined,
           dueAt: dueAt || undefined,
+          startAt: startAt || undefined,
           priority,
           parentTaskId: parentTaskId || undefined,
           createdBySlackId,
@@ -162,6 +183,12 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
               <option key={t.id} value={t.id}>{t.title}</option>
             ))}
           </select>
+        </Field>
+        <Field label="開始日（任意、JST）">
+          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={submitting} />
+        </Field>
+        <Field label="開始時刻（任意、JST）">
+          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} disabled={submitting} />
         </Field>
         <Field label="期限日（任意、JST）">
           <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={submitting} />

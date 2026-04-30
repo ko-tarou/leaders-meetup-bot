@@ -52,6 +52,29 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
       },
       {
         type: "input",
+        block_id: "start_date_block",
+        optional: true,
+        label: { type: "plain_text", text: "開始日（任意）" },
+        element: {
+          type: "datepicker",
+          action_id: "start_date_input",
+        },
+      },
+      {
+        type: "input",
+        block_id: "start_time_block",
+        optional: true,
+        label: {
+          type: "plain_text",
+          text: "開始時刻（JST、任意。日付指定時のみ有効）",
+        },
+        element: {
+          type: "timepicker",
+          action_id: "start_time_input",
+        },
+      },
+      {
+        type: "input",
         block_id: "due_date_block",
         optional: true,
         label: { type: "plain_text", text: "期限日（任意）" },

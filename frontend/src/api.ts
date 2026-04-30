@@ -293,6 +293,7 @@ export const api = {
       title: string;
       description?: string;
       dueAt?: string;
+      startAt?: string;
       status?: "todo" | "doing" | "done";
       priority?: "low" | "mid" | "high";
       parentTaskId?: string;
@@ -308,6 +309,7 @@ export const api = {
         title?: string;
         description?: string | null;
         dueAt?: string | null;
+        startAt?: string | null;
         status?: "todo" | "doing" | "done";
         priority?: "low" | "mid" | "high";
         parentTaskId?: string | null;

@@ -155,6 +155,7 @@ export type Task = {
   title: string;
   description: string | null;
   dueAt: string | null; // UTC ISO 8601 (Z付き)
+  startAt: string | null; // UTC ISO 8601 (Z付き) — タスク開始日時（ADR-0006）
   status: "todo" | "doing" | "done";
   priority: "low" | "mid" | "high";
   createdBySlackId: string;

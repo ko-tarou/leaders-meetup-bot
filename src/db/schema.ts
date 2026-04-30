@@ -123,6 +123,9 @@ export const meetings = sqliteTable("meetings", {
   // ADR-0006: sticky bot の現在のメッセージ timestamp（"1234567890.123456" 形式）
   // NULL なら sticky bot 未起動。set されていれば該当チャンネルで sticky board 有効。
   taskBoardTs: text("task_board_ts"),
+  // ADR-0006: sticky board のフィルタ状態。1 なら未開始 (start_at > now) のタスクも表示する。
+  // デフォルト 0 = 進行中のみ表示（start_at NULL or <= now のタスクのみ）。
+  taskBoardShowUnstarted: integer("task_board_show_unstarted").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 

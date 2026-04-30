@@ -120,6 +120,13 @@
       "when": 1777525823465,
       "tag": "0016_overconfident_whiplash",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1777533518245,
+      "tag": "0017_rich_nighthawk",
+      "breakpoints": true
     }
   ]
 }
