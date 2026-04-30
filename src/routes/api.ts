@@ -39,7 +39,10 @@ import {
   postInitialBoard,
   deleteBoard,
 } from "../services/sticky-task-board";
-import { createSlackClientForWorkspace } from "../services/workspace";
+import {
+  createSlackClientForWorkspace,
+  getDecryptedWorkspace,
+} from "../services/workspace";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -240,7 +243,12 @@ api.get("/meetings/:id/status", async (c) => {
 });
 
 api.post("/meetings", async (c) => {
-  const body = await c.req.json<{ name: string; channelId: string; eventId?: string }>();
+  const body = await c.req.json<{
+    name: string;
+    channelId: string;
+    eventId?: string;
+    workspaceId?: string;
+  }>();
   if (!body.name || !body.channelId) {
     return c.json({ error: "name and channelId are required" }, 400);
   }
@@ -253,12 +261,40 @@ api.post("/meetings", async (c) => {
     return c.json({ error: `event not found: ${eventId}` }, 400);
   }
 
+  // ADR-0006: workspaceId 未指定時は default WS にフォールバック（既存運用の後方互換）
+  const workspaceId = body.workspaceId ?? DEFAULT_WORKSPACE_ID;
+  const workspace = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .get();
+  if (!workspace) {
+    return c.json({ error: `workspace not found: ${workspaceId}` }, 400);
+  }
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await db
     .insert(meetings)
-    .values({ id, name: body.name, channelId: body.channelId, eventId, createdAt });
-  return c.json({ id, name: body.name, channelId: body.channelId, eventId, createdAt }, 201);
+    .values({
+      id,
+      name: body.name,
+      channelId: body.channelId,
+      workspaceId,
+      eventId,
+      createdAt,
+    });
+  return c.json(
+    {
+      id,
+      name: body.name,
+      channelId: body.channelId,
+      workspaceId,
+      eventId,
+      createdAt,
+    },
+    201,
+  );
 });
 
 api.put("/meetings/:id", async (c) => {
@@ -1506,10 +1542,25 @@ api.get("/slack/users/batch", async (c) => {
 });
 
 api.get("/slack/channels", async (c) => {
-  const client = new SlackClient(
-    c.env.SLACK_BOT_TOKEN,
-    c.env.SLACK_SIGNING_SECRET,
-  );
+  // ADR-0006: workspaceId が指定された場合は対象 WS の bot_token を使う。
+  // 未指定時は env の SLACK_BOT_TOKEN を使う既存挙動（後方互換）。
+  const workspaceIdQuery = c.req.query("workspaceId");
+  let client: SlackClient;
+  if (workspaceIdQuery) {
+    const ws = await getDecryptedWorkspace(c.env, workspaceIdQuery);
+    if (!ws) {
+      return c.json(
+        { error: `workspace not found: ${workspaceIdQuery}` },
+        404,
+      );
+    }
+    client = new SlackClient(ws.botToken, ws.signingSecret);
+  } else {
+    client = new SlackClient(
+      c.env.SLACK_BOT_TOKEN,
+      c.env.SLACK_SIGNING_SECRET,
+    );
+  }
   const result = await client.getChannelList(200);
   if (!result.ok) return c.json({ error: result.error }, 400);
   // users.conversations は bot 参加中のチャンネルのみ返すので is_member フィルタは不要
