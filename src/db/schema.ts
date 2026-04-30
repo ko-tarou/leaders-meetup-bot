@@ -34,6 +34,27 @@ export const events = sqliteTable("events", {
   createdAt: text("created_at").notNull(),
 });
 
+// アクション登録（ADR-0008）
+// event 1:N action。各イベントに紐付く Bot のアクション（タスク管理 / 新メンバー対応 / PR レビュー等）。
+// (event_id, action_type) UNIQUE で同一イベントに同一アクションの重複登録を防止。
+export const eventActions = sqliteTable(
+  "event_actions",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    // 'schedule_polling' | 'task_management' | 'member_welcome' | 'pr_review_list'
+    actionType: text("action_type").notNull(),
+    // アクション固有設定（JSON 文字列）
+    config: text("config").notNull().default("{}"),
+    enabled: integer("enabled").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [unique("event_actions_event_type_uniq").on(t.eventId, t.actionType)],
+);
+
 // タスク（HackIt等のハッカソン運営タスク管理用、ADR-0002）
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
