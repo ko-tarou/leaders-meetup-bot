@@ -630,6 +630,55 @@ slack.post("/interactions", async (c) => {
 
       return c.json({ ok: true });
     }
+
+    // === Sprint 14 PR1: 未開始タスクの表示切替 ===
+    // sticky_show_unstarted_<meetingId>: meetings.task_board_show_unstarted を 1 にして repost
+    if (action.action_id?.startsWith("sticky_show_unstarted_")) {
+      const meetingId = action.value;
+      const channelId = payload.channel?.id;
+      if (!meetingId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            await d1
+              .update(meetings)
+              .set({ taskBoardShowUnstarted: 1 })
+              .where(eq(meetings.id, meetingId));
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_show_unstarted:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_hide_unstarted_<meetingId>: 0 に戻して repost
+    if (action.action_id?.startsWith("sticky_hide_unstarted_")) {
+      const meetingId = action.value;
+      const channelId = payload.channel?.id;
+      if (!meetingId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            await d1
+              .update(meetings)
+              .set({ taskBoardShowUnstarted: 0 })
+              .where(eq(meetings.id, meetingId));
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_hide_unstarted:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
   }
 
   if (payload.type === "view_submission") {
@@ -661,6 +710,10 @@ slack.post("/interactions", async (c) => {
         values.due_date_block?.due_date_input?.selected_date || null;
       const dueTime: string | null =
         values.due_time_block?.due_time_input?.selected_time || null;
+      const startDate: string | null =
+        values.start_date_block?.start_date_input?.selected_date || null;
+      const startTime: string | null =
+        values.start_time_block?.start_time_input?.selected_time || null;
       const priority: string =
         values.priority_block?.priority_input?.selected_option?.value || "mid";
 
@@ -683,6 +736,9 @@ slack.post("/interactions", async (c) => {
       const dueAt: string | null = dueDate
         ? jstDateTimeToUtcIso(dueDate, dueTime)
         : null;
+      const startAt: string | null = startDate
+        ? jstDateTimeToUtcIso(startDate, startTime)
+        : null;
 
       // モーダル送信は3秒以内に応答必須。実処理は waitUntil でバックグラウンド化
       c.executionCtx.waitUntil(
@@ -702,6 +758,7 @@ slack.post("/interactions", async (c) => {
               title,
               description,
               dueAt,
+              startAt,
               status: "todo",
               priority,
               createdBySlackId,
@@ -796,6 +853,10 @@ slack.post("/interactions", async (c) => {
         values.due_date_block?.due_date_input?.selected_date || null;
       const dueTime: string | null =
         values.due_time_block?.due_time_input?.selected_time || null;
+      const startDate: string | null =
+        values.start_date_block?.start_date_input?.selected_date || null;
+      const startTime: string | null =
+        values.start_time_block?.start_time_input?.selected_time || null;
       const priority: string =
         values.priority_block?.priority_input?.selected_option?.value || "mid";
 
@@ -818,6 +879,9 @@ slack.post("/interactions", async (c) => {
       const dueAt: string | null = dueDate
         ? jstDateTimeToUtcIso(dueDate, dueTime)
         : null;
+      const startAt: string | null = startDate
+        ? jstDateTimeToUtcIso(startDate, startTime)
+        : null;
 
       c.executionCtx.waitUntil(
         (async () => {
@@ -836,6 +900,7 @@ slack.post("/interactions", async (c) => {
               title,
               description,
               dueAt,
+              startAt,
               status: "todo",
               priority,
               createdBySlackId,
