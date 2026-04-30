@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
+import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
@@ -11,6 +12,9 @@ const app = new Hono<{ Bindings: Env }>();
 // Workers Assets serves static files from ./public (including index.html at /)
 // Only API and Slack routes are handled by the Worker
 
+// ADR-0007: OAuth エンドポイントは Slack 署名検証ミドルウェアの対象外なので
+// /slack より先に /slack/oauth を登録してパス先勝でルーティングを確定させる。
+app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
 

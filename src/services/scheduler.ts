@@ -3,6 +3,7 @@ import { eq, and, lte } from "drizzle-orm";
 import { scheduledJobs } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { sendReminder } from "./reminder";
+import { cleanupExpiredOauthStates } from "../routes/oauth";
 
 export async function processScheduledJobs(
   db: D1Database,
@@ -10,6 +11,16 @@ export async function processScheduledJobs(
 ): Promise<{ processed: number }> {
   const d1 = drizzle(db);
   const now = new Date().toISOString();
+
+  // ADR-0007: 期限切れ OAuth state を削除（best-effort、失敗してもジョブ処理は続行）
+  try {
+    const cleaned = await cleanupExpiredOauthStates(db);
+    if (cleaned > 0) {
+      console.log(`Cleaned up ${cleaned} expired OAuth states`);
+    }
+  } catch (e) {
+    console.error("Failed to cleanup expired OAuth states:", e);
+  }
 
   const jobs = await d1
     .select()
