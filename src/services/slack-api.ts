@@ -104,6 +104,19 @@ export class SlackClient {
     return this.callApiGet("conversations.info", { channel });
   }
 
+  /**
+   * ADR-0008: 指定チャンネルに 1 ユーザーを招待する。
+   * - public channel: `channels:manage` scope が必要
+   * - private channel: `groups:write.invites` scope が必要
+   * - 既に member の場合 `already_in_channel` で ok=false を返すので呼び出し側で許容判定
+   */
+  async inviteToChannel(
+    channel: string,
+    users: string,
+  ): Promise<SlackResponse> {
+    return this.callApi("conversations.invite", { channel, users });
+  }
+
   // ADR-0006: workspace bootstrap で team_id を取得するために使う
   async authTest(): Promise<
     SlackResponse & {
