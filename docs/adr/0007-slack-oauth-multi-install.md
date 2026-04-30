@@ -48,7 +48,7 @@ DevHub Ops に実装することで、1 つの App から複数 workspace への
 
 - `SLACK_CLIENT_ID`: OAuth アプリの Client ID
 - `SLACK_CLIENT_SECRET`: OAuth アプリの Client Secret（Wrangler secret として登録）
-- `OAUTH_REDIRECT_URL`: コールバック URL（例: `https://leaders-meetup-bot.akokoa1221.workers.dev/slack/oauth/callback`）
+- `OAUTH_REDIRECT_URL`: コールバック URL（例: `https://<your-worker-domain>/slack/oauth/callback`、実際の URL は本番デプロイ先に合わせる）
 
 ### 6. UI 統合
 
@@ -69,6 +69,24 @@ DevHub Ops に実装することで、1 つの App から複数 workspace への
 
 簡易実装なら scheduled_jobs を流用 or 単に短期 JWT で signed state を発行も可。
 本ADRでは **新規 oauth_states テーブル**を採用（UNIQUE PK で再利用防止が明示的）。
+
+### 8. oauth_states の期限切れレコードクリーンアップ
+
+D1 には自動 TTL 機能がないため、`expires_at < NOW()` のレコードは放置すると蓄積する。
+以下のいずれかで定期削除する:
+
+| 案 | 内容 | 推奨度 |
+|---|---|---|
+| **A（推奨）** | 既存 cron (5分間隔) の `processScheduledJobs` フローに `cleanupExpiredOauthStates()` を1行追加 | 既存基盤再利用、追加コスト最小 |
+| B | `scheduled_jobs` に `oauth_state_cleanup` タイプを定期登録、Worker が処理 | 過剰、cron で十分 |
+| C | install / callback 各呼び出しで都度 expired を delete | リクエスト遅延、推奨しない |
+
+採用: **案A**。`src/services/scheduler.ts` の cron ハンドラに以下のような数行を追加:
+
+```typescript
+// oauth_states の期限切れ削除（5分ごとに実行される cron で十分）
+await db.delete(oauthStates).where(lt(oauthStates.expiresAt, new Date().toISOString()));
+```
 
 ### シーケンス図 (Mermaid)
 
@@ -134,3 +152,4 @@ sequenceDiagram
 | 5 | PR3: Web UI 統合 |
 | 6 | デプロイ + マイグレーション適用 |
 | 7 | UI からテストインストール（HackIt WS を追加） |
+| 8 | scheduler.ts に oauth_states cleanup 追加（PR2 で同時実装） |
