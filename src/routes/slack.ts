@@ -9,6 +9,7 @@ import {
   handleMessageEvent,
   maybeTriggerStickyRepost,
 } from "../services/auto-respond";
+import { handleMemberJoinedChannel } from "../services/member-welcome";
 import { meetings, tasks, taskAssignees } from "../db/schema";
 import {
   buildTaskAddModalView,
@@ -157,6 +158,19 @@ slack.post("/events", async (c) => {
     // ADR-0006 sticky board repost トリガー（10秒デバウンス）。
     // handleMessageEvent とは独立して走らせる（auto-respond の成否に関係なく動く）。
     maybeTriggerStickyRepost(c.env, c.executionCtx, body.event);
+  }
+
+  // ADR-0008: member_joined_channel イベント
+  // event_actions の member_welcome 設定があれば、運営チャンネルへ自動招待 + 案内 DM
+  if (
+    body.type === "event_callback" &&
+    body.event?.type === "member_joined_channel"
+  ) {
+    c.executionCtx.waitUntil(
+      handleMemberJoinedChannel(c.env, body.event).catch((e) => {
+        console.error("Failed to handle member_joined_channel:", e);
+      }),
+    );
   }
 
   return c.json({ ok: true });
