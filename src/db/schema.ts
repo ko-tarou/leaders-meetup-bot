@@ -13,6 +13,14 @@ export const workspaces = sqliteTable("workspaces", {
   createdAt: text("created_at").notNull(),
 });
 
+// ADR-0007: OAuth install フロー用の state ストア (CSRF防止)
+// expires_at を過ぎたレコードは cron で定期削除
+export const oauthStates = sqliteTable("oauth_states", {
+  state: text("state").primaryKey(), // UUID
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+});
+
 // イベント（meetup, hackathon 等の単位）
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
