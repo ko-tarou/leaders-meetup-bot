@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
-import { DEFAULT_TAB_BY_TYPE } from "../lib/eventTabs";
 
 const labelStyle: React.CSSProperties = {
   color: "#999",
@@ -38,12 +37,10 @@ export function EventSwitcher() {
       onChange={(e) => {
         const newId = e.target.value;
         setCurrentEventId(newId);
-        // URL も同期 (Sprint 2 PR2): 選択した event の既定タブへ遷移
+        // URL も同期: Sprint 13 PR1 でデフォルトタブを actions 固定に変更。
         const newEvent = events.find((ev) => ev.id === newId);
         if (newEvent) {
-          navigate(
-            `/events/${newId}/${DEFAULT_TAB_BY_TYPE[newEvent.type]}`,
-          );
+          navigate(`/events/${newId}/actions`);
         }
       }}
       aria-label="イベント切替"

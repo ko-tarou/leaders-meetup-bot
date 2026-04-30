@@ -1,6 +1,7 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { EventSwitcher } from "./components/EventSwitcher";
 import { EventProvider } from "./contexts/EventContext";
+import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
 import { HomePage } from "./pages/HomePage";
@@ -56,6 +57,11 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+          {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
+          <Route
+            path="/events/:eventId/actions/:actionType"
+            element={<ActionDetailPage />}
+          />
           <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
           <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
           <Route path="/workspaces" element={<WorkspacesPage />} />

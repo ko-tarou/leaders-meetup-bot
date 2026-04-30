@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
-import { DEFAULT_TAB_BY_TYPE, type EventType } from "../lib/eventTabs";
+import { type EventType } from "../lib/eventTabs";
 
 // events 0件時に表示する空状態UI。
 // 「イベントを作成」CTA → 簡易フォームで作成 → 作成後その event の既定タブへ。
@@ -22,7 +22,7 @@ export function EmptyEventState() {
       const created = await api.events.create({ type, name: trimmed });
       await refreshEvents();
       setCurrentEventId(created.id);
-      navigate(`/events/${created.id}/${DEFAULT_TAB_BY_TYPE[type]}`, { replace: true });
+      navigate(`/events/${created.id}/actions`, { replace: true });
     } catch (e) {
       console.error("event creation failed", e);
       alert("イベント作成に失敗しました");

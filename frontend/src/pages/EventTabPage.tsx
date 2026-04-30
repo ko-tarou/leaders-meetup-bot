@@ -3,19 +3,12 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
 import type { EventAction } from "../types";
-import {
-  buildTabsFromActions,
-  getDefaultTabId,
-} from "../lib/eventTabs";
-import { MeetingList } from "../components/MeetingList";
-import { TasksTab } from "../components/TasksTab";
-import { ActionsTab } from "../components/ActionsTab";
-import { PRReviewListTab } from "../components/PRReviewListTab";
+import { TOP_TABS } from "../lib/eventTabs";
+import { ActionsListView } from "../components/ActionsListView";
 
-// ADR-0008 / Sprint 10 PR4:
-// event_actions を fetch して動的にタブ一覧を生成する。
-// schedule / tasks タブは既存コンポーネントをそのまま流用。
-// member_welcome / pr_review はプレースホルダ (Sprint 11/12 で本実装)。
+// Sprint 13 PR1: 上部タブを 3 つ (アクション/メンバー/履歴) に固定。
+// schedule / tasks / member_welcome / pr_review といった旧タブは廃止し、
+// 全て /events/:id/actions/:actionType の専用ページへ集約した。
 export function EventTabPage() {
   const { eventId, tab } = useParams<{ eventId: string; tab: string }>();
   const navigate = useNavigate();
@@ -38,7 +31,7 @@ export function EventTabPage() {
     }
   }, [eventsLoading, eventId, currentEvent?.id, events, setCurrentEventId]);
 
-  // event_actions 取得
+  // event_actions 取得 (アクション一覧表示で使用)
   useEffect(() => {
     if (!eventId) return;
     let cancelled = false;
@@ -68,16 +61,13 @@ export function EventTabPage() {
     );
   }
 
-  // eventId が events に現存しない (削除/存在しない) → / へ
+  // eventId が現存しない (削除/存在しない) → / へ
   const event = events.find((e) => e.id === eventId);
   if (!event || !eventId) return <Navigate to="/" replace />;
 
-  const tabs = buildTabsFromActions(actions);
-
-  // tab 不整合時はデフォルトタブへリダイレクト
-  if (!tab || !tabs.some((t) => t.tabId === tab)) {
-    const def = getDefaultTabId(actions);
-    return <Navigate to={`/events/${eventId}/${def}`} replace />;
+  // タブ不整合 → actions にフォールバック (旧 URL 互換)
+  if (!tab || !TOP_TABS.some((t) => t.id === tab)) {
+    return <Navigate to={`/events/${eventId}/actions`} replace />;
   }
 
   return (
@@ -85,22 +75,24 @@ export function EventTabPage() {
       <div
         style={{
           display: "flex",
-          gap: 4,
-          marginBottom: 16,
+          gap: "0.25rem",
+          borderBottom: "1px solid #e5e7eb",
+          marginBottom: "1rem",
           flexWrap: "wrap",
         }}
       >
-        {tabs.map((t) => (
+        {TOP_TABS.map((t) => (
           <button
-            key={t.tabId}
-            onClick={() => navigate(`/events/${eventId}/${t.tabId}`)}
+            key={t.id}
+            onClick={() => navigate(`/events/${eventId}/${t.id}`)}
             style={{
-              padding: "8px 16px",
+              padding: "0.5rem 1rem",
               border: "none",
-              borderRadius: "4px 4px 0 0",
-              background: t.tabId === tab ? "#4A90D9" : "#eee",
-              color: t.tabId === tab ? "#fff" : "#333",
+              borderRadius: "0.25rem 0.25rem 0 0",
+              background: t.id === tab ? "#4A90D9" : "transparent",
+              color: t.id === tab ? "white" : "#374151",
               cursor: "pointer",
+              fontSize: "0.95rem",
             }}
           >
             {t.label}
@@ -108,70 +100,23 @@ export function EventTabPage() {
         ))}
       </div>
 
-      {renderTabContent({
-        tab,
-        eventId,
-        actions,
-        navigate,
-        refreshActions: () => setActionsRefreshKey((k) => k + 1),
-      })}
+      {tab === "actions" && (
+        <ActionsListView
+          eventId={eventId}
+          actions={actions}
+          onChange={() => setActionsRefreshKey((k) => k + 1)}
+        />
+      )}
+      {tab === "members" && (
+        <PlaceholderTab label="メンバー一覧は今後のスプリントで実装予定です。" />
+      )}
+      {tab === "history" && (
+        <PlaceholderTab label="履歴ビューは今後のスプリントで実装予定です。" />
+      )}
     </div>
   );
 }
 
-function renderTabContent({
-  tab,
-  eventId,
-  actions,
-  navigate,
-  refreshActions,
-}: {
-  tab: string;
-  eventId: string;
-  actions: EventAction[];
-  navigate: ReturnType<typeof useNavigate>;
-  refreshActions: () => void;
-}) {
-  // アクション系
-  if (tab === "schedule") {
-    return <MeetingList onSelect={(id) => navigate(`/meetings/${id}`)} />;
-  }
-  if (tab === "tasks") {
-    return <TasksTab eventId={eventId} />;
-  }
-  if (tab === "member_welcome") {
-    return (
-      <PlaceholderTab label="新メンバー対応は Sprint 11 で実装予定です。" />
-    );
-  }
-  if (tab === "pr_review") {
-    return <PRReviewListTab eventId={eventId} />;
-  }
-  // 共通タブ
-  if (tab === "members") {
-    return (
-      <PlaceholderTab label="メンバー一覧は今後のスプリントで実装予定です。" />
-    );
-  }
-  if (tab === "history") {
-    return (
-      <PlaceholderTab label="履歴ビューは今後のスプリントで実装予定です。" />
-    );
-  }
-  if (tab === "actions") {
-    return (
-      <ActionsTab
-        eventId={eventId}
-        actions={actions}
-        onChange={refreshActions}
-      />
-    );
-  }
-  return <PlaceholderTab label={`未知のタブ: ${tab}`} />;
-}
-
 function PlaceholderTab({ label }: { label: string }) {
-  return (
-    <p style={{ color: "#999", padding: "1rem" }}>{label}</p>
-  );
+  return <p style={{ color: "#999", padding: "1rem" }}>{label}</p>;
 }
