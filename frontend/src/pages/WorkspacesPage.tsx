@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { Workspace } from "../types";
 import { api } from "../api";
 
-// ADR-0006: Slack workspace 管理画面
-// - 一覧 / 新規登録 / 削除 をサポート
+// ADR-0006 / ADR-0007: Slack workspace 管理画面
+// - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
 // - bot_token / signing_secret は登録時のみ送信し、サーバーは AES-256-GCM で暗号化保存
 export function WorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -11,6 +12,20 @@ export function WorkspacesPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // OAuth callback redirect (?installed=<team_name>) を検出して成功メッセージを表示
+  useEffect(() => {
+    const installed = searchParams.get("installed");
+    if (!installed) return;
+    setSuccessMsg(`「${installed}」を登録しました`);
+    // URL からクエリ削除（履歴を汚さないよう replace）
+    searchParams.delete("installed");
+    setSearchParams(searchParams, { replace: true });
+    const t = setTimeout(() => setSuccessMsg(null), 5000);
+    return () => clearTimeout(t);
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,18 +78,44 @@ export function WorkspacesPage() {
           display: "flex",
           alignItems: "center",
           marginBottom: "1rem",
+          gap: "0.5rem",
         }}
       >
         <h2 style={{ margin: 0 }}>
           ワークスペース管理 ({workspaces.length}件)
         </h2>
-        <button
-          onClick={() => setShowForm(true)}
-          style={{ marginLeft: "auto" }}
+        <a
+          href="/slack/oauth/install"
+          style={{
+            marginLeft: "auto",
+            background: "#4A154B", // Slack purple
+            color: "white",
+            padding: "0.5rem 1rem",
+            borderRadius: "0.375rem",
+            textDecoration: "none",
+            fontWeight: "bold",
+            fontSize: "0.95rem",
+          }}
         >
-          + 新規追加
-        </button>
+          + Slack でインストール
+        </a>
+        <button onClick={() => setShowForm(true)}>+ 新規追加</button>
       </div>
+
+      {successMsg && (
+        <div
+          role="status"
+          style={{
+            background: "#10b981",
+            color: "white",
+            padding: "0.75rem",
+            borderRadius: "0.375rem",
+            marginBottom: "1rem",
+          }}
+        >
+          {successMsg}
+        </div>
+      )}
 
       {workspaces.length === 0 && (
         <div style={{ color: "#6b7280" }}>
