@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
-import type { Meeting } from "../types";
+import type { Meeting, Workspace } from "../types";
 import { ChannelSelector } from "./ChannelSelector";
 
 type Props = { onSelect: (id: string) => void };
@@ -11,6 +11,22 @@ export function MeetingList({ onSelect }: Props) {
   const [name, setName] = useState("");
   const [channelId, setChannelId] = useState("");
   const [channelNames, setChannelNames] = useState<Record<string, string>>({});
+  // ADR-0006: meeting 作成時に workspace を選択する
+  const [workspaceList, setWorkspaceList] = useState<Workspace[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
+
+  useEffect(() => {
+    api.workspaces
+      .list()
+      .then((list) => {
+        if (!Array.isArray(list)) return;
+        setWorkspaceList(list);
+        if (list.length > 0) {
+          setSelectedWorkspaceId((prev) => prev || list[0].id);
+        }
+      })
+      .catch(() => setWorkspaceList([]));
+  }, []);
 
   const load = () => {
     api
@@ -41,7 +57,12 @@ export function MeetingList({ onSelect }: Props) {
 
   const handleCreate = async () => {
     if (!name || !channelId) return;
-    await api.createMeeting({ name, channelId });
+    await api.createMeeting({
+      name,
+      channelId,
+      // selectedWorkspaceId が空文字なら省略 → backend で default WS
+      ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
+    });
     setName("");
     setChannelId("");
     load();
@@ -67,9 +88,28 @@ export function MeetingList({ onSelect }: Props) {
             onChange={(e) => setName(e.target.value)}
             style={inputStyle}
           />
+          {workspaceList.length > 0 && (
+            <select
+              value={selectedWorkspaceId}
+              onChange={(e) => {
+                setSelectedWorkspaceId(e.target.value);
+                // workspace が変われば channel 候補も変わるので選択をクリア
+                setChannelId("");
+              }}
+              style={selectStyle}
+              aria-label="Workspace を選択"
+            >
+              {workspaceList.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          )}
           <ChannelSelector
             value={channelId}
             onChange={(id) => setChannelId(id)}
+            workspaceId={selectedWorkspaceId || undefined}
           />
           <button onClick={handleCreate} style={buttonStyle}>
             作成
@@ -134,6 +174,12 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid #ddd",
   borderRadius: 4,
   flex: 1,
+};
+const selectStyle: React.CSSProperties = {
+  padding: "8px 12px",
+  border: "1px solid #ddd",
+  borderRadius: 4,
+  minWidth: 160,
 };
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",
