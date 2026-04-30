@@ -135,6 +135,89 @@ export function buildStickyTaskAddModal(meta: TaskAddModalMetadata) {
   };
 }
 
+/**
+ * ADR-0008: PR レビュー sticky board の「+ 新規レビュー依頼」ボタンから
+ * 開くモーダル view。
+ *
+ * callback_id: sticky_pr_review_add_submit
+ * private_metadata: { eventId, requesterSlackId, channelId } を JSON 化
+ *
+ * - title: 必須
+ * - url: 任意（PR/Issue リンク）
+ * - description: 任意
+ * - reviewer: 任意（指定された場合は status=in_review、未指定なら open）
+ */
+export type PRReviewAddModalMetadata = {
+  eventId: string;
+  requesterSlackId: string;
+  channelId: string;
+};
+
+export function buildPRReviewAddModal(
+  eventId: string,
+  userId: string,
+  channelId: string,
+) {
+  const meta: PRReviewAddModalMetadata = {
+    eventId,
+    requesterSlackId: userId,
+    channelId,
+  };
+  return {
+    type: "modal",
+    callback_id: "sticky_pr_review_add_submit",
+    private_metadata: JSON.stringify(meta),
+    title: { type: "plain_text", text: "レビュー依頼を作成" },
+    submit: { type: "plain_text", text: "作成" },
+    close: { type: "plain_text", text: "キャンセル" },
+    blocks: [
+      {
+        type: "input",
+        block_id: "title_block",
+        label: { type: "plain_text", text: "タイトル" },
+        element: {
+          type: "plain_text_input",
+          action_id: "title_input",
+          max_length: 200,
+        },
+      },
+      {
+        type: "input",
+        block_id: "url_block",
+        optional: true,
+        label: { type: "plain_text", text: "URL（PR/Issue リンク）" },
+        element: {
+          type: "plain_text_input",
+          action_id: "url_input",
+        },
+      },
+      {
+        type: "input",
+        block_id: "desc_block",
+        optional: true,
+        label: { type: "plain_text", text: "説明" },
+        element: {
+          type: "plain_text_input",
+          action_id: "desc_input",
+          multiline: true,
+          max_length: 2000,
+        },
+      },
+      {
+        type: "input",
+        block_id: "reviewer_block",
+        optional: true,
+        label: { type: "plain_text", text: "レビュアー（任意）" },
+        element: {
+          type: "users_select",
+          action_id: "reviewer_input",
+          placeholder: { type: "plain_text", text: "レビュアーを選択" },
+        },
+      },
+    ],
+  };
+}
+
 // JST の YYYY-MM-DD + HH:mm を UTC ISO 文字列 (Z付き) に変換
 // 時刻未指定時は 09:00 JST を採用
 export function jstDateTimeToUtcIso(
