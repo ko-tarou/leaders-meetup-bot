@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { EventAction, EventActionType } from "../types";
 import { api } from "../api";
 import { ACTION_TAB_INFO } from "../lib/eventTabs";
+import { ActionConfigModal } from "./ActionConfigModal";
 
 // ADR-0008 / Sprint 10 PR4: アクション管理UI。
 // 一覧 / 追加 / 有効化トグル / 削除 を提供する。
@@ -23,6 +24,8 @@ export function ActionsTab({ eventId, actions, onChange }: Props) {
   const [showAdd, setShowAdd] = useState(false);
   // mutation 中の action id (二重押下防止)
   const [pending, setPending] = useState<string | null>(null);
+  // 設定モーダルを開いている action（null = 非表示）
+  const [editingConfig, setEditingConfig] = useState<EventAction | null>(null);
 
   const usedTypes = new Set(actions.map((a) => a.actionType));
   const availableTypes = ALL_ACTION_TYPES.filter((t) => !usedTypes.has(t));
@@ -116,6 +119,19 @@ export function ActionsTab({ eventId, actions, onChange }: Props) {
               </div>
             </div>
             <button
+              onClick={() => setEditingConfig(a)}
+              disabled={isPending}
+              style={{
+                padding: "0.25rem 0.75rem",
+                border: "1px solid #d1d5db",
+                borderRadius: "0.25rem",
+                background: "#fff",
+                cursor: isPending ? "wait" : "pointer",
+              }}
+            >
+              設定
+            </button>
+            <button
               onClick={() => handleToggle(a)}
               disabled={isPending}
               style={{
@@ -153,6 +169,18 @@ export function ActionsTab({ eventId, actions, onChange }: Props) {
           onClose={() => setShowAdd(false)}
           onAdded={() => {
             setShowAdd(false);
+            onChange();
+          }}
+        />
+      )}
+
+      {editingConfig && (
+        <ActionConfigModal
+          eventId={eventId}
+          action={editingConfig}
+          onClose={() => setEditingConfig(null)}
+          onSaved={() => {
+            setEditingConfig(null);
             onChange();
           }}
         />
