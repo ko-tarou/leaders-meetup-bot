@@ -10,6 +10,7 @@ import {
 import { MeetingList } from "../components/MeetingList";
 import { TasksTab } from "../components/TasksTab";
 import { ActionsTab } from "../components/ActionsTab";
+import { PRReviewListTab } from "../components/PRReviewListTab";
 
 // ADR-0008 / Sprint 10 PR4:
 // event_actions を fetch して動的にタブ一覧を生成する。
@@ -144,9 +145,7 @@ function renderTabContent({
     );
   }
   if (tab === "pr_review") {
-    return (
-      <PlaceholderTab label="PRレビュー一覧は Sprint 12 で実装予定です。" />
-    );
+    return <PRReviewListTab eventId={eventId} />;
   }
   // 共通タブ
   if (tab === "members") {
