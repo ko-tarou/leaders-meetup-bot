@@ -10,15 +10,17 @@ import {
   maybeTriggerStickyRepost,
 } from "../services/auto-respond";
 import { handleMemberJoinedChannel } from "../services/member-welcome";
-import { meetings, tasks, taskAssignees } from "../db/schema";
+import { meetings, tasks, taskAssignees, prReviews } from "../db/schema";
 import {
   buildTaskAddModalView,
   buildStickyTaskAddModal,
+  buildPRReviewAddModal,
   jstDateTimeToUtcIso,
 } from "../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../services/devhub-task-list";
 import { scheduleTaskReminders } from "../services/devhub-task-reminder";
 import { stickyRepostByChannel } from "../services/sticky-task-board";
+import { prReviewRepostByChannel } from "../services/sticky-pr-review-board";
 import {
   getWorkspaceBySlackTeamId,
   getDecryptedWorkspace,
@@ -679,6 +681,152 @@ slack.post("/interactions", async (c) => {
 
       return c.json({ ok: true });
     }
+
+    // === ADR-0008 PR レビュー sticky board actions ===
+    // sticky_pr_take_<reviewId>: 押した本人をレビュアーに割り当て、status=in_review に更新
+    if (action.action_id?.startsWith("sticky_pr_take_")) {
+      const reviewId = action.value;
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !userId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            await d1
+              .update(prReviews)
+              .set({
+                reviewerSlackId: userId,
+                status: "in_review",
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(prReviews.id, reviewId));
+            await prReviewRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_take:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_done_<reviewId>: status=merged に更新 → 即時 repost（ボードから消える）
+    if (action.action_id?.startsWith("sticky_pr_done_")) {
+      const reviewId = action.value;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            await d1
+              .update(prReviews)
+              .set({
+                status: "merged",
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(prReviews.id, reviewId));
+            await prReviewRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_done:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_review_<reviewId>: 予備の手動「レビュー中」遷移（将来用）
+    // 現状は使わないが action_id プレフィックスは仕様書で予約済み。
+    if (action.action_id?.startsWith("sticky_pr_review_")) {
+      const reviewId = action.value;
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !userId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            await d1
+              .update(prReviews)
+              .set({
+                reviewerSlackId: userId,
+                status: "in_review",
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(prReviews.id, reviewId));
+            await prReviewRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_review:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_create: 「+ 新規レビュー依頼」ボタン → モーダル open
+    // value に meetingId が入っている。trigger_id は 3 秒で失効するため waitUntil
+    // 内でも極力早く openView を叩く。
+    if (action.action_id === "sticky_pr_create") {
+      const meetingId = action.value;
+      const triggerId = payload.trigger_id;
+      if (!meetingId || !triggerId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const meeting = await d1
+              .select()
+              .from(meetings)
+              .where(eq(meetings.id, meetingId))
+              .get();
+            if (
+              !meeting ||
+              !meeting.eventId ||
+              !meeting.workspaceId ||
+              !meeting.channelId
+            ) {
+              console.warn(
+                `sticky_pr_create: meeting ${meetingId} not ready (eventId/workspaceId/channelId missing)`,
+              );
+              return;
+            }
+
+            const client = await createSlackClientForWorkspace(
+              c.env,
+              meeting.workspaceId,
+            );
+            if (!client) {
+              console.warn(
+                `sticky_pr_create: no SlackClient for workspace ${meeting.workspaceId}`,
+              );
+              return;
+            }
+
+            const userId = payload.user?.id || "";
+            const view = buildPRReviewAddModal(
+              meeting.eventId,
+              userId,
+              meeting.channelId,
+            );
+            const res = await client.openView(triggerId, view);
+            if (!res.ok) {
+              console.error("sticky_pr_create views.open returned not ok:", res);
+            }
+          } catch (e) {
+            console.error("Failed to open sticky_pr_create modal:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
   }
 
   if (payload.type === "view_submission") {
@@ -963,6 +1111,92 @@ slack.post("/interactions", async (c) => {
             } catch (notifyErr) {
               console.error("Failed to notify sticky task failure:", notifyErr);
             }
+          }
+        })(),
+      );
+
+      return c.json({});
+    }
+
+    // === ADR-0008 PR レビュー sticky board: 新規レビュー依頼モーダルのサブミット ===
+    if (view?.callback_id === "sticky_pr_review_add_submit") {
+      let meta: {
+        eventId?: string;
+        requesterSlackId?: string;
+        channelId?: string;
+      } = {};
+      try {
+        meta = JSON.parse(view.private_metadata || "{}");
+      } catch {
+        meta = {};
+      }
+      const eventId = meta.eventId;
+      const channelId = meta.channelId || "";
+      const requesterSlackId =
+        meta.requesterSlackId || payload.user?.id || "";
+
+      const values = view.state?.values || {};
+      const title: string | undefined =
+        values.title_block?.title_input?.value;
+      const url: string | null =
+        values.url_block?.url_input?.value || null;
+      const description: string | null =
+        values.desc_block?.desc_input?.value || null;
+      const reviewerSlackId: string | null =
+        values.reviewer_block?.reviewer_input?.selected_user || null;
+
+      if (!title || !title.trim()) {
+        return c.json({
+          response_action: "errors",
+          errors: { title_block: "タイトルは必須です" },
+        });
+      }
+      if (!eventId) {
+        return c.json({
+          response_action: "errors",
+          errors: {
+            title_block:
+              "イベント情報が失われています。ボードの新規ボタンを押し直してください。",
+          },
+        });
+      }
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          const d1 = drizzle(c.env.DB);
+          try {
+            const reviewId = crypto.randomUUID();
+            const now = new Date().toISOString();
+            // レビュアー指定があれば即 in_review、無ければ open
+            const initialStatus = reviewerSlackId ? "in_review" : "open";
+            await d1.insert(prReviews).values({
+              id: reviewId,
+              eventId,
+              title,
+              url,
+              description,
+              status: initialStatus,
+              requesterSlackId,
+              reviewerSlackId,
+              createdAt: now,
+              updatedAt: now,
+            });
+
+            if (channelId) {
+              try {
+                await prReviewRepostByChannel(c.env, channelId);
+              } catch (repErr) {
+                console.error(
+                  "Failed to repost pr review sticky after create:",
+                  repErr,
+                );
+              }
+            }
+          } catch (e) {
+            console.error(
+              "Failed to create pr review from sticky modal:",
+              e,
+            );
           }
         })(),
       );
