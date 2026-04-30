@@ -1,18 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Meeting, Workspace } from "../types";
+import type { EventActionType, Meeting, Workspace } from "../types";
 import { api } from "../api";
 
 // Sprint 13 PR3: タスク管理アクションの「チャンネル管理」サブタブ。
 // 旧 TaskManagementSettings + AddChannelModal を統合し、
 // ページ内インラインで「検索 + リスト + ページネーション」UI に置換する。
+// Sprint 15 PR2: actionType prop で task_management / pr_review_list を切替。
+//   sticky 状態判定と enable/disable API を分岐する。
 
 const PAGE_SIZE = 20;
 
-type Props = { eventId: string };
+type Props = {
+  eventId: string;
+  actionType: EventActionType;
+};
 
 type SlackChannel = { id: string; name: string };
 
-export function ChannelManagementSection({ eventId }: Props) {
+// actionType ごとの sticky bot ラベル。MVP では「sticky bot」表記を踏襲しつつ
+// 説明文だけ機能名を分岐する。
+const STICKY_DESC: Record<string, string> = {
+  task_management:
+    "ここに登録された各チャンネルでタスク管理機能（タスク作成・sticky bot）が動作します。",
+  pr_review_list:
+    "ここに登録された各チャンネルで PR レビュー機能（一覧表示・sticky bot）が動作します。",
+};
+
+export function ChannelManagementSection({ eventId, actionType }: Props) {
   // 登録済みチャンネル
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -117,12 +131,33 @@ export function ChannelManagementSection({ eventId }: Props) {
   const wsName = (id?: string | null) =>
     workspaces.find((w) => w.id === id)?.name ?? "不明な workspace";
 
+  // actionType ごとに sticky 有効/無効を判定
+  const getStickyEnabled = (m: Meeting): boolean => {
+    if (actionType === "task_management") return !!m.taskBoardTs;
+    if (actionType === "pr_review_list") return !!m.prReviewBoardTs;
+    return false;
+  };
+
+  // actionType ごとに sticky enable/disable API を選択
+  const enableSticky = (meetingId: string) => {
+    if (actionType === "task_management") return api.enableTaskBoard(meetingId);
+    if (actionType === "pr_review_list")
+      return api.enablePRReviewBoard(meetingId);
+    throw new Error(`unsupported actionType: ${actionType}`);
+  };
+  const disableSticky = (meetingId: string) => {
+    if (actionType === "task_management") return api.disableTaskBoard(meetingId);
+    if (actionType === "pr_review_list")
+      return api.disablePRReviewBoard(meetingId);
+    throw new Error(`unsupported actionType: ${actionType}`);
+  };
+
   const handleToggleSticky = async (m: Meeting) => {
     setPendingMeetingId(m.id);
     try {
-      const r = m.taskBoardTs
-        ? await api.disableTaskBoard(m.id)
-        : await api.enableTaskBoard(m.id);
+      const r = getStickyEnabled(m)
+        ? await disableSticky(m.id)
+        : await enableSticky(m.id);
       if (!r.ok) throw new Error(r.error ?? "切替に失敗しました");
       setRefreshKey((k) => k + 1);
     } catch (e) {
@@ -163,7 +198,7 @@ export function ChannelManagementSection({ eventId }: Props) {
       });
       // sticky をデフォルトで即有効化（失敗しても追加自体は成立させる）
       try {
-        await api.enableTaskBoard(created.id);
+        await enableSticky(created.id);
       } catch (e) {
         console.warn("sticky 有効化失敗:", e);
       }
@@ -190,7 +225,8 @@ export function ChannelManagementSection({ eventId }: Props) {
           影響するチャンネル ({meetings.length}件)
         </h3>
         <p style={descStyle}>
-          ここに登録された各チャンネルでタスク管理機能（タスク作成・sticky bot）が動作します。
+          {STICKY_DESC[actionType] ??
+            "ここに登録された各チャンネルでこのアクションの sticky bot が動作します。"}
         </p>
         {meetings.length === 0 ? (
           <div style={emptyStyle}>
@@ -199,7 +235,7 @@ export function ChannelManagementSection({ eventId }: Props) {
         ) : (
           <div style={{ display: "grid", gap: "0.5rem" }}>
             {meetings.map((m) => {
-              const isEnabled = !!m.taskBoardTs;
+              const isEnabled = getStickyEnabled(m);
               return (
                 <div key={m.id} style={meetingRowStyle}>
                   <div style={{ flex: 1, minWidth: 0 }}>
