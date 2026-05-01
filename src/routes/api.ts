@@ -43,12 +43,12 @@ import {
 import {
   postInitialBoard,
   deleteBoard,
-  repostBoard,
+  buildBoardBlocks,
 } from "../services/sticky-task-board";
 import {
   postInitialPRReviewBoard,
   deletePRReviewBoard,
-  repostPRReviewBoard,
+  buildPRReviewBoardBlocks,
 } from "../services/sticky-pr-review-board";
 import {
   createSlackClientForWorkspace,
@@ -377,9 +377,11 @@ api.post("/meetings/:id/task-board", async (c) => {
   return c.json({ ok: true, ts: result.ts });
 });
 
-// Sprint 18 PR1: 既存 sticky メッセージを削除して最新 blocks で再投稿する
-// 手動リフレッシュ。既存の repostBoard を再利用するだけ。
-// 機能更新（start_at トグル / LGTM 等）が古いメッセージに反映されない問題対策。
+// Sprint 18 PR2: 「更新ボタン押しても再投稿されない」報告に対する診断版。
+// repostBoard を呼ばずに delete / post の各ステップをインライン展開し、
+// 各 Slack API レスポンスとエラー文字列を構造化して返す。
+// これで「post は ok=true だが画面に出ない」「delete が silent fail」など
+// 運用画面で原因が即特定できる。既存サービス層には触らない。
 api.post("/meetings/:id/task-board/refresh", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
@@ -404,17 +406,65 @@ api.post("/meetings/:id/task-board/refresh", async (c) => {
     return c.json({ error: "failed to create SlackClient" }, 500);
   }
 
-  const result = await repostBoard(c.env.DB, client, {
-    id: meeting.id,
-    channelId: meeting.channelId,
-    eventId: meeting.eventId,
-    taskBoardTs: meeting.taskBoardTs,
-    taskBoardShowUnstarted: meeting.taskBoardShowUnstarted,
-  });
-  if ("error" in result) {
-    return c.json({ ok: false, error: result.error }, 500);
+  const diagnostics: {
+    oldTs: string;
+    deleteResult?: unknown;
+    deleteError?: string;
+    postResult?: unknown;
+    postError?: string;
+    newTs?: string;
+  } = { oldTs: meeting.taskBoardTs };
+
+  // 1. delete 旧メッセージ（fail-soft: 失敗しても続行）
+  try {
+    const delResult = await client.deleteMessage(
+      meeting.channelId,
+      meeting.taskBoardTs,
+    );
+    diagnostics.deleteResult = delResult;
+    if (!delResult || delResult.ok === false) {
+      diagnostics.deleteError = `delete returned not-ok: ${JSON.stringify(delResult)}`;
+    }
+  } catch (e) {
+    diagnostics.deleteError = e instanceof Error ? e.message : String(e);
   }
-  return c.json({ ok: true, ts: result.ts });
+
+  // 2. blocks を構築
+  const showUnstarted = (meeting.taskBoardShowUnstarted ?? 0) === 1;
+  const blocks = await buildBoardBlocks(
+    c.env.DB,
+    client,
+    meeting.id,
+    meeting.eventId,
+    showUnstarted,
+  );
+
+  // 3. post 新メッセージ
+  try {
+    const postResult = await client.postMessage(
+      meeting.channelId,
+      "📋 タスクボード",
+      blocks,
+    );
+    diagnostics.postResult = postResult;
+    const ts = typeof postResult.ts === "string" ? postResult.ts : undefined;
+    if (postResult.ok === true && ts) {
+      diagnostics.newTs = ts;
+      await db
+        .update(meetings)
+        .set({ taskBoardTs: ts })
+        .where(eq(meetings.id, id));
+    } else {
+      diagnostics.postError = `post returned not-ok: ${JSON.stringify(postResult)}`;
+    }
+  } catch (e) {
+    diagnostics.postError = e instanceof Error ? e.message : String(e);
+  }
+
+  return c.json({
+    ok: !diagnostics.postError,
+    ...diagnostics,
+  });
 });
 
 api.delete("/meetings/:id/task-board", async (c) => {
@@ -480,8 +530,8 @@ api.post("/meetings/:id/pr-review-board", async (c) => {
   return c.json({ ok: true, ts: result.ts });
 });
 
-// Sprint 18 PR1: PR レビュー sticky board の手動リフレッシュ。
-// 古いメッセージを削除して最新機能（LGTM 等）が反映された新メッセージを post。
+// Sprint 18 PR2: PR レビュー board も診断版に改修。
+// task-board と同じく delete / post を構造化して返す。
 api.post("/meetings/:id/pr-review-board/refresh", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
@@ -503,16 +553,63 @@ api.post("/meetings/:id/pr-review-board/refresh", async (c) => {
     return c.json({ error: "failed to create SlackClient" }, 500);
   }
 
-  const result = await repostPRReviewBoard(c.env.DB, client, {
-    id: meeting.id,
-    channelId: meeting.channelId,
-    eventId: meeting.eventId,
-    prReviewBoardTs: meeting.prReviewBoardTs,
-  });
-  if ("error" in result) {
-    return c.json({ ok: false, error: result.error }, 500);
+  const diagnostics: {
+    oldTs: string;
+    deleteResult?: unknown;
+    deleteError?: string;
+    postResult?: unknown;
+    postError?: string;
+    newTs?: string;
+  } = { oldTs: meeting.prReviewBoardTs };
+
+  // 1. delete
+  try {
+    const delResult = await client.deleteMessage(
+      meeting.channelId,
+      meeting.prReviewBoardTs,
+    );
+    diagnostics.deleteResult = delResult;
+    if (!delResult || delResult.ok === false) {
+      diagnostics.deleteError = `delete returned not-ok: ${JSON.stringify(delResult)}`;
+    }
+  } catch (e) {
+    diagnostics.deleteError = e instanceof Error ? e.message : String(e);
   }
-  return c.json({ ok: true, ts: result.ts });
+
+  // 2. blocks
+  const blocks = await buildPRReviewBoardBlocks(
+    c.env.DB,
+    client,
+    meeting.id,
+    meeting.eventId,
+  );
+
+  // 3. post
+  try {
+    const postResult = await client.postMessage(
+      meeting.channelId,
+      "🔍 PR レビュー依頼",
+      blocks,
+    );
+    diagnostics.postResult = postResult;
+    const ts = typeof postResult.ts === "string" ? postResult.ts : undefined;
+    if (postResult.ok === true && ts) {
+      diagnostics.newTs = ts;
+      await db
+        .update(meetings)
+        .set({ prReviewBoardTs: ts })
+        .where(eq(meetings.id, id));
+    } else {
+      diagnostics.postError = `post returned not-ok: ${JSON.stringify(postResult)}`;
+    }
+  } catch (e) {
+    diagnostics.postError = e instanceof Error ? e.message : String(e);
+  }
+
+  return c.json({
+    ok: !diagnostics.postError,
+    ...diagnostics,
+  });
 });
 
 api.delete("/meetings/:id/pr-review-board", async (c) => {
