@@ -197,6 +197,15 @@ export type PRReview = {
   updatedAt: string;
 };
 
+// PR レビュー LGTM (Sprint 17 PR1)
+// 同一ユーザーの重複付与は backend の UNIQUE 制約で弾かれる
+export type PRReviewLgtm = {
+  id: string;
+  reviewId: string;
+  slackUserId: string;
+  createdAt: string;
+};
+
 // Slack workspace（ADR-0006）
 // bot_token / signing_secret は backend が返さないため型にも含めない
 export type Workspace = {

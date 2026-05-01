@@ -14,11 +14,15 @@
 
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { meetings, prReviews } from "../db/schema";
+import { meetings, prReviews, prReviewLgtms } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { createSlackClientForWorkspace } from "./workspace";
 import type { Env } from "../types/env";
+
+// Sprint 17 PR1: 自動完了に必要な LGTM 数。
+// このしきい値に達した時点で sticky bot が status='merged' に自動更新する。
+export const LGTM_THRESHOLD = 2;
 
 const STATUS_LABEL: Record<string, string> = {
   open: "未着手",
@@ -94,7 +98,14 @@ export async function buildPRReviewBoardBlocks(
     const urlText = r.url ? `\n<${r.url}|🔗 リンク>` : "";
     const statusEmoji = STATUS_EMOJI[r.status] ?? "🔴";
     const statusLabel = STATUS_LABEL[r.status] ?? r.status;
-    const sectionText = `*${statusEmoji} ${r.title}*\n${statusLabel} / 依頼者: ${requesterName} / ${reviewerText}${urlText}`;
+    // Sprint 17 PR1: LGTM 数を取得して表示
+    const lgtms = await d1
+      .select()
+      .from(prReviewLgtms)
+      .where(eq(prReviewLgtms.reviewId, r.id))
+      .all();
+    const lgtmText = `LGTM ${lgtms.length}/${LGTM_THRESHOLD}`;
+    const sectionText = `*${statusEmoji} ${r.title}*\n${statusLabel} / ${lgtmText} / 依頼者: ${requesterName} / ${reviewerText}${urlText}`;
 
     blocks.push({
       type: "section",
@@ -112,6 +123,12 @@ export async function buildPRReviewBoardBlocks(
       });
     }
     if (r.status === "open" || r.status === "in_review") {
+      buttons.push({
+        type: "button",
+        action_id: `sticky_pr_lgtm_${r.id}`,
+        text: { type: "plain_text", text: "👍 LGTM" },
+        value: r.id,
+      });
       buttons.push({
         type: "button",
         action_id: `sticky_pr_done_${r.id}`,

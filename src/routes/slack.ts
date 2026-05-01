@@ -10,7 +10,13 @@ import {
   maybeTriggerStickyRepost,
 } from "../services/auto-respond";
 import { handleMemberJoinedChannel } from "../services/member-welcome";
-import { meetings, tasks, taskAssignees, prReviews } from "../db/schema";
+import {
+  meetings,
+  tasks,
+  taskAssignees,
+  prReviews,
+  prReviewLgtms,
+} from "../db/schema";
 import {
   buildTaskAddModalView,
   buildStickyTaskAddModal,
@@ -705,6 +711,112 @@ slack.post("/interactions", async (c) => {
             await prReviewRepostByChannel(c.env, channelId);
           } catch (e) {
             console.error("Failed to handle sticky_pr_take:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_lgtm_<reviewId>: LGTM をトグル（同じユーザーが再押下で取消）。
+    // 2 つ集まったら自動で status='merged' に遷移し、依頼者にメンションで完了通知を post。
+    if (action.action_id?.startsWith("sticky_pr_lgtm_")) {
+      const reviewId = action.value;
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !userId || !channelId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+
+            // 既に LGTM 済みかチェック
+            const existing = await d1
+              .select()
+              .from(prReviewLgtms)
+              .where(
+                and(
+                  eq(prReviewLgtms.reviewId, reviewId),
+                  eq(prReviewLgtms.slackUserId, userId),
+                ),
+              )
+              .get();
+
+            if (existing) {
+              // すでに LGTM 済み → トグルとして削除
+              await d1
+                .delete(prReviewLgtms)
+                .where(
+                  and(
+                    eq(prReviewLgtms.reviewId, reviewId),
+                    eq(prReviewLgtms.slackUserId, userId),
+                  ),
+                );
+            } else {
+              // 新規 LGTM
+              await d1.insert(prReviewLgtms).values({
+                id: crypto.randomUUID(),
+                reviewId,
+                slackUserId: userId,
+                createdAt: new Date().toISOString(),
+              });
+
+              // LGTM 数を確認（しきい値 = 2）
+              const lgtms = await d1
+                .select()
+                .from(prReviewLgtms)
+                .where(eq(prReviewLgtms.reviewId, reviewId))
+                .all();
+
+              const LGTM_THRESHOLD = 2;
+              if (lgtms.length >= LGTM_THRESHOLD) {
+                // status を merged に更新（既に merged ならスキップ）
+                const review = await d1
+                  .select()
+                  .from(prReviews)
+                  .where(eq(prReviews.id, reviewId))
+                  .get();
+                if (review && review.status !== "merged") {
+                  await d1
+                    .update(prReviews)
+                    .set({
+                      status: "merged",
+                      updatedAt: new Date().toISOString(),
+                    })
+                    .where(eq(prReviews.id, reviewId));
+
+                  // チャンネルに通知 post（依頼者にメンション）
+                  const meeting = await d1
+                    .select()
+                    .from(meetings)
+                    .where(eq(meetings.channelId, channelId))
+                    .get();
+                  if (meeting && meeting.workspaceId) {
+                    const client = await createSlackClientForWorkspace(
+                      c.env,
+                      meeting.workspaceId,
+                    );
+                    if (client) {
+                      const message = `<@${review.requesterSlackId}> 「${review.title}」のレビューが完了しました 🎉`;
+                      try {
+                        await client.postMessage(channelId, message);
+                      } catch (e) {
+                        console.error(
+                          "Failed to post completion message:",
+                          e,
+                        );
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // ボード repost
+            await prReviewRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_lgtm:", e);
           }
         })(),
       );

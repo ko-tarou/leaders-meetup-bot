@@ -24,6 +24,7 @@ import {
   tasks,
   taskAssignees,
   prReviews,
+  prReviewLgtms,
   applications,
   workspaces,
 } from "../db/schema";
@@ -1917,6 +1918,83 @@ api.delete("/pr-reviews/:id", async (c) => {
   const existing = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
   if (!existing) return c.json({ error: "Not found" }, 404);
   await db.delete(prReviews).where(eq(prReviews.id, id));
+  return c.json({ ok: true });
+});
+
+// === pr_review_lgtms (Sprint 17 PR1) ===
+// PR レビューに対する LGTM の付与/削除/一覧。
+// UNIQUE(review_id, slack_user_id) により重複は弾かれる（API 側でも 409 を返す）。
+api.get("/pr-reviews/:id/lgtms", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const rows = await db
+    .select()
+    .from(prReviewLgtms)
+    .where(eq(prReviewLgtms.reviewId, id))
+    .all();
+  return c.json(rows);
+});
+
+api.post("/pr-reviews/:id/lgtms", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json<{ slackUserId: string }>();
+  if (!body.slackUserId) {
+    return c.json({ error: "slackUserId is required" }, 400);
+  }
+
+  const review = await db
+    .select()
+    .from(prReviews)
+    .where(eq(prReviews.id, id))
+    .get();
+  if (!review) return c.json({ error: "review not found" }, 404);
+
+  // 重複チェック
+  const existing = await db
+    .select()
+    .from(prReviewLgtms)
+    .where(
+      and(
+        eq(prReviewLgtms.reviewId, id),
+        eq(prReviewLgtms.slackUserId, body.slackUserId),
+      ),
+    )
+    .get();
+  if (existing) return c.json({ error: "already given" }, 409);
+
+  const lgtmId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.insert(prReviewLgtms).values({
+    id: lgtmId,
+    reviewId: id,
+    slackUserId: body.slackUserId,
+    createdAt: now,
+  });
+  // pr_review 自体の updatedAt も更新（board の並び順に反映するため）
+  await db
+    .update(prReviews)
+    .set({ updatedAt: now })
+    .where(eq(prReviews.id, id));
+
+  return c.json(
+    { id: lgtmId, reviewId: id, slackUserId: body.slackUserId, createdAt: now },
+    201,
+  );
+});
+
+api.delete("/pr-reviews/:id/lgtms/:slackUserId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const slackUserId = c.req.param("slackUserId");
+  await db
+    .delete(prReviewLgtms)
+    .where(
+      and(
+        eq(prReviewLgtms.reviewId, id),
+        eq(prReviewLgtms.slackUserId, slackUserId),
+      ),
+    );
   return c.json({ ok: true });
 });
 

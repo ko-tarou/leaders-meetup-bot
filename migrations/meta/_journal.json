@@ -141,6 +141,13 @@
       "when": 1777629428605,
       "tag": "0019_tan_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1777652653044,
+      "tag": "0020_premium_kate_bishop",
+      "breakpoints": true
     }
   ]
 }

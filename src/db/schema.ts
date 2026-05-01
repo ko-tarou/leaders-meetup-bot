@@ -134,6 +134,21 @@ export const prReviews = sqliteTable("pr_reviews", {
   updatedAt: text("updated_at").notNull(),
 });
 
+// PR レビュー LGTM（多対多）
+// 同一ユーザーの重複 LGTM を UNIQUE で防止
+export const prReviewLgtms = sqliteTable(
+  "pr_review_lgtms",
+  {
+    id: text("id").primaryKey(),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => prReviews.id),
+    slackUserId: text("slack_user_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [unique("pr_review_lgtms_review_user_uniq").on(t.reviewId, t.slackUserId)],
+);
+
 // ミーティング定義
 export const meetings = sqliteTable("meetings", {
   id: text("id").primaryKey(),
