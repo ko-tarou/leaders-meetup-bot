@@ -2174,6 +2174,53 @@ api.delete("/pr-reviews/:id/lgtms/:slackUserId", async (c) => {
 
 // === applications (Sprint 16: 新メンバー入会フロー) ===
 
+// Sprint 19 PR1: 公開エンドポイント。eventId の member_application アクションから
+// リーダーが事前にマークした候補日時 (leaderAvailableSlots) を返す。認証不要。
+// 応募ページはこの結果を WeekCalendarPicker.restrictTo に渡し、
+// 候補のみ選択可能にする。
+api.get("/apply/:eventId/availability", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+
+  // event 存在確認
+  const event = await db.select().from(events).where(eq(events.id, eventId)).get();
+  if (!event) return c.json({ error: "event not found" }, 404);
+
+  // member_application アクションを検索
+  const action = await db
+    .select()
+    .from(eventActions)
+    .where(
+      and(
+        eq(eventActions.eventId, eventId),
+        eq(eventActions.actionType, "member_application"),
+      ),
+    )
+    .get();
+
+  if (!action || action.enabled !== 1) {
+    return c.json({ enabled: false, leaderAvailableSlots: [] });
+  }
+
+  let config: { leaderAvailableSlots?: unknown } = {};
+  try {
+    config = JSON.parse(action.config || "{}");
+  } catch {
+    config = {};
+  }
+  const slots = Array.isArray(config.leaderAvailableSlots)
+    ? (config.leaderAvailableSlots as unknown[]).filter(
+        (s): s is string => typeof s === "string",
+      )
+    : [];
+
+  return c.json({
+    enabled: true,
+    eventName: event.name,
+    leaderAvailableSlots: slots,
+  });
+});
+
 // 公開: 応募受付（認証不要、CORS は既存設定を継承）
 api.post("/apply/:eventId", async (c) => {
   const db = drizzle(c.env.DB);

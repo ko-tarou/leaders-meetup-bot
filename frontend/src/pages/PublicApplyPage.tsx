@@ -4,11 +4,19 @@ import { api } from "../api";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
 import type { Event } from "../types";
 
+// Sprint 19 PR1: 公開エンドポイントから取得する availability の型
+type Availability = {
+  enabled: boolean;
+  leaderAvailableSlots: string[];
+  eventName?: string;
+};
+
 export function PublicApplyPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
+  const [availability, setAvailability] = useState<Availability | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [motivation, setMotivation] = useState("");
@@ -32,6 +40,20 @@ export function PublicApplyPage() {
         setEvent(null);
         setLoading(false);
       });
+  }, [eventId]);
+
+  // Sprint 19 PR1: availability をフェッチ
+  useEffect(() => {
+    if (!eventId) return;
+    fetch(`/api/apply/${eventId}/availability`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("availability fetch failed");
+        return (await res.json()) as Availability;
+      })
+      .then((data) => setAvailability(data))
+      .catch(() =>
+        setAvailability({ enabled: false, leaderAvailableSlots: [] }),
+      );
   }, [eventId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,7 +86,7 @@ export function PublicApplyPage() {
     }
   };
 
-  if (loading) {
+  if (loading || availability === null) {
     return (
       <Layout>
         <div style={{ color: "#6b7280" }}>読み込み中...</div>
@@ -83,6 +105,30 @@ export function PublicApplyPage() {
         >
           イベントが見つかりません
         </div>
+      </Layout>
+    );
+  }
+
+  // Sprint 19 PR1: 受付停止 / 候補未設定 の文言分岐
+  if (!availability.enabled) {
+    return (
+      <Layout>
+        <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+          {event.name} 応募フォーム
+        </h1>
+        <NoticeBox>現在この応募は受付停止中です。</NoticeBox>
+      </Layout>
+    );
+  }
+  if (availability.leaderAvailableSlots.length === 0) {
+    return (
+      <Layout>
+        <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+          {event.name} 応募フォーム
+        </h1>
+        <NoticeBox>
+          面談可能な日時候補がまだ設定されていません。しばらくしてから再度ご確認ください。
+        </NoticeBox>
       </Layout>
     );
   }
@@ -170,9 +216,13 @@ export function PublicApplyPage() {
               margin: "0 0 0.5rem",
             }}
           >
-            ご都合の良い時間帯をクリック（またはドラッグ）で選択してください。複数選択可能です。
+            ご都合の良い時間帯をクリック（またはドラッグ）で選択してください。リーダー側の都合により、選択できるのは候補として表示されている時間帯のみです。
           </p>
-          <WeekCalendarPicker selectedSlots={slots} onChange={setSlots} />
+          <WeekCalendarPicker
+            selectedSlots={slots}
+            onChange={setSlots}
+            restrictTo={availability.leaderAvailableSlots}
+          />
         </div>
 
         <button
@@ -220,6 +270,27 @@ function Layout({ children }: { children: React.ReactNode }) {
         padding: "2rem 1rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         color: "#111827",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// Sprint 19 PR1: 受付停止 / 候補未設定 のお知らせ枠
+function NoticeBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "1.5rem 1rem",
+        background: "#f9fafb",
+        border: "1px solid #e5e7eb",
+        borderRadius: "0.5rem",
+        color: "#374151",
+        fontSize: "0.95rem",
+        textAlign: "center",
+        lineHeight: 1.6,
       }}
     >
       {children}
