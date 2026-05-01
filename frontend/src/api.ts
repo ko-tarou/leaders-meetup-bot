@@ -82,6 +82,19 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  // Sprint 18 PR1: sticky board の手動リフレッシュ。
+  // 既存メッセージを削除して最新機能を反映した新メッセージを post する。
+  refreshTaskBoard: (meetingId: string) =>
+    request<{ ok: boolean; ts?: string; error?: string }>(
+      `/meetings/${meetingId}/task-board/refresh`,
+      { method: "POST" },
+    ),
+  refreshPRReviewBoard: (meetingId: string) =>
+    request<{ ok: boolean; ts?: string; error?: string }>(
+      `/meetings/${meetingId}/pr-review-board/refresh`,
+      { method: "POST" },
+    ),
+
   getMembers: (meetingId: string) =>
     request<MeetingMember[]>(`/meetings/${meetingId}/members`),
   addMember: (meetingId: string, slackUserId: string) =>

@@ -43,10 +43,12 @@ import {
 import {
   postInitialBoard,
   deleteBoard,
+  repostBoard,
 } from "../services/sticky-task-board";
 import {
   postInitialPRReviewBoard,
   deletePRReviewBoard,
+  repostPRReviewBoard,
 } from "../services/sticky-pr-review-board";
 import {
   createSlackClientForWorkspace,
@@ -375,6 +377,46 @@ api.post("/meetings/:id/task-board", async (c) => {
   return c.json({ ok: true, ts: result.ts });
 });
 
+// Sprint 18 PR1: 既存 sticky メッセージを削除して最新 blocks で再投稿する
+// 手動リフレッシュ。既存の repostBoard を再利用するだけ。
+// 機能更新（start_at トグル / LGTM 等）が古いメッセージに反映されない問題対策。
+api.post("/meetings/:id/task-board/refresh", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId || !meeting.eventId) {
+    return c.json(
+      { error: "meeting must have workspaceId and eventId" },
+      400,
+    );
+  }
+  if (!meeting.taskBoardTs) {
+    return c.json(
+      { error: "task board not enabled, call POST /task-board first" },
+      400,
+    );
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await repostBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    eventId: meeting.eventId,
+    taskBoardTs: meeting.taskBoardTs,
+    taskBoardShowUnstarted: meeting.taskBoardShowUnstarted,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
+  return c.json({ ok: true, ts: result.ts });
+});
+
 api.delete("/meetings/:id/task-board", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
@@ -431,6 +473,41 @@ api.post("/meetings/:id/pr-review-board", async (c) => {
     id: meeting.id,
     channelId: meeting.channelId,
     eventId: meeting.eventId,
+  });
+  if ("error" in result) {
+    return c.json({ ok: false, error: result.error }, 500);
+  }
+  return c.json({ ok: true, ts: result.ts });
+});
+
+// Sprint 18 PR1: PR レビュー sticky board の手動リフレッシュ。
+// 古いメッセージを削除して最新機能（LGTM 等）が反映された新メッセージを post。
+api.post("/meetings/:id/pr-review-board/refresh", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+
+  const meeting = await db.select().from(meetings).where(eq(meetings.id, id)).get();
+  if (!meeting) return c.json({ error: "meeting not found" }, 404);
+  if (!meeting.workspaceId || !meeting.eventId) {
+    return c.json(
+      { error: "meeting must have workspaceId and eventId" },
+      400,
+    );
+  }
+  if (!meeting.prReviewBoardTs) {
+    return c.json({ error: "pr review board not enabled" }, 400);
+  }
+
+  const client = await createSlackClientForWorkspace(c.env, meeting.workspaceId);
+  if (!client) {
+    return c.json({ error: "failed to create SlackClient" }, 500);
+  }
+
+  const result = await repostPRReviewBoard(c.env.DB, client, {
+    id: meeting.id,
+    channelId: meeting.channelId,
+    eventId: meeting.eventId,
+    prReviewBoardTs: meeting.prReviewBoardTs,
   });
   if ("error" in result) {
     return c.json({ ok: false, error: result.error }, 500);
