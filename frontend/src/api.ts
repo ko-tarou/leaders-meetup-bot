@@ -6,6 +6,7 @@ import type {
   Event,
   EventAction,
   EventActionType,
+  GmailIntegration,
   HowFound,
   IncomingEmail,
   InterviewLocation,
@@ -30,6 +31,15 @@ const BASE = "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  return res.json() as Promise<T>;
+}
+
+// Sprint 21 PR1: Gmail OAuth は /google/* に配置されているため /api プレフィックスを通さない。
+async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
@@ -496,6 +506,21 @@ export const api = {
           method: "DELETE",
         }),
     },
+  },
+
+  // Gmail OAuth 連携 (Sprint 21 PR1)
+  // install は GET 遷移なので URL を返すだけ。SPA から window.location.href に代入する。
+  gmail: {
+    list: (eventActionId: string) =>
+      rawRequest<GmailIntegration[]>(
+        `/google/integrations?eventActionId=${encodeURIComponent(eventActionId)}`,
+      ),
+    installUrl: (eventActionId: string, email: string) =>
+      `/google/oauth/install?eventActionId=${encodeURIComponent(eventActionId)}&email=${encodeURIComponent(email)}`,
+    disconnect: (id: string) =>
+      rawRequest<{ ok: boolean }>(`/google/integrations/${id}`, {
+        method: "DELETE",
+      }),
   },
 
   // Slack Workspaces (ADR-0006)

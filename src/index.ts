@@ -3,10 +3,12 @@ import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
 import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
+import { google } from "./routes/google-oauth";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { SlackClient } from "./services/slack-api";
 import { handleIncomingEmail } from "./services/email-handler";
+import { pollAllGmailIntegrations } from "./services/gmail-poll";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -18,6 +20,9 @@ const app = new Hono<{ Bindings: Env }>();
 app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
+// Sprint 21 PR1: Gmail OAuth install/callback + 連携管理 API。
+// 署名検証は不要（Google からのリダイレクトは state HMAC 署名で検証）。
+app.route("/google", google);
 
 // SPA fallback: /api, /slack 以外で Hono にマッチしないパス（例: /events/.../actions）は
 // ASSETS バインディング経由で index.html を返し、React Router にクライアント側で処理させる。
@@ -31,10 +36,21 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     const client = new SlackClient(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
+    // Sprint 21 PR1: Gmail ポーリングを既存ジョブと並列実行。
+    // どれか 1 つの失敗が他を巻き込まないよう、それぞれ catch で握り潰す。
     ctx.waitUntil(
       Promise.all([
         processScheduledJobs(env.DB, client),
         processAutoCycles(env.DB, client),
+        pollAllGmailIntegrations(env)
+          .then((r) => {
+            if (r.scanned > 0 || r.errors > 0) {
+              console.log(
+                `[gmail-poll] scanned=${r.scanned} new=${r.newMessages} errors=${r.errors}`,
+              );
+            }
+          })
+          .catch((e) => console.error("[gmail-poll] unhandled error:", e)),
       ]),
     );
   },
