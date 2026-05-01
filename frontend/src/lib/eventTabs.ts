@@ -33,6 +33,11 @@ export const ACTION_META: Record<
     description: "PR レビュー依頼を一覧管理（流れ防止）",
     icon: "🔍",
   },
+  member_application: {
+    label: "新メンバー入会",
+    description: "応募フォームから入会希望者を受付け、面談を経て合否判定",
+    icon: "📝",
+  },
 };
 
 // 共通タブ (イベント直下)

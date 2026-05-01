@@ -1,4 +1,6 @@
 import type {
+  Application,
+  ApplicationStatus,
   AutoSchedule,
   Event,
   EventAction,
@@ -409,7 +411,26 @@ export const api = {
           body: JSON.stringify(data),
         },
       ),
-    // 管理API は次PR で追加（一覧 / 合否判定 / メールテンプレ生成）
+    // 管理API（Sprint 16 PR3）— 一覧 / 詳細 / 更新（合否判定）/ 削除
+    list: (eventId: string, status?: ApplicationStatus) => {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+      return request<Application[]>(`/events/${eventId}/applications${qs}`);
+    },
+    get: (id: string) => request<Application>(`/applications/${id}`),
+    update: (
+      id: string,
+      data: {
+        status?: ApplicationStatus;
+        interviewAt?: string | null;
+        decisionNote?: string | null;
+      },
+    ) =>
+      request<Application>(`/applications/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/applications/${id}`, { method: "DELETE" }),
   },
 
   // Slack Workspaces (ADR-0006)

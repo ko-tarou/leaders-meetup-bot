@@ -12,7 +12,8 @@ export type EventActionType =
   | "schedule_polling"
   | "task_management"
   | "member_welcome"
-  | "pr_review_list";
+  | "pr_review_list"
+  | "member_application";
 
 export type EventAction = {
   id: string;
@@ -203,4 +204,28 @@ export type Workspace = {
   name: string;
   slackTeamId: string;
   createdAt: string;
+};
+
+// 応募 (ADR-0008 / Sprint 16)
+export type ApplicationStatus =
+  | "pending"
+  | "scheduled"
+  | "passed"
+  | "failed"
+  | "rejected";
+
+export type Application = {
+  id: string;
+  eventId: string;
+  name: string;
+  email: string;
+  motivation: string | null;
+  introduction: string | null;
+  // UTC ISO 配列の JSON 文字列。フロントでパースして表示
+  availableSlots: string;
+  status: ApplicationStatus;
+  interviewAt: string | null;
+  decisionNote: string | null;
+  appliedAt: string;
+  decidedAt: string | null;
 };
