@@ -5,6 +5,9 @@ type Props = {
   onChange: (slots: string[]) => void;
   hourStart?: number; // 0-23, default 9
   hourEnd?: number; // 0-23, default 22 (= 22:00 開始の枠まで含む)
+  // Sprint 19 PR1: 候補制限。undefined なら全 slot 選択可。
+  // 配列なら、含まれる slot のみ選択可。それ以外は淡色＋クリック不可。
+  restrictTo?: string[];
 };
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -14,6 +17,7 @@ export function WeekCalendarPicker({
   onChange,
   hourStart = 9,
   hourEnd = 22,
+  restrictTo,
 }: Props) {
   const [weekOffset, setWeekOffset] = useState(0);
 
@@ -56,6 +60,18 @@ export function WeekCalendarPicker({
   const now = new Date();
   const isPast = (slot: string) => new Date(slot).getTime() < now.getTime();
 
+  // Sprint 19 PR1: 候補制限。restrictTo が undefined なら制限なし。
+  const restrictSet = useMemo(
+    () => (restrictTo ? new Set(restrictTo) : null),
+    [restrictTo],
+  );
+  // 「クリック可能」かどうか。restrictTo 制限ありの場合は含まれる slot のみ。
+  const isAvailable = (slot: string): boolean => {
+    if (isPast(slot)) return false;
+    if (restrictSet && !restrictSet.has(slot)) return false;
+    return true;
+  };
+
   // 長押しドラッグでの範囲選択（簡易実装）
   const [dragMode, setDragMode] = useState<"add" | "remove" | null>(null);
 
@@ -69,7 +85,7 @@ export function WeekCalendarPicker({
   };
 
   const handleMouseDown = (slot: string) => {
-    if (isPast(slot)) return;
+    if (!isAvailable(slot)) return;
     const mode = isSelected(slot) ? "remove" : "add";
     setDragMode(mode);
     if (mode === "add") {
@@ -81,7 +97,7 @@ export function WeekCalendarPicker({
 
   const handleMouseEnter = (slot: string) => {
     if (!dragMode) return;
-    if (isPast(slot)) return;
+    if (!isAvailable(slot)) return;
     if (dragMode === "add") {
       addSlot(slot);
     } else {
@@ -160,23 +176,35 @@ export function WeekCalendarPicker({
               const slot = getSlotIso(d, h);
               const selected = isSelected(slot);
               const past = isPast(slot);
+              const available = isAvailable(slot);
+              // 制限ありかつ候補に含まれない（=disabled だが過去ではない）か
+              const restrictedOut =
+                !available && !past && restrictSet !== null;
               return (
                 <div
                   key={i}
                   role="button"
                   aria-pressed={selected}
-                  aria-disabled={past}
+                  aria-disabled={!available}
                   onMouseDown={() => handleMouseDown(slot)}
                   onMouseEnter={() => handleMouseEnter(slot)}
                   style={{
                     ...cellStyleSlot,
-                    background: past
-                      ? "#f3f4f6"
-                      : selected
-                        ? "#10b981"
-                        : "white",
-                    color: past ? "#d1d5db" : selected ? "white" : "#9ca3af",
-                    cursor: past ? "not-allowed" : "pointer",
+                    background: selected
+                      ? "#10b981"
+                      : past
+                        ? "#f3f4f6"
+                        : restrictedOut
+                          ? "#f3f4f6"
+                          : "white",
+                    color: selected
+                      ? "white"
+                      : past
+                        ? "#d1d5db"
+                        : restrictedOut
+                          ? "#d1d5db"
+                          : "#9ca3af",
+                    cursor: available ? "pointer" : "not-allowed",
                   }}
                 >
                   {selected ? "✓" : ""}
