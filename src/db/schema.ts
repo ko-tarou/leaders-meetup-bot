@@ -301,25 +301,6 @@ export const slackCache = sqliteTable("slack_cache", {
   fetchedAt: text("fetched_at").notNull(),
 });
 
-// メール受信箱（email_inbox アクション用、Sprint 20 PR1）
-// 監視するメアド一覧は event_actions.config.addresses に JSON で保存し、
-// この incoming_emails テーブルには webhook で受信した実メッセージのみを格納する。
-// rawData は元 payload をそのまま保存（外部サービスごとの形式差異を後で復元できるように）。
-export const incomingEmails = sqliteTable("incoming_emails", {
-  id: text("id").primaryKey(),
-  eventId: text("event_id")
-    .notNull()
-    .references(() => events.id),
-  toAddress: text("to_address").notNull(),
-  fromAddress: text("from_address").notNull(),
-  fromName: text("from_name"),
-  subject: text("subject"),
-  body: text("body"),
-  receivedAt: text("received_at").notNull(),
-  // 元 payload 保存（必要時のデバッグ用）
-  rawData: text("raw_data"),
-});
-
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
   id: text("id").primaryKey(),

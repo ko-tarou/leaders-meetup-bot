@@ -38,11 +38,6 @@ export const ACTION_META: Record<
     description: "応募フォームから入会希望者を受付け、面談を経て合否判定",
     icon: "📝",
   },
-  email_inbox: {
-    label: "メール受信箱",
-    description: "登録したメールアドレス宛の連絡を一元管理",
-    icon: "📧",
-  },
 };
 
 // 共通タブ (イベント直下)

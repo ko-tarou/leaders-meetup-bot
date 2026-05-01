@@ -20,9 +20,4 @@ export type Env = {
 
   // Cloudflare Workers Assets binding（SPA fallback で env.ASSETS.fetch から index.html を返す）
   ASSETS: Fetcher;
-
-  // Sprint 20 PR1: email_inbox アクション用 webhook 認証トークン
-  // POST /api/email-inbox/incoming に X-Webhook-Token ヘッダで送信される値と照合
-  // Wrangler secrets で管理（kota が手動で設定）
-  EMAIL_WEBHOOK_TOKEN: string;
 };
