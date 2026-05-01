@@ -1,90 +1,35 @@
 // Sprint 20 PR1: email_inbox アクションのアドレス管理サブタブ。
 // 監視メアド一覧の追加 / 削除を扱う。実体は event_actions.config.addresses (JSON)。
-// Sprint 21 PR1: 各アドレスに対して「Gmail 連携」ボタンを追加。連携済なら最終ポーリング時刻を表示。
 import { useEffect, useState } from "react";
-import type { EmailAddress, GmailIntegration } from "../types";
+import type { EmailAddress } from "../types";
 import { api } from "../api";
 
-type Props = {
-  eventId: string;
-  // Sprint 21 PR1: Gmail 連携は event_action 単位なので action.id が必要。
-  // 連携機能を使わない呼び出し元との後方互換のため optional にしておく。
-  actionId?: string;
-};
-
-export function EmailAddressManager({ eventId, actionId }: Props) {
+export function EmailAddressManager({ eventId }: { eventId: string }) {
   const [addresses, setAddresses] = useState<EmailAddress[]>([]);
-  const [integrations, setIntegrations] = useState<GmailIntegration[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const tasks: Promise<unknown>[] = [
-      api.emailInbox.addresses.list(eventId).then((list) => {
-        if (!cancelled) {
-          setAddresses(Array.isArray(list) ? list : []);
-        }
-      }),
-    ];
-    if (actionId) {
-      tasks.push(
-        api.gmail
-          .list(actionId)
-          .then((list) => {
-            if (!cancelled) {
-              setIntegrations(Array.isArray(list) ? list : []);
-            }
-          })
-          .catch(() => {
-            // 連携情報の取得失敗は致命的ではないので握り潰す（UI は未連携扱い）
-            if (!cancelled) setIntegrations([]);
-          }),
-      );
-    } else {
-      setIntegrations([]);
-    }
-    Promise.all(tasks)
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    api.emailInbox.addresses
+      .list(eventId)
+      .then((list) => {
+        if (cancelled) return;
+        setAddresses(Array.isArray(list) ? list : []);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [eventId, actionId, refreshKey]);
-
-  const findIntegration = (email: string): GmailIntegration | undefined =>
-    integrations.find((g) => g.email.toLowerCase() === email.toLowerCase());
-
-  const handleConnect = (email: string) => {
-    if (!actionId) return;
-    window.location.href = api.gmail.installUrl(actionId, email);
-  };
-
-  const handleDisconnect = async (id: string, email: string) => {
-    if (!confirm(`${email} の Gmail 連携を解除しますか？`)) return;
-    try {
-      await api.gmail.disconnect(id);
-      setRefreshKey((k) => k + 1);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "連携解除に失敗しました");
-    }
-  };
-
-  const formatPolledAt = (iso: string | null): string => {
-    if (!iso) return "未ポーリング";
-    try {
-      return new Date(iso).toLocaleString("ja-JP");
-    } catch {
-      return iso;
-    }
-  };
+  }, [eventId]);
 
   const save = async (next: EmailAddress[]) => {
     setSaving(true);
@@ -168,90 +113,43 @@ export function EmailAddressManager({ eventId, actionId }: Props) {
             アドレスが登録されていません。下の「新規追加」から追加してください。
           </div>
         ) : (
-          addresses.map((a, i) => {
-            const ig = findIntegration(a.email);
-            return (
-              <div
-                key={`${a.email}-${i}`}
+          addresses.map((a, i) => (
+            <div
+              key={`${a.email}-${i}`}
+              style={{
+                padding: "0.75rem",
+                border: "1px solid #e5e7eb",
+                borderRadius: "0.375rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                background: "white",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {a.name && (
+                  <strong style={{ marginRight: "0.5rem" }}>{a.name}</strong>
+                )}
+                <span style={{ color: "#374151", wordBreak: "break-all" }}>
+                  {a.email}
+                </span>
+              </div>
+              <button
+                onClick={() => handleRemove(i)}
+                disabled={saving}
                 style={{
-                  padding: "0.75rem",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "0.375rem",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
+                  color: "#dc2626",
+                  border: "1px solid #dc2626",
                   background: "white",
-                  flexWrap: "wrap",
+                  padding: "0.25rem 0.5rem",
+                  borderRadius: "0.25rem",
+                  cursor: saving ? "wait" : "pointer",
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {a.name && (
-                    <strong style={{ marginRight: "0.5rem" }}>{a.name}</strong>
-                  )}
-                  <span style={{ color: "#374151", wordBreak: "break-all" }}>
-                    {a.email}
-                  </span>
-                  {ig && (
-                    <div
-                      style={{
-                        fontSize: "0.75rem",
-                        color: "#059669",
-                        marginTop: "0.25rem",
-                      }}
-                    >
-                      ✓ Gmail 連携済 / 最終ポーリング:{" "}
-                      {formatPolledAt(ig.lastPolledAt)}
-                    </div>
-                  )}
-                </div>
-                {actionId && (
-                  ig ? (
-                    <button
-                      onClick={() => handleDisconnect(ig.id, a.email)}
-                      style={{
-                        color: "#6b7280",
-                        border: "1px solid #d1d5db",
-                        background: "white",
-                        padding: "0.25rem 0.5rem",
-                        borderRadius: "0.25rem",
-                        cursor: "pointer",
-                      }}
-                    >
-                      連携解除
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => handleConnect(a.email)}
-                      style={{
-                        color: "white",
-                        border: "1px solid #059669",
-                        background: "#059669",
-                        padding: "0.25rem 0.5rem",
-                        borderRadius: "0.25rem",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Gmail 連携
-                    </button>
-                  )
-                )}
-                <button
-                  onClick={() => handleRemove(i)}
-                  disabled={saving}
-                  style={{
-                    color: "#dc2626",
-                    border: "1px solid #dc2626",
-                    background: "white",
-                    padding: "0.25rem 0.5rem",
-                    borderRadius: "0.25rem",
-                    cursor: saving ? "wait" : "pointer",
-                  }}
-                >
-                  削除
-                </button>
-              </div>
-            );
-          })
+                削除
+              </button>
+            </div>
+          ))
         )}
       </div>
 

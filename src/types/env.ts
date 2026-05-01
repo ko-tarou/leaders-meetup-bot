@@ -25,11 +25,4 @@ export type Env = {
   // POST /api/email-inbox/incoming に X-Webhook-Token ヘッダで送信される値と照合
   // Wrangler secrets で管理（kota が手動で設定）
   EMAIL_WEBHOOK_TOKEN: string;
-
-  // Sprint 21 PR1: Gmail OAuth クライアント
-  // GCP Cloud Console → API & Services → Credentials → "OAuth 2.0 Client IDs" で発行。
-  // redirect URI には `<worker-origin>/google/oauth/callback` を登録する。
-  // Wrangler secrets で管理（kota が手動で設定）
-  GOOGLE_CLIENT_ID: string;
-  GOOGLE_CLIENT_SECRET: string;
 };
