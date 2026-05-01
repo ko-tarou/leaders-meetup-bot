@@ -13,7 +13,6 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "task_management",
   "member_welcome",
   "pr_review_list",
-  "email_inbox",
 ];
 
 type Props = {

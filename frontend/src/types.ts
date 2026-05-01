@@ -8,14 +8,12 @@ export type Event = {
 };
 
 // EventAction (ADR-0008)
-// Sprint 20 PR1: email_inbox を 6 番目のアクションとして追加
 export type EventActionType =
   | "schedule_polling"
   | "task_management"
   | "member_welcome"
   | "pr_review_list"
-  | "member_application"
-  | "email_inbox";
+  | "member_application";
 
 export type EventAction = {
   id: string;
@@ -250,25 +248,6 @@ export const HOW_FOUND_LABEL: Record<HowFound, string> = {
 export const INTERVIEW_LOCATION_LABEL: Record<InterviewLocation, string> = {
   online: "オンライン（Google Meet）",
   lab206: "11号館Lab206",
-};
-
-// メール受信箱 (Sprint 20 PR1 / email_inbox アクション)
-// 監視メアドは EventAction.config.addresses に保存されるためテーブルにはない。
-export type EmailAddress = {
-  email: string;
-  name?: string;
-};
-
-export type IncomingEmail = {
-  id: string;
-  eventId: string;
-  toAddress: string;
-  fromAddress: string;
-  fromName: string | null;
-  subject: string | null;
-  body: string | null;
-  receivedAt: string; // UTC ISO 8601
-  rawData: string | null; // JSON 文字列（外部サービスの元 payload）
 };
 
 export type Application = {
