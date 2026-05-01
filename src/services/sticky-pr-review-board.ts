@@ -112,16 +112,8 @@ export async function buildPRReviewBoardBlocks(
       text: { type: "mrkdwn", text: sectionText },
     });
 
-    // 状態に応じてボタン構成を変える
+    // 状態に応じてボタン構成を変える（LGTM ベース運用）
     const buttons: unknown[] = [];
-    if (r.status === "open") {
-      buttons.push({
-        type: "button",
-        action_id: `sticky_pr_take_${r.id}`,
-        text: { type: "plain_text", text: "担当する" },
-        value: r.id,
-      });
-    }
     if (r.status === "open" || r.status === "in_review") {
       buttons.push({
         type: "button",
@@ -132,7 +124,7 @@ export async function buildPRReviewBoardBlocks(
       buttons.push({
         type: "button",
         action_id: `sticky_pr_done_${r.id}`,
-        text: { type: "plain_text", text: "✓ マージ済" },
+        text: { type: "plain_text", text: "✓ 強制完了" },
         value: r.id,
         style: "primary",
       });
@@ -300,7 +292,7 @@ export async function deletePRReviewBoard(
 /**
  * channel_id 起点で PR レビュー sticky board を即時 repost する。
  *
- * block_actions（担当する・マージ済・新規作成サブミット）押下後の即時反映用。
+ * block_actions（LGTM・強制完了・新規作成サブミット）押下後の即時反映用。
  * fail-soft: meeting / workspace が引けない、Slack API 失敗時は warn で握りつぶす。
  */
 export async function prReviewRepostByChannel(
