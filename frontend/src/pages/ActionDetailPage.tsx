@@ -10,6 +10,8 @@ import { MemberApplicationListTab } from "../components/MemberApplicationListTab
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
+import { EmailInboxView } from "../components/EmailInboxView";
+import { EmailAddressManager } from "../components/EmailAddressManager";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -43,6 +45,14 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
     return [
       { id: "main", label: "メイン" },
       { id: "availability", label: "候補日時設定" },
+      { id: "settings", label: "その他設定" },
+    ];
+  }
+  // Sprint 20 PR1: email_inbox は「アドレス管理」サブタブを持つ
+  if (actionType === "email_inbox") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "addresses", label: "アドレス管理" },
       { id: "settings", label: "その他設定" },
     ];
   }
@@ -239,6 +249,9 @@ export function ActionDetailPage() {
           onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
+      {subTab === "addresses" && actionType === "email_inbox" && (
+        <EmailAddressManager eventId={eventId} />
+      )}
       {subTab === "settings" && (
         <div>
           <ActionSettingsContent
@@ -289,6 +302,8 @@ function ActionMainContent({
       return <PRReviewListTab eventId={eventId} />;
     case "member_application":
       return <MemberApplicationListTab eventId={eventId} />;
+    case "email_inbox":
+      return <EmailInboxView eventId={eventId} />;
     case "schedule_polling":
       return (
         <PlaceholderContent label="日程調整のメイン画面（既存リーダー雑談会機能を将来統合予定）" />
@@ -332,6 +347,11 @@ function ActionSettingsContent({
     case "schedule_polling":
       return (
         <PlaceholderContent label="このアクションには専用設定がまだありません" />
+      );
+    case "email_inbox":
+      // Sprint 20 PR1: アドレス管理は専用サブタブへ移動。ここは将来の汎用設定枠。
+      return (
+        <PlaceholderContent label="将来の追加設定がここに表示されます。アドレス管理は「アドレス管理」タブから行ってください。" />
       );
     default:
       return null;
