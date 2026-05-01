@@ -12,6 +12,7 @@ import type {
   MeetingStatus,
   Poll,
   PRReview,
+  PRReviewLgtm,
   PRReviewStatus,
   Reminder,
   ReminderItem,
@@ -389,6 +390,21 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/pr-reviews/${id}`, { method: "DELETE" }),
+    // LGTM 関連 (Sprint 17 PR1)
+    lgtms: {
+      list: (reviewId: string) =>
+        request<PRReviewLgtm[]>(`/pr-reviews/${reviewId}/lgtms`),
+      add: (reviewId: string, slackUserId: string) =>
+        request<PRReviewLgtm>(`/pr-reviews/${reviewId}/lgtms`, {
+          method: "POST",
+          body: JSON.stringify({ slackUserId }),
+        }),
+      remove: (reviewId: string, slackUserId: string) =>
+        request<{ ok: boolean }>(
+          `/pr-reviews/${reviewId}/lgtms/${slackUserId}`,
+          { method: "DELETE" },
+        ),
+    },
   },
 
   // Applications (Sprint 16: 新メンバー入会フロー)

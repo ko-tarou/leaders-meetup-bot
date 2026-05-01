@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { PRReview, PRReviewStatus } from "../types";
+import type { PRReview, PRReviewLgtm, PRReviewStatus } from "../types";
 import { api } from "../api";
 
 // ADR-0008 / Sprint 12 PR2:
 // PR レビュー依頼の一覧 + 新規作成 + 編集 + 削除を行うタブコンポーネント。
 // タスク UI に近いカード一覧スタイルで、完了/クローズはトグルで非表示にできる。
+// Sprint 17 PR1: 各カードに LGTM 数 (N/2) を表示する。
+
+// Sprint 17 PR1: 自動完了に必要な LGTM 数（backend と一致させる）
+const LGTM_THRESHOLD = 2;
+
+// 表示用にカードへ追加する LGTM 数フィールド
+type PRReviewWithLgtm = PRReview & { lgtmCount: number };
 
 const STATUS_LABEL: Record<PRReviewStatus, string> = {
   open: "未着手",
@@ -102,7 +109,7 @@ const styles = {
 };
 
 export function PRReviewListTab({ eventId }: { eventId: string }) {
-  const [reviews, setReviews] = useState<PRReview[]>([]);
+  const [reviews, setReviews] = useState<PRReviewWithLgtm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -116,9 +123,20 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
     setError(null);
     api.prReviews
       .list(eventId)
-      .then((list) => {
+      .then(async (list) => {
         if (cancelled) return;
-        setReviews(Array.isArray(list) ? list : []);
+        const taskList = Array.isArray(list) ? list : [];
+        // 各 review の LGTM 数を並列取得（個別失敗は 0 件にフォールバック）
+        const withLgtm = await Promise.all(
+          taskList.map(async (r) => ({
+            ...r,
+            lgtmCount: (await api.prReviews.lgtms
+              .list(r.id)
+              .catch(() => [] as PRReviewLgtm[])).length,
+          })),
+        );
+        if (cancelled) return;
+        setReviews(withLgtm);
         setLoading(false);
       })
       .catch((e) => {
@@ -201,7 +219,7 @@ function ReviewCard({
   review: r,
   onSelect,
 }: {
-  review: PRReview;
+  review: PRReviewWithLgtm;
   onSelect: () => void;
 }) {
   return (
@@ -219,6 +237,15 @@ function ReviewCard({
     >
       <div style={styles.cardHeader}>
         <strong style={{ flex: 1 }}>{r.title}</strong>
+        <span
+          style={{
+            ...styles.badge,
+            background: "#f3f4f6",
+            color: "#374151",
+          }}
+        >
+          👍 LGTM {r.lgtmCount}/{LGTM_THRESHOLD}
+        </span>
         <span style={{ ...styles.badge, background: STATUS_COLOR[r.status] }}>
           {STATUS_LABEL[r.status]}
         </span>
