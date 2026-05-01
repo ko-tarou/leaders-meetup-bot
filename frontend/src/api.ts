@@ -389,6 +389,29 @@ export const api = {
       request<{ ok: boolean }>(`/pr-reviews/${id}`, { method: "DELETE" }),
   },
 
+  // Applications (Sprint 16: 新メンバー入会フロー)
+  applications: {
+    // 公開API（認証不要）— 応募送信
+    apply: (
+      eventId: string,
+      data: {
+        name: string;
+        email: string;
+        motivation?: string;
+        introduction?: string;
+        availableSlots: string[]; // UTC ISO 配列
+      },
+    ) =>
+      request<{ ok: boolean; id: string; error?: string }>(
+        `/apply/${eventId}`,
+        {
+          method: "POST",
+          body: JSON.stringify(data),
+        },
+      ),
+    // 管理API は次PR で追加（一覧 / 合否判定 / メールテンプレ生成）
+  },
+
   // Slack Workspaces (ADR-0006)
   workspaces: {
     list: () => request<Workspace[]>("/workspaces"),

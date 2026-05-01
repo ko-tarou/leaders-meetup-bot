@@ -6,9 +6,27 @@ import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
 import { HomePage } from "./pages/HomePage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
+import {
+  PublicApplyPage,
+  PublicThanksPage,
+} from "./pages/PublicApplyPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
 
 export function App() {
+  // /apply 配下は公開ページ（ヘッダー・EventProvider なし独立レイアウト）
+  const { pathname } = useLocation();
+  if (pathname.startsWith("/apply")) {
+    return (
+      <Routes>
+        <Route path="/apply/:eventId" element={<PublicApplyPage />} />
+        <Route
+          path="/apply/:eventId/thanks"
+          element={<PublicThanksPage />}
+        />
+      </Routes>
+    );
+  }
+
   return (
     <EventProvider>
       <div
