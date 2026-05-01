@@ -9,6 +9,7 @@ import { PRReviewListTab } from "../components/PRReviewListTab";
 import { MemberApplicationListTab } from "../components/MemberApplicationListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
+import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -34,6 +35,14 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
     return [
       { id: "main", label: "メイン" },
       { id: "channels", label: "チャンネル管理" },
+      { id: "settings", label: "その他設定" },
+    ];
+  }
+  // Sprint 19 PR1: member_application は「候補日時設定」サブタブを持つ
+  if (actionType === "member_application") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "availability", label: "候補日時設定" },
       { id: "settings", label: "その他設定" },
     ];
   }
@@ -221,6 +230,13 @@ export function ActionDetailPage() {
         <ChannelManagementSection
           eventId={eventId}
           actionType={actionType as EventActionType}
+        />
+      )}
+      {subTab === "availability" && actionType === "member_application" && (
+        <LeaderAvailabilityEditor
+          eventId={eventId}
+          action={action}
+          onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
       {subTab === "settings" && (
