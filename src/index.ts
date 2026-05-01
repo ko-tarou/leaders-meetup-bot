@@ -6,6 +6,7 @@ import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { SlackClient } from "./services/slack-api";
+import { handleIncomingEmail } from "./services/email-handler";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -35,6 +36,18 @@ export default {
         processScheduledJobs(env.DB, client),
         processAutoCycles(env.DB, client),
       ]),
+    );
+  },
+
+  // Sprint 20 PR2: Cloudflare Email Routing からの受信ハンドラ。
+  // CF Dashboard で Email Routing を有効化し catch-all rule の Action を
+  // "Send to Worker" にしたとき、このハンドラに ForwardableEmailMessage が渡される。
+  // 既存 webhook (POST /api/email-inbox/incoming) はフォールバックとして温存。
+  async email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(
+      handleIncomingEmail(env, message).catch((e) => {
+        console.error("[email] failed to handle incoming email:", e);
+      }),
     );
   },
 };
