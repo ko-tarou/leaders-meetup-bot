@@ -24,6 +24,7 @@ import {
   tasks,
   taskAssignees,
   prReviews,
+  applications,
   workspaces,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
@@ -586,12 +587,13 @@ api.post("/events/:eventId/actions", async (c) => {
     enabled?: number;
   }>();
 
-  // バリデーション: action_type は4種限定
+  // バリデーション: action_type は5種限定
   const VALID_TYPES = [
     "schedule_polling",
     "task_management",
     "member_welcome",
     "pr_review_list",
+    "member_application",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -1915,6 +1917,161 @@ api.delete("/pr-reviews/:id", async (c) => {
   const existing = await db.select().from(prReviews).where(eq(prReviews.id, id)).get();
   if (!existing) return c.json({ error: "Not found" }, 404);
   await db.delete(prReviews).where(eq(prReviews.id, id));
+  return c.json({ ok: true });
+});
+
+// === applications (Sprint 16: 新メンバー入会フロー) ===
+
+// 公開: 応募受付（認証不要、CORS は既存設定を継承）
+api.post("/apply/:eventId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const body = await c.req.json<{
+    name: string;
+    email: string;
+    motivation?: string;
+    introduction?: string;
+    availableSlots: string[]; // UTC ISO 配列
+  }>();
+
+  // 必須バリデーション
+  if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+    return c.json({ error: "name is required" }, 400);
+  }
+  if (!body.email || typeof body.email !== "string") {
+    return c.json({ error: "email is required" }, 400);
+  }
+  if (!Array.isArray(body.availableSlots)) {
+    return c.json({ error: "availableSlots must be an array" }, 400);
+  }
+  // email 簡易検証
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) {
+    return c.json({ error: "invalid email format" }, 400);
+  }
+
+  // event 存在確認
+  const event = await db.select().from(events).where(eq(events.id, eventId)).get();
+  if (!event) return c.json({ error: "event not found" }, 404);
+
+  // 各 slot が UTC ISO 形式（Z 終端 + Date parse 可能）か検証
+  for (const s of body.availableSlots) {
+    if (typeof s !== "string" || !s.endsWith("Z") || isNaN(new Date(s).getTime())) {
+      return c.json({ error: `invalid slot: ${s}` }, 400);
+    }
+  }
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const application = {
+    id,
+    eventId,
+    name: body.name.trim(),
+    email: body.email.trim(),
+    motivation: body.motivation?.trim() ?? null,
+    introduction: body.introduction?.trim() ?? null,
+    availableSlots: JSON.stringify(body.availableSlots),
+    status: "pending",
+    interviewAt: null,
+    decisionNote: null,
+    appliedAt: now,
+    decidedAt: null,
+  };
+  await db.insert(applications).values(application);
+  return c.json({ ok: true, id }, 201);
+});
+
+// 管理: イベント単位の応募一覧（status クエリで絞り込み可）
+api.get("/events/:eventId/applications", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const status = c.req.query("status");
+
+  let rows = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.eventId, eventId))
+    .all();
+  if (status) rows = rows.filter((r) => r.status === status);
+  // appliedAt 降順
+  rows.sort((a, b) => b.appliedAt.localeCompare(a.appliedAt));
+  return c.json(rows);
+});
+
+// 管理: 単一応募取得
+api.get("/applications/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const row = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.id, id))
+    .get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(row);
+});
+
+// 管理: 応募更新（status / interviewAt / decisionNote）
+api.put("/applications/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    status?: "pending" | "scheduled" | "passed" | "failed" | "rejected";
+    interviewAt?: string | null;
+    decisionNote?: string | null;
+  }>();
+
+  const existing = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.id, id))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  if (
+    body.status &&
+    !["pending", "scheduled", "passed", "failed", "rejected"].includes(body.status)
+  ) {
+    return c.json({ error: "invalid status" }, 400);
+  }
+
+  const updates: Partial<typeof existing> = {};
+  if (body.status !== undefined) {
+    updates.status = body.status;
+    if (
+      body.status === "passed" ||
+      body.status === "failed" ||
+      body.status === "rejected"
+    ) {
+      updates.decidedAt = new Date().toISOString();
+    }
+  }
+  if (body.interviewAt !== undefined) updates.interviewAt = body.interviewAt;
+  if (body.decisionNote !== undefined) updates.decisionNote = body.decisionNote;
+
+  if (Object.keys(updates).length === 0) {
+    return c.json(existing);
+  }
+
+  await db.update(applications).set(updates).where(eq(applications.id, id));
+  const updated = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.id, id))
+    .get();
+  return c.json(updated);
+});
+
+// 管理: 応募削除
+api.delete("/applications/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const existing = await db
+    .select()
+    .from(applications)
+    .where(eq(applications.id, id))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  await db.delete(applications).where(eq(applications.id, id));
   return c.json({ ok: true });
 });
 

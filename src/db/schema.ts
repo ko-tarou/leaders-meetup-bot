@@ -91,6 +91,31 @@ export const taskAssignees = sqliteTable(
   (t) => [unique("task_assignees_task_user_uniq").on(t.taskId, t.slackUserId)]
 );
 
+// ADR-0008 / Sprint 16: 新メンバー入会フロー（member_application アクション用）
+// 応募者が公開フォームから入力。kota が候補から面談日時を確定 → 合否判定。
+// メール送信は POC では行わず、admin UI でテンプレ生成 → kota が手動送信。
+export const applications = sqliteTable("applications", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  motivation: text("motivation"),
+  introduction: text("introduction"),
+  // 応募者が選択した希望日時候補（UTC ISO の配列、JSON）
+  // 例: ["2026-05-10T01:00:00.000Z", "2026-05-10T02:00:00.000Z", ...]
+  availableSlots: text("available_slots").notNull().default("[]"),
+  // 'pending' | 'scheduled' | 'passed' | 'failed' | 'rejected'
+  status: text("status").notNull().default("pending"),
+  // kota が候補から確定した面談日時（UTC ISO）
+  interviewAt: text("interview_at"),
+  // 合否判定時のメモ
+  decisionNote: text("decision_note"),
+  appliedAt: text("applied_at").notNull(),
+  decidedAt: text("decided_at"),
+});
+
 // ADR-0008: PR レビュー依頼一覧（pr_review_list アクション用）
 // タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加
 export const prReviews = sqliteTable("pr_reviews", {
