@@ -320,31 +320,6 @@ export const incomingEmails = sqliteTable("incoming_emails", {
   rawData: text("raw_data"),
 });
 
-// Gmail OAuth 連携 (Sprint 21 PR1)
-// アドレスごとに refresh_token を AES-256-GCM 暗号化保存し、cron で Gmail API をポーリングして
-// 新着メールを incoming_emails に追加する。Cloudflare Email Routing と並走するアダプタ層。
-// (event_action_id, email) UNIQUE で同一アクション内の重複連携を防止。
-export const gmailIntegrations = sqliteTable(
-  "gmail_integrations",
-  {
-    id: text("id").primaryKey(),
-    eventActionId: text("event_action_id")
-      .notNull()
-      .references(() => eventActions.id),
-    email: text("email").notNull(),
-    // AES-256-GCM 暗号化済み refresh_token（src/services/crypto.ts の encryptToken/decryptToken と同形式）
-    encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
-    // 最後にポーリングした Gmail history_id（差分取得用）
-    lastHistoryId: text("last_history_id"),
-    lastPolledAt: text("last_polled_at"),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-  },
-  (t) => [
-    unique("gmail_integrations_action_email_uniq").on(t.eventActionId, t.email),
-  ],
-);
-
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
   id: text("id").primaryKey(),
