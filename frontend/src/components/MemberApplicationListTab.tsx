@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { Application, ApplicationStatus } from "../types";
+import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
 
 // ADR-0008 / Sprint 16 PR3:
@@ -368,6 +369,37 @@ function ApplicationDetailModal({
           <div style={{ fontSize: "0.875rem" }}>{application.email}</div>
         </Section>
 
+        {/* Sprint 19 PR2: Google Form 準拠の新フィールド */}
+        <Section label="学籍番号">
+          <div style={{ fontSize: "0.875rem" }}>
+            {application.studentId || "（未記入）"}
+          </div>
+        </Section>
+
+        <Section label="どこで知ったか">
+          <div style={{ fontSize: "0.875rem" }}>
+            {application.howFound
+              ? HOW_FOUND_LABEL[application.howFound]
+              : "（未記入）"}
+          </div>
+        </Section>
+
+        <Section label="面談場所の希望">
+          <div style={{ fontSize: "0.875rem" }}>
+            {application.interviewLocation
+              ? INTERVIEW_LOCATION_LABEL[application.interviewLocation]
+              : "（未記入）"}
+          </div>
+        </Section>
+
+        <Section label="現在参加している活動">
+          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
+            {application.existingActivities || "（未記入）"}
+          </div>
+        </Section>
+
+        {/* 後方互換: Sprint 16 旧フォームの応募データを表示。
+            新フォームからの応募は両方 null となり「（未記入）」表示。 */}
         <Section label="志望動機">
           <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
             {application.motivation || "（未記入）"}
