@@ -250,7 +250,8 @@ export function ActionDetailPage() {
         />
       )}
       {subTab === "addresses" && actionType === "email_inbox" && (
-        <EmailAddressManager eventId={eventId} />
+        // Sprint 21 PR1: Gmail 連携サブ機能のため action.id も渡す。
+        <EmailAddressManager eventId={eventId} actionId={action.id} />
       )}
       {subTab === "settings" && (
         <div>

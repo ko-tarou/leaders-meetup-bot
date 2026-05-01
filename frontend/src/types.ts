@@ -271,6 +271,18 @@ export type IncomingEmail = {
   rawData: string | null; // JSON 文字列（外部サービスの元 payload）
 };
 
+// Gmail 連携 (Sprint 21 PR1)
+// refresh_token は backend のみが持ち、API レスポンスでは返さない。
+export type GmailIntegration = {
+  id: string;
+  eventActionId: string;
+  email: string;
+  lastHistoryId: string | null;
+  lastPolledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Application = {
   id: string;
   eventId: string;
