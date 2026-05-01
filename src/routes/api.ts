@@ -27,6 +27,7 @@ import {
   prReviewLgtms,
   applications,
   workspaces,
+  incomingEmails,
 } from "../db/schema";
 import { validateReminders } from "../services/reminder-triggers";
 import {
@@ -762,13 +763,14 @@ api.post("/events/:eventId/actions", async (c) => {
     enabled?: number;
   }>();
 
-  // バリデーション: action_type は5種限定
+  // バリデーション: action_type は6種限定（Sprint 20 PR1 で email_inbox 追加）
   const VALID_TYPES = [
     "schedule_polling",
     "task_management",
     "member_welcome",
     "pr_review_list",
     "member_application",
+    "email_inbox",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -2409,6 +2411,222 @@ api.delete("/applications/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
   await db.delete(applications).where(eq(applications.id, id));
   return c.json({ ok: true });
+});
+
+// === email_inbox (Sprint 20 PR1) ===
+// メール受信箱アクション。監視メアド一覧は event_actions.config.addresses に
+// JSON で保存。受信メッセージ本体は incoming_emails テーブル。
+// 外部メールサービス (Zapier / Mailgun / Cloudflare Email Routing 等) から
+// webhook で POST されたメッセージを受け取り、to_address が登録メアドと
+// マッチする event に紐付けて保存する。
+
+// アドレス一覧取得（event_actions.config から）
+api.get("/events/:eventId/email-inbox/addresses", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const action = await db
+    .select()
+    .from(eventActions)
+    .where(
+      and(
+        eq(eventActions.eventId, eventId),
+        eq(eventActions.actionType, "email_inbox"),
+      ),
+    )
+    .get();
+  if (!action)
+    return c.json({ error: "email_inbox action not registered" }, 404);
+
+  let cfg: { addresses?: { email: string; name?: string }[] } = {};
+  try {
+    cfg = JSON.parse(action.config || "{}");
+  } catch {
+    cfg = {};
+  }
+  return c.json(cfg.addresses || []);
+});
+
+// アドレス一覧更新（PUT）
+api.put("/events/:eventId/email-inbox/addresses", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const body = await c.req.json<{
+    addresses: { email: string; name?: string }[];
+  }>();
+
+  if (!Array.isArray(body.addresses)) {
+    return c.json({ error: "addresses must be an array" }, 400);
+  }
+  // 各アドレスの形式検証
+  for (const a of body.addresses) {
+    if (!a.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a.email)) {
+      return c.json({ error: `invalid email: ${a.email}` }, 400);
+    }
+  }
+
+  const action = await db
+    .select()
+    .from(eventActions)
+    .where(
+      and(
+        eq(eventActions.eventId, eventId),
+        eq(eventActions.actionType, "email_inbox"),
+      ),
+    )
+    .get();
+  if (!action)
+    return c.json({ error: "email_inbox action not registered" }, 404);
+
+  // 既存 config を温存（addresses 以外のキーがあれば守る）
+  let existingCfg: Record<string, unknown> = {};
+  try {
+    existingCfg = JSON.parse(action.config || "{}");
+  } catch {
+    existingCfg = {};
+  }
+  // メアドとラベルを正規化（trim + lowercase email）
+  const normalized = body.addresses.map((a) => ({
+    email: a.email.trim().toLowerCase(),
+    ...(a.name ? { name: a.name.trim() } : {}),
+  }));
+  existingCfg.addresses = normalized;
+
+  await db
+    .update(eventActions)
+    .set({
+      config: JSON.stringify(existingCfg),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(eventActions.id, action.id));
+
+  return c.json({ ok: true, addresses: normalized });
+});
+
+// 受信メッセージ一覧
+api.get("/events/:eventId/email-inbox/messages", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const limit = Math.min(parseInt(c.req.query("limit") || "100", 10) || 100, 500);
+  const rows = await db
+    .select()
+    .from(incomingEmails)
+    .where(eq(incomingEmails.eventId, eventId))
+    .all();
+  // received_at の降順 (ISO 8601 なので文字列比較で OK)
+  rows.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  return c.json(rows.slice(0, limit));
+});
+
+// 単一メッセージ
+api.get("/email-inbox/messages/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const row = await db
+    .select()
+    .from(incomingEmails)
+    .where(eq(incomingEmails.id, id))
+    .get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  return c.json(row);
+});
+
+// 削除
+api.delete("/email-inbox/messages/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const existing = await db
+    .select()
+    .from(incomingEmails)
+    .where(eq(incomingEmails.id, id))
+    .get();
+  if (!existing) return c.json({ error: "Not found" }, 404);
+  await db.delete(incomingEmails).where(eq(incomingEmails.id, id));
+  return c.json({ ok: true });
+});
+
+// === Webhook (外部サービスから POST される) ===
+// 認証は X-Webhook-Token ヘッダ (env.EMAIL_WEBHOOK_TOKEN と一致必須)。
+// to が登録メアドにマッチした全 event_action の event_id にメッセージを insert。
+// マッチが 0 件でも 200 を返す（外部サービスが retry しないように）。
+api.post("/email-inbox/incoming", async (c) => {
+  // 認証
+  const token = c.req.header("x-webhook-token");
+  if (!token || token !== c.env.EMAIL_WEBHOOK_TOKEN) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  let body: {
+    to?: string;
+    from?: string;
+    fromName?: string;
+    subject?: string;
+    body?: string;
+    [key: string]: unknown;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+
+  if (!body.to || !body.from || typeof body.to !== "string" || typeof body.from !== "string") {
+    return c.json({ error: "to and from are required" }, 400);
+  }
+
+  // 全 events から enabled な email_inbox アクションを検索 → to が一致するものを探す
+  const db = drizzle(c.env.DB);
+  const allActions = await db
+    .select()
+    .from(eventActions)
+    .where(
+      and(
+        eq(eventActions.actionType, "email_inbox"),
+        eq(eventActions.enabled, 1),
+      ),
+    )
+    .all();
+
+  const targetEvents: string[] = [];
+  const toLower = body.to.toLowerCase();
+  for (const a of allActions) {
+    let cfg: { addresses?: { email: string }[] } = {};
+    try {
+      cfg = JSON.parse(a.config || "{}");
+    } catch {
+      cfg = {};
+    }
+    const matches = (cfg.addresses || []).some(
+      (addr) => addr.email && addr.email.toLowerCase() === toLower,
+    );
+    if (matches) targetEvents.push(a.eventId);
+  }
+
+  if (targetEvents.length === 0) {
+    return c.json(
+      { ok: false, message: "no matching event_action for this address" },
+      200,
+    );
+  }
+
+  // 各該当 event に対してメッセージ insert
+  const inserted: string[] = [];
+  for (const eventId of targetEvents) {
+    const id = crypto.randomUUID();
+    await db.insert(incomingEmails).values({
+      id,
+      eventId,
+      toAddress: body.to,
+      fromAddress: body.from,
+      fromName: body.fromName ?? null,
+      subject: body.subject ?? null,
+      body: body.body ?? null,
+      receivedAt: new Date().toISOString(),
+      rawData: JSON.stringify(body),
+    });
+    inserted.push(id);
+  }
+
+  return c.json({ ok: true, inserted });
 });
 
 export { api };
