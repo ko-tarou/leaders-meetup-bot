@@ -2,10 +2,12 @@ import type {
   Application,
   ApplicationStatus,
   AutoSchedule,
+  EmailAddress,
   Event,
   EventAction,
   EventActionType,
   HowFound,
+  IncomingEmail,
   InterviewLocation,
   Meeting,
   MeetingDetail,
@@ -468,6 +470,32 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/applications/${id}`, { method: "DELETE" }),
+  },
+
+  // メール受信箱 (Sprint 20 PR1 / email_inbox アクション)
+  emailInbox: {
+    addresses: {
+      list: (eventId: string) =>
+        request<EmailAddress[]>(`/events/${eventId}/email-inbox/addresses`),
+      update: (eventId: string, addresses: EmailAddress[]) =>
+        request<{ ok: boolean; addresses: EmailAddress[] }>(
+          `/events/${eventId}/email-inbox/addresses`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ addresses }),
+          },
+        ),
+    },
+    messages: {
+      list: (eventId: string) =>
+        request<IncomingEmail[]>(`/events/${eventId}/email-inbox/messages`),
+      get: (id: string) =>
+        request<IncomingEmail>(`/email-inbox/messages/${id}`),
+      delete: (id: string) =>
+        request<{ ok: boolean }>(`/email-inbox/messages/${id}`, {
+          method: "DELETE",
+        }),
+    },
   },
 
   // Slack Workspaces (ADR-0006)
