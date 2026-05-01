@@ -689,34 +689,9 @@ slack.post("/interactions", async (c) => {
     }
 
     // === ADR-0008 PR レビュー sticky board actions ===
-    // sticky_pr_take_<reviewId>: 押した本人をレビュアーに割り当て、status=in_review に更新
-    if (action.action_id?.startsWith("sticky_pr_take_")) {
-      const reviewId = action.value;
-      const userId = payload.user?.id;
-      const channelId = payload.channel?.id;
-      if (!reviewId || !userId || !channelId) return c.json({ ok: true });
-
-      c.executionCtx.waitUntil(
-        (async () => {
-          try {
-            const d1 = drizzle(c.env.DB);
-            await d1
-              .update(prReviews)
-              .set({
-                reviewerSlackId: userId,
-                status: "in_review",
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(prReviews.id, reviewId));
-            await prReviewRepostByChannel(c.env, channelId);
-          } catch (e) {
-            console.error("Failed to handle sticky_pr_take:", e);
-          }
-        })(),
-      );
-
-      return c.json({ ok: true });
-    }
+    // 注: sticky_pr_take_ ハンドラは LGTM ベース運用への移行に伴い削除済み
+    // （複数人で LGTM するモデルに単一担当者の概念は不要）。
+    // DB の reviewerSlackId 列・in_review ステータスは Web UI 編集用に温存。
 
     // sticky_pr_lgtm_<reviewId>: LGTM をトグル（同じユーザーが再押下で取消）。
     // 2 つ集まったら自動で status='merged' に遷移し、依頼者にメンションで完了通知を post。
