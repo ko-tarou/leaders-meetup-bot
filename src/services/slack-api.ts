@@ -86,17 +86,55 @@ export class SlackClient {
     return this.callApiGet("users.info", { user: userId });
   }
 
-  async getChannelList(limit = 200): Promise<SlackResponse> {
+  async getChannelList(): Promise<SlackResponse> {
     // conversations.list で workspace の全 public/private チャンネルを取得する。
     // 以前は users.conversations を使っていたが、bot 参加済みチャンネルしか
     // 返らず一覧が欠ける問題があったため切替。private_channel を含めるには
     // bot に groups:read scope が必要（既存付与済み）。
     // 戻り値の channels[].is_member で参加状態は呼び出し側が判定可能。
-    return this.callApiGet("conversations.list", {
-      limit,
-      types: "public_channel,private_channel",
-      exclude_archived: "true",
-    });
+    //
+    // ページネーション対応: limit=200 単発呼び出しでは KIT Developers Hub の
+    // ような大規模 workspace で channels が欠ける（next_cursor 未処理）。
+    // cursor を辿って最大 MAX_PAGES (=20, 4000件) まで取得する。
+    const allChannels: unknown[] = [];
+    let cursor = "";
+    let pages = 0;
+    const MAX_PAGES = 20;
+
+    while (pages < MAX_PAGES) {
+      const params: Record<string, string | number> = {
+        limit: 200,
+        types: "public_channel,private_channel",
+        exclude_archived: "true",
+      };
+      if (cursor) params.cursor = cursor;
+
+      const res = await this.callApiGet("conversations.list", params);
+      if (!res.ok) {
+        // エラー時は今までに集めた分を返す（fail-soft）
+        console.error("conversations.list error:", res);
+        return {
+          ok: false,
+          error: res.error,
+          channels: allChannels,
+        };
+      }
+
+      const channels = (res.channels as unknown[] | undefined) ?? [];
+      allChannels.push(...channels);
+
+      const meta = res.response_metadata as
+        | { next_cursor?: string }
+        | undefined;
+      cursor = meta?.next_cursor ?? "";
+      pages++;
+      if (!cursor) break;
+    }
+
+    console.log(
+      `getChannelList: fetched ${allChannels.length} channels in ${pages} pages`,
+    );
+    return { ok: true, channels: allChannels };
   }
 
   async getChannelMembers(channel: string): Promise<SlackResponse> {
