@@ -6,6 +6,7 @@ import type { EventAction, EventActionType } from "../types";
 import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
+import { MemberApplicationListTab } from "../components/MemberApplicationListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 
@@ -270,6 +271,8 @@ function ActionMainContent({
       return <TasksTab eventId={eventId} />;
     case "pr_review_list":
       return <PRReviewListTab eventId={eventId} />;
+    case "member_application":
+      return <MemberApplicationListTab eventId={eventId} />;
     case "schedule_polling":
       return (
         <PlaceholderContent label="日程調整のメイン画面（既存リーダー雑談会機能を将来統合予定）" />
