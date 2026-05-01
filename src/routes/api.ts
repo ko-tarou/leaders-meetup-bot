@@ -586,12 +586,13 @@ api.post("/events/:eventId/actions", async (c) => {
     enabled?: number;
   }>();
 
-  // バリデーション: action_type は4種限定
+  // バリデーション: action_type は5種限定
   const VALID_TYPES = [
     "schedule_polling",
     "task_management",
     "member_welcome",
     "pr_review_list",
+    "member_application",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
