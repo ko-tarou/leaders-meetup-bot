@@ -148,6 +148,13 @@
       "when": 1777652653044,
       "tag": "0020_premium_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1777655814352,
+      "tag": "0021_faithful_kid_colt",
+      "breakpoints": true
     }
   ]
 }

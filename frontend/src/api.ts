@@ -5,6 +5,8 @@ import type {
   Event,
   EventAction,
   EventActionType,
+  HowFound,
+  InterviewLocation,
   Meeting,
   MeetingDetail,
   MeetingMember,
@@ -423,14 +425,20 @@ export const api = {
   // Applications (Sprint 16: 新メンバー入会フロー)
   applications: {
     // 公開API（認証不要）— 応募送信
+    // Sprint 19 PR2: Google Form 「DevelopersHub 面談フォーム」準拠
     apply: (
       eventId: string,
       data: {
         name: string;
         email: string;
+        studentId: string;
+        howFound: HowFound;
+        interviewLocation: InterviewLocation;
+        existingActivities?: string;
+        availableSlots: string[]; // UTC ISO 配列
+        // 後方互換（旧フォームからの呼び出し用、現 UI からは送らない）
         motivation?: string;
         introduction?: string;
-        availableSlots: string[]; // UTC ISO 配列
       },
     ) =>
       request<{ ok: boolean; id: string; error?: string }>(

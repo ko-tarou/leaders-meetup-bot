@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
-import type { Event } from "../types";
+import {
+  HOW_FOUND_LABEL,
+  INTERVIEW_LOCATION_LABEL,
+  type Event,
+  type HowFound,
+  type InterviewLocation,
+} from "../types";
 
 // Sprint 19 PR1: 公開エンドポイントから取得する availability の型
 type Availability = {
@@ -19,8 +25,13 @@ export function PublicApplyPage() {
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [motivation, setMotivation] = useState("");
-  const [introduction, setIntroduction] = useState("");
+  // Sprint 19 PR2: Google Form 準拠の新フィールド
+  const [studentId, setStudentId] = useState("");
+  const [howFound, setHowFound] = useState<HowFound | "">("");
+  const [interviewLocation, setInterviewLocation] = useState<
+    InterviewLocation | ""
+  >("");
+  const [existingActivities, setExistingActivities] = useState("");
   const [slots, setSlots] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +73,18 @@ export function PublicApplyPage() {
       setError("お名前とメールアドレスは必須です");
       return;
     }
+    if (!studentId.trim()) {
+      setError("学籍番号を入力してください");
+      return;
+    }
+    if (!howFound) {
+      setError("どこで知ったかを選択してください");
+      return;
+    }
+    if (!interviewLocation) {
+      setError("面談場所を選択してください");
+      return;
+    }
     if (slots.length === 0) {
       setError("面談希望日時を1つ以上選択してください");
       return;
@@ -72,8 +95,10 @@ export function PublicApplyPage() {
       const res = await api.applications.apply(eventId!, {
         name: name.trim(),
         email: email.trim(),
-        motivation: motivation.trim() || undefined,
-        introduction: introduction.trim() || undefined,
+        studentId: studentId.trim(),
+        howFound,
+        interviewLocation,
+        existingActivities: existingActivities.trim() || undefined,
         availableSlots: slots,
       });
       if (!res.ok) {
@@ -166,10 +191,11 @@ export function PublicApplyPage() {
             onChange={(e) => setName(e.target.value)}
             required
             maxLength={100}
+            placeholder="例: 山田 太郎"
             style={inputStyle}
           />
         </Field>
-        <Field label="メールアドレス *">
+        <Field label="メールアドレス *" hint="運営からの連絡用にご記入ください">
           <input
             type="email"
             value={email}
@@ -179,24 +205,53 @@ export function PublicApplyPage() {
             style={inputStyle}
           />
         </Field>
-        <Field label="志望動機">
-          <textarea
-            value={motivation}
-            onChange={(e) => setMotivation(e.target.value)}
-            rows={4}
-            maxLength={2000}
+        <Field label="学籍番号 *" hint="例: 1 EP 1 - 1">
+          <input
+            type="text"
+            value={studentId}
+            onChange={(e) => setStudentId(e.target.value)}
+            required
+            maxLength={50}
+            placeholder="1 EP 1 - 1"
             style={inputStyle}
           />
         </Field>
-        <Field label="自己紹介">
-          <textarea
-            value={introduction}
-            onChange={(e) => setIntroduction(e.target.value)}
-            rows={4}
-            maxLength={2000}
-            style={inputStyle}
-          />
-        </Field>
+
+        <div style={{ marginBottom: "1.5rem" }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: "0.5rem",
+              fontWeight: "bold",
+              fontSize: "0.875rem",
+            }}
+          >
+            DevelopersHubをどこで知りましたか？ *
+          </label>
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            {(Object.keys(HOW_FOUND_LABEL) as HowFound[]).map((key) => (
+              <label
+                key={key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  cursor: "pointer",
+                  fontSize: "0.95rem",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="howFound"
+                  value={key}
+                  checked={howFound === key}
+                  onChange={() => setHowFound(key)}
+                />
+                <span>{HOW_FOUND_LABEL[key]}</span>
+              </label>
+            ))}
+          </div>
+        </div>
 
         <div style={{ marginBottom: "1.5rem" }}>
           <label
@@ -224,6 +279,57 @@ export function PublicApplyPage() {
             restrictTo={availability.leaderAvailableSlots}
           />
         </div>
+
+        <div style={{ marginBottom: "1.5rem" }}>
+          <label
+            style={{
+              display: "block",
+              marginBottom: "0.5rem",
+              fontWeight: "bold",
+              fontSize: "0.875rem",
+            }}
+          >
+            面談場所の希望 *
+          </label>
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            {(Object.keys(INTERVIEW_LOCATION_LABEL) as InterviewLocation[]).map(
+              (key) => (
+                <label
+                  key={key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    cursor: "pointer",
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="interviewLocation"
+                    value={key}
+                    checked={interviewLocation === key}
+                    onChange={() => setInterviewLocation(key)}
+                  />
+                  <span>{INTERVIEW_LOCATION_LABEL[key]}</span>
+                </label>
+              ),
+            )}
+          </div>
+        </div>
+
+        <Field
+          label="現在参加している活動（任意）"
+          hint="他のサークル・プロジェクト等、差し支えなければご記入ください"
+        >
+          <input
+            type="text"
+            value={existingActivities}
+            onChange={(e) => setExistingActivities(e.target.value)}
+            maxLength={500}
+            style={inputStyle}
+          />
+        </Field>
 
         <button
           type="submit"
@@ -300,9 +406,11 @@ function NoticeBox({ children }: { children: React.ReactNode }) {
 
 function Field({
   label,
+  hint,
   children,
 }: {
   label: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -317,6 +425,17 @@ function Field({
       >
         {label}
       </label>
+      {hint && (
+        <p
+          style={{
+            fontSize: "0.8rem",
+            color: "#6b7280",
+            margin: "0 0 0.375rem",
+          }}
+        >
+          {hint}
+        </p>
+      )}
       {children}
     </div>
   );

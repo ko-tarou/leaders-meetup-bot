@@ -2222,15 +2222,33 @@ api.get("/apply/:eventId/availability", async (c) => {
 });
 
 // 公開: 応募受付（認証不要、CORS は既存設定を継承）
+// Sprint 19 PR2: Google Form 「DevelopersHub 面談フォーム」準拠の選択肢
+const VALID_HOW_FOUND = [
+  "joint_briefing",
+  "welcome_event",
+  "poster",
+  "campus_hp",
+  "friend",
+  "teacher",
+  "other",
+];
+const VALID_INTERVIEW_LOCATION = ["online", "lab206"];
+
 api.post("/apply/:eventId", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const body = await c.req.json<{
     name: string;
     email: string;
+    // Sprint 19 PR2: 新フィールド
+    studentId: string;
+    howFound: string;
+    interviewLocation: string;
+    existingActivities?: string;
+    availableSlots: string[]; // UTC ISO 配列
+    // 後方互換（旧フォームからの応募 / 内部呼び出し用、UI からは送られない）
     motivation?: string;
     introduction?: string;
-    availableSlots: string[]; // UTC ISO 配列
   }>();
 
   // 必須バリデーション
@@ -2239,6 +2257,21 @@ api.post("/apply/:eventId", async (c) => {
   }
   if (!body.email || typeof body.email !== "string") {
     return c.json({ error: "email is required" }, 400);
+  }
+  if (!body.studentId || typeof body.studentId !== "string" || !body.studentId.trim()) {
+    return c.json({ error: "studentId is required" }, 400);
+  }
+  if (!body.howFound || typeof body.howFound !== "string") {
+    return c.json({ error: "howFound is required" }, 400);
+  }
+  if (!VALID_HOW_FOUND.includes(body.howFound)) {
+    return c.json({ error: "invalid howFound" }, 400);
+  }
+  if (!body.interviewLocation || typeof body.interviewLocation !== "string") {
+    return c.json({ error: "interviewLocation is required" }, 400);
+  }
+  if (!VALID_INTERVIEW_LOCATION.includes(body.interviewLocation)) {
+    return c.json({ error: "invalid interviewLocation" }, 400);
   }
   if (!Array.isArray(body.availableSlots)) {
     return c.json({ error: "availableSlots must be an array" }, 400);
@@ -2268,6 +2301,10 @@ api.post("/apply/:eventId", async (c) => {
     email: body.email.trim(),
     motivation: body.motivation?.trim() ?? null,
     introduction: body.introduction?.trim() ?? null,
+    studentId: body.studentId.trim(),
+    howFound: body.howFound,
+    interviewLocation: body.interviewLocation,
+    existingActivities: body.existingActivities?.trim() || null,
     availableSlots: JSON.stringify(body.availableSlots),
     status: "pending",
     interviewAt: null,

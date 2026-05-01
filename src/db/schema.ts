@@ -103,6 +103,18 @@ export const applications = sqliteTable("applications", {
   email: text("email").notNull(),
   motivation: text("motivation"),
   introduction: text("introduction"),
+  // === Sprint 19 PR2 新規フィールド（Google Form 「DevelopersHub 面談フォーム」準拠） ===
+  // ADR-0005 流儀: nullable + アプリ層で必須化（既存レコードと互換）
+  // 学籍番号（例: "1 EP 1 - 1"）
+  studentId: text("student_id"),
+  // どこで知ったか:
+  //   'joint_briefing' | 'welcome_event' | 'poster' | 'campus_hp' | 'friend' | 'teacher' | 'other'
+  howFound: text("how_found"),
+  // 面談場所の希望: 'online' | 'lab206'
+  interviewLocation: text("interview_location"),
+  // 既存の参加活動（任意）
+  existingActivities: text("existing_activities"),
+  // === 既存続き ===
   // 応募者が選択した希望日時候補（UTC ISO の配列、JSON）
   // 例: ["2026-05-10T01:00:00.000Z", "2026-05-10T02:00:00.000Z", ...]
   availableSlots: text("available_slots").notNull().default("[]"),
