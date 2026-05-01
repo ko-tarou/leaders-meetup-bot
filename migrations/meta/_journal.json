@@ -155,6 +155,13 @@
       "when": 1777655814352,
       "tag": "0021_faithful_kid_colt",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1777656628264,
+      "tag": "0022_dusty_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }
