@@ -1973,14 +1973,25 @@ api.get("/slack/channels", async (c) => {
       c.env.SLACK_SIGNING_SECRET,
     );
   }
-  const result = await client.getChannelList(200);
+  const result = await client.getChannelList();
   if (!result.ok) return c.json({ error: result.error }, 400);
   // users.conversations は bot 参加中のチャンネルのみ返すので is_member フィルタは不要
+  // is_private / is_member もデバッグ容易化のために返す（KIT のような大規模
+  // workspace で private channel が欠けていないかフロント/CLI から確認可能に）。
   const channels = (result.channels as Array<{
     id: string;
     name: string;
+    is_private?: boolean;
+    is_member?: boolean;
   }>) ?? [];
-  return c.json(channels.map((ch) => ({ id: ch.id, name: ch.name })));
+  return c.json(
+    channels.map((ch) => ({
+      id: ch.id,
+      name: ch.name,
+      is_private: ch.is_private,
+      is_member: ch.is_member,
+    })),
+  );
 });
 
 // --- Scheduled Jobs ---
