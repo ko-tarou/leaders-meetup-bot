@@ -167,6 +167,42 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
     }
   };
 
+  // Sprint 18 PR1: sticky board の手動リフレッシュ。
+  // 古いメッセージを削除して最新機能（start_at トグル / LGTM 等）が反映された
+  // 新メッセージを post する。誤操作防止のため confirm を挟む。
+  const handleRefresh = async (m: Meeting) => {
+    if (!getStickyEnabled(m)) {
+      alert("sticky bot が無効です。先に有効化してください。");
+      return;
+    }
+    if (
+      !confirm(
+        `「${m.name}」の sticky メッセージを削除して新しく投稿し直します。よろしいですか？`,
+      )
+    ) {
+      return;
+    }
+    setPendingMeetingId(m.id);
+    try {
+      const r =
+        actionType === "task_management"
+          ? await api.refreshTaskBoard(m.id)
+          : actionType === "pr_review_list"
+            ? await api.refreshPRReviewBoard(m.id)
+            : null;
+      if (!r) {
+        throw new Error(`unsupported actionType: ${actionType}`);
+      }
+      if (!r.ok) throw new Error(r.error ?? "更新に失敗しました");
+      setRefreshKey((k) => k + 1);
+      alert("ボードを更新しました（Slack で確認してください）");
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "更新に失敗しました");
+    } finally {
+      setPendingMeetingId(null);
+    }
+  };
+
   const handleRemove = async (m: Meeting) => {
     if (
       !confirm(
@@ -258,6 +294,18 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
                     />
                     sticky bot {isEnabled ? "ON" : "OFF"}
                   </label>
+                  <button
+                    onClick={() => handleRefresh(m)}
+                    disabled={pendingMeetingId === m.id || !isEnabled}
+                    style={refreshBtnStyle}
+                    title={
+                      isEnabled
+                        ? "古いメッセージを削除して最新機能で再投稿"
+                        : "sticky bot を有効化してください"
+                    }
+                  >
+                    🔄 更新
+                  </button>
                   <button
                     onClick={() => handleRemove(m)}
                     disabled={pendingMeetingId === m.id}
@@ -492,6 +540,16 @@ const removeBtnStyle: React.CSSProperties = {
   border: "1px solid #fecaca",
   background: "white",
   color: "#dc2626",
+  borderRadius: "0.25rem",
+  cursor: "pointer",
+  fontSize: "0.8125rem",
+};
+
+const refreshBtnStyle: React.CSSProperties = {
+  padding: "0.25rem 0.6rem",
+  border: "1px solid #d1d5db",
+  background: "white",
+  color: "#374151",
   borderRadius: "0.25rem",
   cursor: "pointer",
   fontSize: "0.8125rem",
