@@ -170,6 +170,18 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
   // Sprint 18 PR1: sticky board の手動リフレッシュ。
   // 古いメッセージを削除して最新機能（start_at トグル / LGTM 等）が反映された
   // 新メッセージを post する。誤操作防止のため confirm を挟む。
+  // Sprint 18 PR2: 診断版に対応。delete / post の各結果を alert で表示し、
+  // 「ok=true なのに Slack に出ない」「silent fail」を運用画面で特定可能に。
+  // backend は診断情報を含むが api.ts の型は ts/error しか持たないため
+  // ローカル型で受け直す。
+  type RefreshDiagnostics = {
+    ok: boolean;
+    error?: string;
+    oldTs?: string;
+    deleteError?: string;
+    postError?: string;
+    newTs?: string;
+  };
   const handleRefresh = async (m: Meeting) => {
     if (!getStickyEnabled(m)) {
       alert("sticky bot が無効です。先に有効化してください。");
@@ -184,18 +196,28 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
     }
     setPendingMeetingId(m.id);
     try {
-      const r =
+      const raw =
         actionType === "task_management"
           ? await api.refreshTaskBoard(m.id)
           : actionType === "pr_review_list"
             ? await api.refreshPRReviewBoard(m.id)
             : null;
-      if (!r) {
+      if (!raw) {
         throw new Error(`unsupported actionType: ${actionType}`);
       }
-      if (!r.ok) throw new Error(r.error ?? "更新に失敗しました");
+      const r = raw as unknown as RefreshDiagnostics;
       setRefreshKey((k) => k + 1);
-      alert("ボードを更新しました（Slack で確認してください）");
+
+      // 診断情報を整形して表示
+      const deleteLine = r.deleteError
+        ? `削除: NG ${r.deleteError}`
+        : "削除: OK";
+      const postLine = r.postError
+        ? `投稿: NG ${r.postError}`
+        : `投稿: OK (ts=${r.newTs ?? "?"})`;
+      alert(
+        `ボード更新結果:\n${deleteLine}\n${postLine}\n\n旧 ts: ${r.oldTs ?? "?"}`,
+      );
     } catch (e) {
       alert(e instanceof Error ? e.message : "更新に失敗しました");
     } finally {
