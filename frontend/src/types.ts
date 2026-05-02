@@ -206,6 +206,16 @@ export type PRReviewLgtm = {
   createdAt: string;
 };
 
+// PR レビューの担当レビュアー (Sprint 22)
+// 旧 PRReview.reviewerSlackId（単一）から多対多化。
+// PRReview 側のフィールドは後方互換のため残るが新コードは参照しない。
+export type PRReviewReviewer = {
+  id: string;
+  reviewId: string;
+  slackUserId: string;
+  createdAt: string;
+};
+
 // Slack workspace（ADR-0006）
 // bot_token / signing_secret は backend が返さないため型にも含めない
 export type Workspace = {

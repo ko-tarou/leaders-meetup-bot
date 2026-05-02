@@ -15,6 +15,7 @@ import type {
   Poll,
   PRReview,
   PRReviewLgtm,
+  PRReviewReviewer,
   PRReviewStatus,
   Reminder,
   ReminderItem,
@@ -417,6 +418,21 @@ export const api = {
       remove: (reviewId: string, slackUserId: string) =>
         request<{ ok: boolean }>(
           `/pr-reviews/${reviewId}/lgtms/${slackUserId}`,
+          { method: "DELETE" },
+        ),
+    },
+    // 担当レビュアー関連 (Sprint 22): N人対応
+    reviewers: {
+      list: (reviewId: string) =>
+        request<PRReviewReviewer[]>(`/pr-reviews/${reviewId}/reviewers`),
+      add: (reviewId: string, slackUserId: string) =>
+        request<PRReviewReviewer>(`/pr-reviews/${reviewId}/reviewers`, {
+          method: "POST",
+          body: JSON.stringify({ slackUserId }),
+        }),
+      remove: (reviewId: string, slackUserId: string) =>
+        request<{ ok: true }>(
+          `/pr-reviews/${reviewId}/reviewers/${slackUserId}`,
           { method: "DELETE" },
         ),
     },
