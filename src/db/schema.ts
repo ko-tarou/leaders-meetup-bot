@@ -141,7 +141,9 @@ export const prReviews = sqliteTable("pr_reviews", {
   // 'open' | 'in_review' | 'merged' | 'closed'
   status: text("status").notNull().default("open"),
   requesterSlackId: text("requester_slack_id").notNull(),
-  reviewerSlackId: text("reviewer_slack_id"), // 担当レビュアー（任意）
+  // Sprint 22 で多対多化（pr_review_reviewers）。
+  // 新コードは参照しない（dead column として残す）。
+  reviewerSlackId: text("reviewer_slack_id"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -159,6 +161,21 @@ export const prReviewLgtms = sqliteTable(
     createdAt: text("created_at").notNull(),
   },
   (t) => [unique("pr_review_lgtms_review_user_uniq").on(t.reviewId, t.slackUserId)],
+);
+
+// PR レビューの担当レビュアー（多対多, ADR-0008 拡張 / Sprint 22）
+// 旧 prReviews.reviewerSlackId は廃止。dead column として残るが新コードは参照しない。
+export const prReviewReviewers = sqliteTable(
+  "pr_review_reviewers",
+  {
+    id: text("id").primaryKey(),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => prReviews.id),
+    slackUserId: text("slack_user_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [unique("pr_review_reviewers_review_user_uniq").on(t.reviewId, t.slackUserId)],
 );
 
 // ミーティング定義
