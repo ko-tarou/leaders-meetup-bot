@@ -14,7 +14,12 @@
 
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { meetings, prReviews, prReviewLgtms } from "../db/schema";
+import {
+  meetings,
+  prReviews,
+  prReviewLgtms,
+  prReviewReviewers,
+} from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { createSlackClientForWorkspace } from "./workspace";
@@ -92,9 +97,22 @@ export async function buildPRReviewBoardBlocks(
       client,
       r.requesterSlackId,
     ).catch(() => r.requesterSlackId);
-    const reviewerText = r.reviewerSlackId
-      ? `レビュアー: ${await getUserName(db, client, r.reviewerSlackId).catch(() => r.reviewerSlackId)}`
-      : "レビュアー: 未割当";
+    // Sprint 22: 多対多 reviewers 対応。pr_review_reviewers テーブルから取得し
+    // カンマ区切りで表示。0 件なら "未割当"。
+    const reviewerRows = await d1
+      .select()
+      .from(prReviewReviewers)
+      .where(eq(prReviewReviewers.reviewId, r.id))
+      .all();
+    const reviewerNames = await Promise.all(
+      reviewerRows.map((rr) =>
+        getUserName(db, client, rr.slackUserId).catch(() => rr.slackUserId),
+      ),
+    );
+    const reviewerText =
+      reviewerNames.length > 0
+        ? `レビュアー: ${reviewerNames.join(", ")}`
+        : "レビュアー: 未割当";
     const urlText = r.url ? `\n<${r.url}|🔗 リンク>` : "";
     const statusEmoji = STATUS_EMOJI[r.status] ?? "🔴";
     const statusLabel = STATUS_LABEL[r.status] ?? r.status;
