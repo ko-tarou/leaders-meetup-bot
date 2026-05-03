@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { PRReview, PRReviewLgtm, PRReviewStatus } from "../types";
+import type {
+  PRReview,
+  PRReviewLgtm,
+  PRReviewReviewer,
+  PRReviewStatus,
+} from "../types";
 import { api } from "../api";
 
 // ADR-0008 / Sprint 12 PR2:
 // PR レビュー依頼の一覧 + 新規作成 + 編集 + 削除を行うタブコンポーネント。
 // タスク UI に近いカード一覧スタイルで、完了/クローズはトグルで非表示にできる。
 // Sprint 17 PR1: 各カードに LGTM 数 (N/2) を表示する。
+// Sprint 22: 担当レビュアーを N 人対応（チップ式 UI）。
+// 旧 PRReview.reviewerSlackId は後方互換のため残置するが、新 UI では未使用。
 
 // Sprint 17 PR1: 自動完了に必要な LGTM 数（backend と一致させる）
 const LGTM_THRESHOLD = 2;
@@ -106,6 +113,49 @@ const styles = {
     justifyContent: "flex-end",
   } as CSSProperties,
   fullInput: { width: "100%" } as CSSProperties,
+  chipsRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "0.25rem",
+    marginBottom: "0.5rem",
+  } as CSSProperties,
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    background: "#e5e7eb",
+    color: "#374151",
+    fontSize: "0.75rem",
+    padding: "0.125rem 0.5rem",
+    borderRadius: "9999px",
+  } as CSSProperties,
+  chipRemove: {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    color: "#6b7280",
+    padding: 0,
+    fontSize: "0.875rem",
+    lineHeight: 1,
+  } as CSSProperties,
+  chipInputRow: {
+    display: "flex",
+    gap: "0.25rem",
+  } as CSSProperties,
+  chipInput: { flex: 1 } as CSSProperties,
+  chipAddBtn: {
+    background: "#2563eb",
+    color: "white",
+    border: "none",
+    padding: "0.25rem 0.75rem",
+    borderRadius: "0.25rem",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+  } as CSSProperties,
+  reviewersHint: {
+    fontSize: "0.75rem",
+    color: "#6b7280",
+  } as CSSProperties,
 };
 
 export function PRReviewListTab({ eventId }: { eventId: string }) {
@@ -222,6 +272,31 @@ function ReviewCard({
   review: PRReviewWithLgtm;
   onSelect: () => void;
 }) {
+  // Sprint 22: 多対多 reviewers を表示。マウント時に取得。
+  // 個別失敗は空配列にフォールバック（カード自体の表示は壊さない）。
+  const [reviewers, setReviewers] = useState<PRReviewReviewer[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.prReviews.reviewers
+      .list(r.id)
+      .then((list) => {
+        if (cancelled) return;
+        setReviewers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setReviewers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [r.id]);
+
+  const reviewerText =
+    reviewers.length > 0
+      ? `レビュアー: ${reviewers.map((rv) => rv.slackUserId).join(", ")}`
+      : "レビュアー: 未割当";
+
   return (
     <div
       onClick={onSelect}
@@ -266,7 +341,7 @@ function ReviewCard({
       {r.description && <div style={styles.desc}>{r.description}</div>}
       <div style={styles.cardMeta}>
         <span>依頼者: {r.requesterSlackId}</span>
-        {r.reviewerSlackId && <span>レビュアー: {r.reviewerSlackId}</span>}
+        <span>{reviewerText}</span>
       </div>
     </div>
   );
@@ -293,11 +368,58 @@ function PRReviewForm({
       localStorage.getItem("devhub_ops:my_slack_id") ??
       "",
   );
-  const [reviewerSlackId, setReviewerSlackId] = useState(
-    review?.reviewerSlackId ?? "",
-  );
+  // Sprint 22: 多対多 reviewers をチップ式 UI で管理。
+  // 編集モードでは即座に API を叩いて反映する（reviewerSlackId 単一カラムは
+  // 後方互換のため残るが、新 UI からは送らない）。
+  const [reviewers, setReviewers] = useState<PRReviewReviewer[]>([]);
+  const [reviewerInput, setReviewerInput] = useState("");
+  const [reviewerError, setReviewerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 編集モードのみ既存 reviewers をロード
+  useEffect(() => {
+    if (!review) return;
+    let cancelled = false;
+    api.prReviews.reviewers
+      .list(review.id)
+      .then((list) => {
+        if (cancelled) return;
+        setReviewers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setReviewers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [review]);
+
+  const handleAddReviewer = async () => {
+    const value = reviewerInput.trim();
+    if (!value) return;
+    if (!review) return; // 新規モードでは無効
+    setReviewerError(null);
+    try {
+      const created = await api.prReviews.reviewers.add(review.id, value);
+      setReviewers((prev) => [...prev, created]);
+      setReviewerInput("");
+    } catch (e) {
+      setReviewerError(e instanceof Error ? e.message : "追加に失敗");
+    }
+  };
+
+  const handleRemoveReviewer = async (slackUserId: string) => {
+    if (!review) return;
+    setReviewerError(null);
+    try {
+      await api.prReviews.reviewers.remove(review.id, slackUserId);
+      setReviewers((prev) => prev.filter((r) => r.slackUserId !== slackUserId));
+    } catch (e) {
+      setReviewerError(e instanceof Error ? e.message : "削除に失敗");
+    }
+  };
 
   const canSubmit = !!title.trim() && !!requesterSlackId.trim() && !submitting;
 
@@ -309,13 +431,14 @@ function PRReviewForm({
     setError(null);
     setSubmitting(true);
     try {
+      // Sprint 22: 担当レビュアーは pr_review_reviewers 経由で管理するため
+      // reviewerSlackId は新 UI からは送らない（API は後方互換で受け付ける）。
       if (isEdit && review) {
         await api.prReviews.update(review.id, {
           title: title.trim(),
           url: url.trim() || null,
           description: description.trim() || null,
           status,
-          reviewerSlackId: reviewerSlackId.trim() || null,
         });
       } else {
         await api.prReviews.create(eventId, {
@@ -323,7 +446,6 @@ function PRReviewForm({
           url: url.trim() || undefined,
           description: description.trim() || undefined,
           requesterSlackId: requesterSlackId.trim(),
-          reviewerSlackId: reviewerSlackId.trim() || undefined,
         });
       }
       onSaved();
@@ -391,14 +513,61 @@ function PRReviewForm({
             style={styles.fullInput}
           />
         </Field>
-        <Field label="レビュアー Slack ID（任意）">
-          <input
-            value={reviewerSlackId}
-            onChange={(e) => setReviewerSlackId(e.target.value)}
-            disabled={submitting}
-            placeholder="U..."
-            style={styles.fullInput}
-          />
+        <Field label="レビュアー（複数登録可）">
+          {isEdit ? (
+            <>
+              {reviewers.length > 0 && (
+                <div style={styles.chipsRow}>
+                  {reviewers.map((rv) => (
+                    <span key={rv.id} style={styles.chip}>
+                      {rv.slackUserId}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveReviewer(rv.slackUserId)}
+                        disabled={submitting}
+                        style={styles.chipRemove}
+                        aria-label={`${rv.slackUserId} を削除`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={styles.chipInputRow}>
+                <input
+                  value={reviewerInput}
+                  onChange={(e) => setReviewerInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddReviewer();
+                    }
+                  }}
+                  disabled={submitting}
+                  placeholder="U..."
+                  style={{ ...styles.fullInput, ...styles.chipInput }}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddReviewer}
+                  disabled={submitting || !reviewerInput.trim()}
+                  style={styles.chipAddBtn}
+                >
+                  追加
+                </button>
+              </div>
+              {reviewerError && (
+                <div style={{ color: "#dc2626", fontSize: "0.75rem", marginTop: "0.25rem" }}>
+                  {reviewerError}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={styles.reviewersHint}>
+              作成後に編集モードで設定してください。
+            </div>
+          )}
         </Field>
         {isEdit && (
           <Field label="ステータス">

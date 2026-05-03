@@ -13,8 +13,13 @@
 // - update ではなく delete + post で「edited バッジ」と通知の二重化を避ける
 
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
-import { meetings, prReviews, prReviewLgtms } from "../db/schema";
+import { eq, inArray } from "drizzle-orm";
+import {
+  meetings,
+  prReviews,
+  prReviewLgtms,
+  prReviewReviewers,
+} from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { createSlackClientForWorkspace } from "./workspace";
@@ -86,25 +91,70 @@ export async function buildPRReviewBoardBlocks(
     });
   }
 
+  // N+1 解消: ループに入る前に reviewers / lgtms / userName を一括取得して
+  // Map 化する。multi-review の [must] 指摘 + gemini-code-assist[bot] からも
+  // high で同点指摘あり。PR 数 × レビュアー数の D1 クエリ膨張を解消する。
+  const reviewIds = activeReviews.map((r) => r.id);
+  const reviewerMap = new Map<string, string[]>();
+  const lgtmMap = new Map<string, number>();
+  // reviewIds が空のときは inArray クエリを発行せず空配列で代替する
+  // （drizzle の inArray は空配列を渡すと SQL 構文エラーになる実装があるため）
+  const allReviewerRows = reviewIds.length
+    ? await d1
+        .select()
+        .from(prReviewReviewers)
+        .where(inArray(prReviewReviewers.reviewId, reviewIds))
+        .all()
+    : [];
+  for (const row of allReviewerRows) {
+    const list = reviewerMap.get(row.reviewId);
+    if (list) {
+      list.push(row.slackUserId);
+    } else {
+      reviewerMap.set(row.reviewId, [row.slackUserId]);
+    }
+  }
+  const allLgtmRows = reviewIds.length
+    ? await d1
+        .select()
+        .from(prReviewLgtms)
+        .where(inArray(prReviewLgtms.reviewId, reviewIds))
+        .all()
+    : [];
+  for (const row of allLgtmRows) {
+    lgtmMap.set(row.reviewId, (lgtmMap.get(row.reviewId) ?? 0) + 1);
+  }
+
+  // 全 reviewer + 全 requester の slackUserId を unique 化して getUserName を
+  // 並列呼び出しする（N×M 回 → unique 件数のみに削減）。
+  const allUserIds = new Set<string>();
+  for (const r of activeReviews) allUserIds.add(r.requesterSlackId);
+  for (const row of allReviewerRows) allUserIds.add(row.slackUserId);
+  const nameEntries = await Promise.all(
+    Array.from(allUserIds).map(async (uid) => {
+      const name = await getUserName(db, client, uid).catch(() => uid);
+      return [uid, name] as const;
+    }),
+  );
+  const nameMap = new Map(nameEntries);
+
   for (const r of activeReviews) {
-    const requesterName = await getUserName(
-      db,
-      client,
-      r.requesterSlackId,
-    ).catch(() => r.requesterSlackId);
-    const reviewerText = r.reviewerSlackId
-      ? `レビュアー: ${await getUserName(db, client, r.reviewerSlackId).catch(() => r.reviewerSlackId)}`
-      : "レビュアー: 未割当";
+    const requesterName = nameMap.get(r.requesterSlackId) ?? r.requesterSlackId;
+    // Sprint 22: 多対多 reviewers 対応。pr_review_reviewers テーブルから取得し
+    // カンマ区切りで表示。0 件なら "未割当"。
+    const reviewerNames = (reviewerMap.get(r.id) ?? []).map(
+      (uid) => nameMap.get(uid) ?? uid,
+    );
+    const reviewerText =
+      reviewerNames.length > 0
+        ? `レビュアー: ${reviewerNames.join(", ")}`
+        : "レビュアー: 未割当";
     const urlText = r.url ? `\n<${r.url}|🔗 リンク>` : "";
     const statusEmoji = STATUS_EMOJI[r.status] ?? "🔴";
     const statusLabel = STATUS_LABEL[r.status] ?? r.status;
     // Sprint 17 PR1: LGTM 数を取得して表示
-    const lgtms = await d1
-      .select()
-      .from(prReviewLgtms)
-      .where(eq(prReviewLgtms.reviewId, r.id))
-      .all();
-    const lgtmText = `LGTM ${lgtms.length}/${LGTM_THRESHOLD}`;
+    const lgtmCount = lgtmMap.get(r.id) ?? 0;
+    const lgtmText = `LGTM ${lgtmCount}/${LGTM_THRESHOLD}`;
     const sectionText = `*${statusEmoji} ${r.title}*\n${statusLabel} / ${lgtmText} / 依頼者: ${requesterName} / ${reviewerText}${urlText}`;
 
     blocks.push({
