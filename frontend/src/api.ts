@@ -234,15 +234,15 @@ export const api = {
 
   // Events (ADR-0001)
   events: {
-    list: () => request<Event[]>("/events"),
-    get: (id: string) => request<Event>(`/events/${id}`),
+    list: () => request<Event[]>("/orgs"),
+    get: (id: string) => request<Event>(`/orgs/${id}`),
     create: (data: {
       type: "meetup" | "hackathon" | "project";
       name: string;
       config?: string;
       status?: "active" | "archived";
     }) =>
-      request<Event>("/events", {
+      request<Event>("/orgs", {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -254,7 +254,7 @@ export const api = {
         status?: "active" | "archived";
       },
     ) =>
-      request<Event>(`/events/${id}`, {
+      request<Event>(`/orgs/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       }),
@@ -262,7 +262,7 @@ export const api = {
     // EventActions (ADR-0008)
     actions: {
       list: (eventId: string) =>
-        request<EventAction[]>(`/events/${eventId}/actions`),
+        request<EventAction[]>(`/orgs/${eventId}/actions`),
       create: (
         eventId: string,
         data: {
@@ -271,7 +271,7 @@ export const api = {
           enabled?: number;
         },
       ) =>
-        request<EventAction>(`/events/${eventId}/actions`, {
+        request<EventAction>(`/orgs/${eventId}/actions`, {
           method: "POST",
           body: JSON.stringify(data),
         }),
@@ -281,7 +281,7 @@ export const api = {
         data: { config?: string; enabled?: number },
       ) =>
         request<EventAction>(
-          `/events/${eventId}/actions/${actionId}`,
+          `/orgs/${eventId}/actions/${actionId}`,
           {
             method: "PUT",
             body: JSON.stringify(data),
@@ -289,7 +289,7 @@ export const api = {
         ),
       delete: (eventId: string, actionId: string) =>
         request<{ ok: boolean }>(
-          `/events/${eventId}/actions/${actionId}`,
+          `/orgs/${eventId}/actions/${actionId}`,
           { method: "DELETE" },
         ),
     },
@@ -301,7 +301,7 @@ export const api = {
         scanned: number;
         inserted: number;
         skipped: number;
-      }>(`/events/bootstrap-actions`, { method: "POST" }),
+      }>(`/orgs/bootstrap-actions`, { method: "POST" }),
   },
 
   // Tasks (ADR-0002)
@@ -373,7 +373,7 @@ export const api = {
   prReviews: {
     list: (eventId: string, status?: PRReviewStatus) => {
       const qs = status ? `?status=${status}` : "";
-      return request<PRReview[]>(`/events/${eventId}/pr-reviews${qs}`);
+      return request<PRReview[]>(`/orgs/${eventId}/pr-reviews${qs}`);
     },
     get: (id: string) => request<PRReview>(`/pr-reviews/${id}`),
     create: (
@@ -386,7 +386,7 @@ export const api = {
         reviewerSlackId?: string;
       },
     ) =>
-      request<PRReview>(`/events/${eventId}/pr-reviews`, {
+      request<PRReview>(`/orgs/${eventId}/pr-reviews`, {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -467,7 +467,7 @@ export const api = {
     // 管理API（Sprint 16 PR3）— 一覧 / 詳細 / 更新（合否判定）/ 削除
     list: (eventId: string, status?: ApplicationStatus) => {
       const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-      return request<Application[]>(`/events/${eventId}/applications${qs}`);
+      return request<Application[]>(`/orgs/${eventId}/applications${qs}`);
     },
     get: (id: string) => request<Application>(`/applications/${id}`),
     update: (
