@@ -38,6 +38,12 @@ export const ACTION_META: Record<
     description: "応募フォームから入会希望者を受付け、面談を経て合否判定",
     icon: "📝",
   },
+  weekly_reminder: {
+    label: "週次リマインド",
+    description:
+      "曜日と時刻を指定して、チームチャンネル・運営チャンネルに自動でメッセージを送ります",
+    icon: "🔔",
+  },
 };
 
 // 共通タブ (イベント直下)
