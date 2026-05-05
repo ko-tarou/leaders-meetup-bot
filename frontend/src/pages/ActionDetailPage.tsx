@@ -349,6 +349,8 @@ function ActionSettingsContent({
         <PlaceholderContent label="このアクションには専用設定がまだありません" />
       );
     case "weekly_reminder":
+      // workspaceId は今回未指定。ChannelSelector の default WS フォールバックに乗る。
+      // 多 workspace 対応は別 PR で行う。
       return (
         <WeeklyReminderForm
           eventId={eventId}

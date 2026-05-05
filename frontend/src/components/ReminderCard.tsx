@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { ChipInput } from "./ChipInput";
+import { MultiChannelSelector } from "./MultiChannelSelector";
 
 // Sprint 23 PR3: weekly_reminder の 1 件分 (= 1 reminder) を編集するカード。
 // 折りたたみ可能なヘッダ (名前 + on/off + 削除) と、展開時の詳細フォームを持つ。
@@ -30,12 +31,14 @@ export function ReminderCard({
   reminder,
   errors,
   disabled,
+  workspaceId,
   onChange,
   onDelete,
 }: {
   reminder: ReminderDraft;
   errors: ReminderError;
   disabled?: boolean;
+  workspaceId?: string;
   onChange: (next: ReminderDraft) => void;
   onDelete: () => void;
 }) {
@@ -103,7 +106,7 @@ export function ReminderCard({
             </select>
           </Field>
 
-          <Field label="送信時刻 (JST、HH:MM)" error={errors.times}>
+          <Field label="送信時刻 (JST、HH:MM。複数設定可)" error={errors.times}>
             <ChipInput
               values={reminder.schedule.times}
               onChange={(times) => update("schedule", { ...reminder.schedule, times })}
@@ -117,18 +120,17 @@ export function ReminderCard({
                 return null;
               }}
             />
+            <div style={s.helper}>
+              「追加」ボタンまたは Enter で時刻を追加できます
+            </div>
           </Field>
 
-          <Field label="チャンネル ID (複数登録可)" error={errors.channelIds}>
-            <ChipInput
+          <Field label="送信先チャンネル (複数選択可)" error={errors.channelIds}>
+            <MultiChannelSelector
               values={reminder.channelIds}
               onChange={(channelIds) => update("channelIds", channelIds)}
-              placeholder="C0XXXXX"
-              disabled={disabled}
-              ariaLabelPrefix="チャンネル"
-              validateAdd={(v, cur) =>
-                cur.includes(v) ? "同じチャンネル ID が既に登録されています" : null
-              }
+              workspaceId={workspaceId}
+              ariaLabel="送信先チャンネルを追加"
             />
           </Field>
 
@@ -194,5 +196,8 @@ const s: Record<string, CSSProperties> = {
   input: {
     width: "100%", padding: "0.5rem", border: "1px solid #d1d5db",
     borderRadius: "0.25rem", boxSizing: "border-box",
+  },
+  helper: {
+    color: "#6b7280", fontSize: "0.75rem", marginTop: "0.25rem",
   },
 };
