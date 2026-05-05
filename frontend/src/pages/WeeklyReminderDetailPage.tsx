@@ -13,8 +13,17 @@ import {
 import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
-// PR-A では暫定的に既存 ReminderCard を流用した単一フォーム。
-// PR-B でサブタブ (チャンネル/時刻/テキスト) に分割予定。
+// Sprint 23 PR-B/C: 3 サブタブ (メイン / チャンネル管理 / 時刻設定) に再構成。
+// この commit ではタブ navigation の骨格のみ追加し、本体は次 commit で各タブ
+// コンポーネントに置き換える。
+
+type SubTab = "main" | "channels" | "time";
+
+const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: "main", label: "メイン" },
+  { id: "channels", label: "チャンネル管理" },
+  { id: "time", label: "時刻設定" },
+];
 
 export function WeeklyReminderDetailPage() {
   const { eventId, reminderId } = useParams<{
@@ -30,6 +39,7 @@ export function WeeklyReminderDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<SubTab>("main");
 
   useEffect(() => {
     if (!eventId || !reminderId) return;
@@ -102,7 +112,6 @@ export function WeeklyReminderDetailPage() {
       const updated = await api.events.actions.update(eventId, action.id, {
         config: JSON.stringify({ reminders: next }),
       });
-      // updated.config を取り回せるよう action ステートも反映
       setAction(updated);
       setNotice("保存しました");
     } catch (err) {
@@ -144,9 +153,24 @@ export function WeeklyReminderDetailPage() {
         </button>
       </div>
 
+      {/* サブタブ */}
+      <div style={s.subTabs}>
+        {SUB_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setSubTab(t.id)}
+            style={subTabBtnStyle(subTab === t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {error && <div style={s.errorBanner}>{error}</div>}
       {notice && <div style={s.noticeBanner}>{notice}</div>}
 
+      {/* PR-B/C 移行中: 各タブ実装が揃うまでは ReminderCard を全タブで描画する */}
       <ReminderCard
         reminder={draft}
         errors={errors}
@@ -190,6 +214,18 @@ export function WeeklyReminderDetailPage() {
   );
 }
 
+function subTabBtnStyle(active: boolean): CSSProperties {
+  return {
+    padding: "0.5rem 1rem",
+    background: active ? "#2563eb" : "transparent",
+    color: active ? "white" : "#374151",
+    border: "none",
+    cursor: "pointer",
+    borderRadius: "0.25rem 0.25rem 0 0",
+    fontSize: "0.875rem",
+  };
+}
+
 const s: Record<string, CSSProperties> = {
   loading: { padding: "2rem", textAlign: "center", color: "#999" },
   notFound: { padding: "2rem", textAlign: "center", color: "#6b7280" },
@@ -216,6 +252,12 @@ const s: Record<string, CSSProperties> = {
     cursor: "pointer",
     fontSize: "0.875rem",
     padding: 0,
+  },
+  subTabs: {
+    display: "flex",
+    gap: "0.25rem",
+    borderBottom: "1px solid #e5e7eb",
+    marginBottom: "1rem",
   },
   errorBanner: {
     color: "#dc2626",
