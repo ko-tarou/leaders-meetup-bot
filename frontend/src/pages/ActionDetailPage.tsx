@@ -10,10 +10,7 @@ import { MemberApplicationListTab } from "../components/MemberApplicationListTab
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
-import {
-  WeeklyReminderForm,
-  WeeklyReminderMain,
-} from "../components/WeeklyReminderForm";
+import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import {
   AttendanceCheckForm,
   AttendanceCheckMain,
@@ -53,6 +50,10 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
       { id: "availability", label: "候補日時設定" },
       { id: "settings", label: "その他設定" },
     ];
+  }
+  // Sprint 23 PR-A: weekly_reminder は一覧ベース UX に再構成。サブタブを廃止。
+  if (actionType === "weekly_reminder") {
+    return [];
   }
   return [
     { id: "main", label: "メイン" },
@@ -208,27 +209,63 @@ export function ActionDetailPage() {
         </p>
       )}
 
-      {/* サブタブ */}
-      <div
-        style={{
-          display: "flex",
-          gap: "0.25rem",
-          borderBottom: "1px solid #e5e7eb",
-          marginBottom: "1rem",
-        }}
-      >
-        {subTabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setSubTab(t.id)}
-            style={subTabBtn(subTab === t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* サブタブ (weekly_reminder は廃止 → subTabs が空のときは描画しない) */}
+      {subTabs.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            gap: "0.25rem",
+            borderBottom: "1px solid #e5e7eb",
+            marginBottom: "1rem",
+          }}
+        >
+          {subTabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSubTab(t.id)}
+              style={subTabBtn(subTab === t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {subTab === "main" && (
+      {/* Sprint 23 PR-A: weekly_reminder はタブを持たず一覧ページを直接埋め込む */}
+      {actionType === "weekly_reminder" && (
+        <div>
+          <WeeklyReminderListPage
+            eventId={eventId}
+            action={action}
+            onChanged={() => setRefreshKey((k) => k + 1)}
+          />
+          <hr
+            style={{
+              margin: "2rem 0 1rem",
+              border: "none",
+              borderTop: "1px solid #e5e7eb",
+            }}
+          />
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button onClick={handleToggle} style={secondaryBtnStyle}>
+              {action.enabled === 1 ? "無効化" : "有効化"}
+            </button>
+            <button
+              onClick={handleDelete}
+              style={{
+                ...secondaryBtnStyle,
+                background: "#dc2626",
+                color: "white",
+                borderColor: "#dc2626",
+              }}
+            >
+              削除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {actionType !== "weekly_reminder" && subTab === "main" && (
         <ActionMainContent
           eventId={eventId}
           actionType={actionType as EventActionType}
@@ -248,7 +285,7 @@ export function ActionDetailPage() {
           onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
-      {subTab === "settings" && (
+      {actionType !== "weekly_reminder" && subTab === "settings" && (
         <div>
           <ActionSettingsContent
             eventId={eventId}
@@ -308,8 +345,6 @@ function ActionMainContent({
       return (
         <PlaceholderContent label="新メンバー対応に状態画面はありません。「設定」タブで動作を構成してください。" />
       );
-    case "weekly_reminder":
-      return <WeeklyReminderMain action={action} />;
     case "attendance_check":
       return <AttendanceCheckMain action={action} />;
     default:
@@ -347,16 +382,6 @@ function ActionSettingsContent({
     case "schedule_polling":
       return (
         <PlaceholderContent label="このアクションには専用設定がまだありません" />
-      );
-    case "weekly_reminder":
-      // workspaceId は今回未指定。ChannelSelector の default WS フォールバックに乗る。
-      // 多 workspace 対応は別 PR で行う。
-      return (
-        <WeeklyReminderForm
-          eventId={eventId}
-          action={action}
-          onSaved={onSaved}
-        />
       );
     case "attendance_check":
       return (

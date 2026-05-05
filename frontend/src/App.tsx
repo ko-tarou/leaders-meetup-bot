@@ -6,6 +6,7 @@ import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
 import { HomePage } from "./pages/HomePage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
+import { WeeklyReminderDetailPage } from "./pages/WeeklyReminderDetailPage";
 import {
   PublicApplyPage,
   PublicThanksPage,
@@ -75,6 +76,12 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+          {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
+              より具体的なルートを上に置いてマッチを優先させる。 */}
+          <Route
+            path="/events/:eventId/actions/weekly_reminder/:reminderId"
+            element={<WeeklyReminderDetailPage />}
+          />
           {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
           <Route
             path="/events/:eventId/actions/:actionType"
