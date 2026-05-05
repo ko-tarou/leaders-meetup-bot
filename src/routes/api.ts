@@ -641,7 +641,7 @@ api.delete("/meetings/:id/pr-review-board", async (c) => {
 
 // --- Events (ADR-0001) ---
 
-api.get("/events", async (c) => {
+api.get("/orgs", async (c) => {
   const db = drizzle(c.env.DB);
   const rows = await db
     .select()
@@ -652,7 +652,7 @@ api.get("/events", async (c) => {
   return c.json(rows);
 });
 
-api.get("/events/:id", async (c) => {
+api.get("/orgs/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
   const event = await db.select().from(events).where(eq(events.id, id)).get();
@@ -660,7 +660,7 @@ api.get("/events/:id", async (c) => {
   return c.json(event);
 });
 
-api.post("/events", async (c) => {
+api.post("/orgs", async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json<{
     type: string;
@@ -694,7 +694,7 @@ api.post("/events", async (c) => {
   return c.json(event, 201);
 });
 
-api.put("/events/:id", async (c) => {
+api.put("/orgs/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const id = c.req.param("id");
   const body = await c.req.json<{
@@ -727,7 +727,7 @@ api.put("/events/:id", async (c) => {
 // --- Event Actions (ADR-0008) ---
 
 // bootstrap (kota が手動で叩く)
-api.post("/events/bootstrap-actions", async (c) => {
+api.post("/orgs/bootstrap-actions", async (c) => {
   try {
     const result = await ensureDefaultActions(c.env.DB);
     return c.json({ ok: true, ...result });
@@ -741,7 +741,7 @@ api.post("/events/bootstrap-actions", async (c) => {
 });
 
 // 単一 event のアクション一覧
-api.get("/events/:eventId/actions", async (c) => {
+api.get("/orgs/:eventId/actions", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const rows = await db
@@ -754,7 +754,7 @@ api.get("/events/:eventId/actions", async (c) => {
 });
 
 // 新規追加
-api.post("/events/:eventId/actions", async (c) => {
+api.post("/orgs/:eventId/actions", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const body = await c.req.json<{
@@ -824,7 +824,7 @@ api.post("/events/:eventId/actions", async (c) => {
 });
 
 // 更新
-api.put("/events/:eventId/actions/:actionId", async (c) => {
+api.put("/orgs/:eventId/actions/:actionId", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const actionId = c.req.param("actionId");
@@ -862,7 +862,7 @@ api.put("/events/:eventId/actions/:actionId", async (c) => {
 });
 
 // 削除
-api.delete("/events/:eventId/actions/:actionId", async (c) => {
+api.delete("/orgs/:eventId/actions/:actionId", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const actionId = c.req.param("actionId");
@@ -2013,7 +2013,7 @@ api.get("/jobs", async (c) => {
 // --- PR Reviews (ADR-0008 pr_review_list) ---
 // タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加していく。
 
-api.get("/events/:eventId/pr-reviews", async (c) => {
+api.get("/orgs/:eventId/pr-reviews", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const status = c.req.query("status");
@@ -2034,7 +2034,7 @@ api.get("/pr-reviews/:id", async (c) => {
   return c.json(row);
 });
 
-api.post("/events/:eventId/pr-reviews", async (c) => {
+api.post("/orgs/:eventId/pr-reviews", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const body = await c.req.json<{
@@ -2406,7 +2406,7 @@ api.post("/apply/:eventId", async (c) => {
 });
 
 // 管理: イベント単位の応募一覧（status クエリで絞り込み可）
-api.get("/events/:eventId/applications", async (c) => {
+api.get("/orgs/:eventId/applications", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const status = c.req.query("status");
