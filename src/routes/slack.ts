@@ -4,6 +4,10 @@ import { eq, and } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
+import {
+  handleAttendanceVote,
+  type AttendanceChoice,
+} from "../services/attendance-check";
 import { createReminderJob } from "../services/scheduler";
 import {
   handleMessageEvent,
@@ -439,6 +443,53 @@ slack.post("/interactions", async (c) => {
       } catch (error) {
         console.error("Failed to handle vote:", error);
       }
+    }
+
+    // Sprint 23 PR2: 出席確認 (attendance_check) の投票ボタン。
+    // action_id 形式: `attendance_vote_${pollId}_${choice}`
+    // pollId は UUID (英数字 + ハイフン)、choice は "attend" | "absent" | "undecided"。
+    // 末尾の choice を rsplit("_") 1 回で分離する。
+    if (action.action_id?.startsWith("attendance_vote_")) {
+      const userId = payload.user?.id;
+      const responseUrl: string | null = payload.response_url ?? null;
+      if (!userId) return c.json({ ok: true });
+
+      const rest = action.action_id.slice("attendance_vote_".length);
+      const lastUnderscore = rest.lastIndexOf("_");
+      if (lastUnderscore <= 0) return c.json({ ok: true });
+      const pollId = rest.slice(0, lastUnderscore);
+      const choiceRaw = rest.slice(lastUnderscore + 1);
+      const validChoices: AttendanceChoice[] = [
+        "attend",
+        "absent",
+        "undecided",
+      ];
+      if (!validChoices.includes(choiceRaw as AttendanceChoice)) {
+        return c.json({ ok: true });
+      }
+      const choice = choiceRaw as AttendanceChoice;
+
+      // 3 秒以内に ack。実処理は waitUntil。
+      c.executionCtx.waitUntil(
+        (async () => {
+          const client = new SlackClient(
+            c.env.SLACK_BOT_TOKEN,
+            c.env.SLACK_SIGNING_SECRET,
+          );
+          try {
+            await handleAttendanceVote(c.env.DB, client, {
+              pollId,
+              slackUserId: userId,
+              choice,
+              responseUrl,
+            });
+          } catch (e) {
+            console.error("Failed to handle attendance vote:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
     }
 
     // /devhub task list の「完了」ボタン: タスクを done に更新（ADR-0002）

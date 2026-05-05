@@ -44,6 +44,12 @@ export const ACTION_META: Record<
       "曜日と時刻を指定して、チームチャンネル・運営チャンネルに自動でメッセージを送ります",
     icon: "🔔",
   },
+  attendance_check: {
+    label: "出席確認",
+    description:
+      "毎週指定曜日に Slack チャンネルへ匿名投票（出席/欠席/未定）を送ります",
+    icon: "🙋",
+  },
 };
 
 // 共通タブ (イベント直下)

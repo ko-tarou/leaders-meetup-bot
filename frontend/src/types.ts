@@ -14,7 +14,8 @@ export type EventActionType =
   | "member_welcome"
   | "pr_review_list"
   | "member_application"
-  | "weekly_reminder";
+  | "weekly_reminder"
+  | "attendance_check";
 
 export type EventAction = {
   id: string;
