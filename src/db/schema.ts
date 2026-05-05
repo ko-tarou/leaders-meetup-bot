@@ -318,6 +318,53 @@ export const slackCache = sqliteTable("slack_cache", {
   fetchedAt: text("fetched_at").notNull(),
 });
 
+// Sprint 23 PR2: 出席確認 (attendance_check) アクション用
+// 1 回のチャンネル投票 = 1 row。匿名性は Slack 上で担保（ephemeral 応答 + 集計のみ公開）。
+// (action_id, posted_for_date, poll_key) UNIQUE で重複 post を防止。
+export const attendancePolls = sqliteTable(
+  "attendance_polls",
+  {
+    id: text("id").primaryKey(),
+    actionId: text("action_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    title: text("title").notNull(),
+    // 'open' | 'closed'
+    status: text("status").notNull().default("open"),
+    slackMessageTs: text("slack_message_ts"),
+    // "YYYY-MM-DD" (JST) 形式。dedup の単位
+    postedForDate: text("posted_for_date").notNull(),
+    // config 内の polls[].key（同日中の複数 poll を区別する識別子）
+    pollKey: text("poll_key").notNull(),
+    postedAt: text("posted_at").notNull(),
+    closedAt: text("closed_at"),
+  },
+  (t) => [
+    unique("attendance_polls_action_date_key_uniq").on(
+      t.actionId,
+      t.postedForDate,
+      t.pollKey,
+    ),
+  ],
+);
+
+// 出席投票（多対多: poll × user）。同一 user の重複は UNIQUE で防ぎ、再投票は UPDATE で扱う。
+// choice = 'attend' | 'absent' | 'undecided'
+export const attendanceVotes = sqliteTable(
+  "attendance_votes",
+  {
+    id: text("id").primaryKey(),
+    pollId: text("poll_id")
+      .notNull()
+      .references(() => attendancePolls.id),
+    slackUserId: text("slack_user_id").notNull(),
+    choice: text("choice").notNull(),
+    votedAt: text("voted_at").notNull(),
+  },
+  (t) => [
+    unique("attendance_votes_poll_user_uniq").on(t.pollId, t.slackUserId),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable("scheduled_jobs", {
   id: text("id").primaryKey(),
