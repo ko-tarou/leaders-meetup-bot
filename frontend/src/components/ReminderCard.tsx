@@ -106,7 +106,7 @@ export function ReminderCard({
             </select>
           </Field>
 
-          <Field label="送信時刻 (JST、HH:MM)" error={errors.times}>
+          <Field label="送信時刻 (JST、HH:MM。複数設定可)" error={errors.times}>
             <ChipInput
               values={reminder.schedule.times}
               onChange={(times) => update("schedule", { ...reminder.schedule, times })}
@@ -120,6 +120,9 @@ export function ReminderCard({
                 return null;
               }}
             />
+            <div style={s.helper}>
+              「追加」ボタンまたは Enter で時刻を追加できます
+            </div>
           </Field>
 
           <Field label="送信先チャンネル (複数選択可)" error={errors.channelIds}>
@@ -193,5 +196,8 @@ const s: Record<string, CSSProperties> = {
   input: {
     width: "100%", padding: "0.5rem", border: "1px solid #d1d5db",
     borderRadius: "0.25rem", boxSizing: "border-box",
+  },
+  helper: {
+    color: "#6b7280", fontSize: "0.75rem", marginTop: "0.25rem",
   },
 };
