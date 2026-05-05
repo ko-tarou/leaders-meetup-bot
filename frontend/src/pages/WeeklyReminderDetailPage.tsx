@@ -4,17 +4,24 @@ import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
 import type { EventAction } from "../types";
 import { ACTION_META } from "../lib/eventTabs";
-import {
-  ReminderCard,
-  validateReminderDraft,
-  type ReminderDraft,
-  type ReminderError,
-} from "../components/ReminderCard";
+import type { ReminderDraft } from "../components/ReminderCard";
+import { ReminderMainTab } from "../components/ReminderMainTab";
+import { ReminderTimeTab } from "../components/ReminderTimeTab";
+import { ReminderChannelTab } from "../components/ReminderChannelTab";
 import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
-// PR-A では暫定的に既存 ReminderCard を流用した単一フォーム。
-// PR-B でサブタブ (チャンネル/時刻/テキスト) に分割予定。
+// Sprint 23 PR-B/C: 3 サブタブ (メイン / チャンネル管理 / 時刻設定) に再構成。
+// 各タブが個別に保存ボタンを持ち、共通の saveReminder ヘルパで
+// event_action.config の reminders 配列を更新する。
+
+type SubTab = "main" | "channels" | "time";
+
+const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: "main", label: "メイン" },
+  { id: "channels", label: "チャンネル管理" },
+  { id: "time", label: "時刻設定" },
+];
 
 export function WeeklyReminderDetailPage() {
   const { eventId, reminderId } = useParams<{
@@ -25,11 +32,10 @@ export function WeeklyReminderDetailPage() {
   const { events } = useEvents();
   const [action, setAction] = useState<EventAction | null>(null);
   const [draft, setDraft] = useState<ReminderDraft | null>(null);
-  const [errors, setErrors] = useState<ReminderError>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<SubTab>("main");
 
   useEffect(() => {
     if (!eventId || !reminderId) return;
@@ -85,30 +91,28 @@ export function WeeklyReminderDetailPage() {
     );
   }
 
-  const handleSave = async () => {
+  // 全タブ共通の保存処理。reminder を引数で受け取り、event_action.config の
+  // reminders 配列を書き換えて PUT する。各タブから onSave 経由で呼ばれる。
+  const saveReminder = async (next: ReminderDraft) => {
+    if (!action) throw new Error("action が読み込まれていません");
+    const all = parseReminders(action.config);
+    const updatedList = all.map((r) => (r.id === next.id ? next : r));
+    const updated = await api.events.actions.update(eventId, action.id, {
+      config: JSON.stringify({ reminders: updatedList }),
+    });
+    setAction(updated);
+    setDraft(next);
+    setNotice("保存しました");
+  };
+
+  const wrapSave = async (next: ReminderDraft) => {
     setError(null);
     setNotice(null);
-    const e = validateReminderDraft(draft);
-    if (e.name || e.times || e.channelIds) {
-      setErrors(e);
-      setError("入力エラーがあります。赤色のフィールドを確認してください。");
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
     try {
-      const all = parseReminders(action.config);
-      const next = all.map((r) => (r.id === draft.id ? draft : r));
-      const updated = await api.events.actions.update(eventId, action.id, {
-        config: JSON.stringify({ reminders: next }),
-      });
-      // updated.config を取り回せるよう action ステートも反映
-      setAction(updated);
-      setNotice("保存しました");
+      await saveReminder(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存に失敗しました");
-    } finally {
-      setSubmitting(false);
+      throw err;
     }
   };
 
@@ -144,50 +148,46 @@ export function WeeklyReminderDetailPage() {
         </button>
       </div>
 
+      {/* サブタブ */}
+      <div style={s.subTabs}>
+        {SUB_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setSubTab(t.id)}
+            style={subTabBtnStyle(subTab === t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {error && <div style={s.errorBanner}>{error}</div>}
       {notice && <div style={s.noticeBanner}>{notice}</div>}
 
-      <ReminderCard
-        reminder={draft}
-        errors={errors}
-        disabled={submitting}
-        onChange={(next) => {
-          setDraft(next);
-          setNotice(null);
-        }}
-        onDelete={async () => {
-          if (
-            !confirm(
-              `リマインド「${draft.name || "(名前未設定)"}」を削除します。よろしいですか？`,
-            )
-          ) {
-            return;
-          }
-          try {
-            const all = parseReminders(action.config);
-            const next = all.filter((r) => r.id !== draft.id);
-            await api.events.actions.update(eventId, action.id, {
-              config: JSON.stringify({ reminders: next }),
-            });
-            navigate(backUrl);
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "削除に失敗しました");
-          }
-        }}
-      />
-
-      <div style={s.actionsRow}>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={submitting}
-          style={s.primaryBtn}
-        >
-          {submitting ? "保存中..." : "保存"}
-        </button>
-      </div>
+      {subTab === "main" && (
+        <ReminderMainTab reminder={draft} onSave={wrapSave} />
+      )}
+      {subTab === "time" && (
+        <ReminderTimeTab reminder={draft} onSave={wrapSave} />
+      )}
+      {subTab === "channels" && (
+        <ReminderChannelTab reminder={draft} onSave={wrapSave} />
+      )}
     </div>
   );
+}
+
+function subTabBtnStyle(active: boolean): CSSProperties {
+  return {
+    padding: "0.5rem 1rem",
+    background: active ? "#2563eb" : "transparent",
+    color: active ? "white" : "#374151",
+    border: "none",
+    cursor: "pointer",
+    borderRadius: "0.25rem 0.25rem 0 0",
+    fontSize: "0.875rem",
+  };
 }
 
 const s: Record<string, CSSProperties> = {
@@ -217,6 +217,12 @@ const s: Record<string, CSSProperties> = {
     fontSize: "0.875rem",
     padding: 0,
   },
+  subTabs: {
+    display: "flex",
+    gap: "0.25rem",
+    borderBottom: "1px solid #e5e7eb",
+    marginBottom: "1rem",
+  },
   errorBanner: {
     color: "#dc2626",
     background: "#fef2f2",
@@ -234,18 +240,5 @@ const s: Record<string, CSSProperties> = {
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
     marginBottom: "0.75rem",
-  },
-  actionsRow: {
-    display: "flex",
-    justifyContent: "flex-end",
-    marginTop: "1rem",
-  },
-  primaryBtn: {
-    background: "#2563eb",
-    color: "white",
-    border: "none",
-    padding: "0.5rem 1.25rem",
-    borderRadius: "0.25rem",
-    cursor: "pointer",
   },
 };
