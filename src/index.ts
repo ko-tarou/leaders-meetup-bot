@@ -6,6 +6,7 @@ import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
+import { processAttendanceCheck } from "./services/attendance-check";
 import { SlackClient } from "./services/slack-api";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -36,6 +37,7 @@ export default {
         processScheduledJobs(env.DB, client),
         processAutoCycles(env.DB, client),
         processWeeklyReminders(env.DB, client),
+        processAttendanceCheck(env.DB, client),
       ]),
     );
   },

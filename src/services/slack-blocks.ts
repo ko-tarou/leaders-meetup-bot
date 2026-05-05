@@ -61,6 +61,90 @@ export function createReminderBlocks(
   ];
 }
 
+// Sprint 23 PR2: 出席確認 (attendance_check) 用 blocks。
+// 個別の回答は ephemeral 応答でのみ本人に返す。チャンネルには件数のみ。
+export function createAttendancePollBlocks(
+  title: string,
+  pollId: string,
+  responseCount: number,
+): Block[] {
+  return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*${title}*` },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `現在 ${responseCount} 人が回答済み（個別の回答は他メンバーには見えません）`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "出席" },
+          action_id: `attendance_vote_${pollId}_attend`,
+          value: pollId,
+          style: "primary",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "欠席" },
+          action_id: `attendance_vote_${pollId}_absent`,
+          value: pollId,
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "未定" },
+          action_id: `attendance_vote_${pollId}_undecided`,
+          value: pollId,
+        },
+      ],
+    },
+  ];
+}
+
+export function createAttendanceResultBlocks(
+  title: string,
+  attend: number,
+  absent: number,
+  undecided: number,
+): Block[] {
+  const total = attend + absent + undecided;
+  return [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*${title} 集計*` },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text:
+          `:white_check_mark: 出席 *${attend}*\n` +
+          `:x: 欠席 *${absent}*\n` +
+          `:grey_question: 未定 *${undecided}*\n` +
+          `（合計 ${total} 人が回答）`,
+      },
+    },
+  ];
+}
+
+export function createAttendanceClosedBlocks(title: string): Block[] {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${title}*\n投票は締め切られました。`,
+      },
+    },
+  ];
+}
+
 export function createResultBlocks(title: string, results: PollResult[]): Block[] {
   const sorted = [...results].sort((a, b) => b.count - a.count);
   const maxCount = sorted.length > 0 ? sorted[0].count : 0;
