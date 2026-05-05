@@ -10,6 +10,7 @@ import {
   type ReminderDraft,
   type ReminderError,
 } from "../components/ReminderCard";
+import { ReminderMainTab } from "../components/ReminderMainTab";
 import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
@@ -95,6 +96,20 @@ export function WeeklyReminderDetailPage() {
     );
   }
 
+  // 全フォーム共通の保存処理。reminder を引数で受け取り、event_action.config の
+  // reminders 配列を書き換えて PUT する。
+  const saveReminder = async (next: ReminderDraft) => {
+    if (!action) throw new Error("action が読み込まれていません");
+    const all = parseReminders(action.config);
+    const updatedList = all.map((r) => (r.id === next.id ? next : r));
+    const updated = await api.events.actions.update(eventId, action.id, {
+      config: JSON.stringify({ reminders: updatedList }),
+    });
+    setAction(updated);
+    setDraft(next);
+    setNotice("保存しました");
+  };
+
   const handleSave = async () => {
     setError(null);
     setNotice(null);
@@ -107,13 +122,7 @@ export function WeeklyReminderDetailPage() {
     setErrors({});
     setSubmitting(true);
     try {
-      const all = parseReminders(action.config);
-      const next = all.map((r) => (r.id === draft.id ? draft : r));
-      const updated = await api.events.actions.update(eventId, action.id, {
-        config: JSON.stringify({ reminders: next }),
-      });
-      setAction(updated);
-      setNotice("保存しました");
+      await saveReminder(draft);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存に失敗しました");
     } finally {
@@ -170,46 +179,69 @@ export function WeeklyReminderDetailPage() {
       {error && <div style={s.errorBanner}>{error}</div>}
       {notice && <div style={s.noticeBanner}>{notice}</div>}
 
-      {/* PR-B/C 移行中: 各タブ実装が揃うまでは ReminderCard を全タブで描画する */}
-      <ReminderCard
-        reminder={draft}
-        errors={errors}
-        disabled={submitting}
-        onChange={(next) => {
-          setDraft(next);
-          setNotice(null);
-        }}
-        onDelete={async () => {
-          if (
-            !confirm(
-              `リマインド「${draft.name || "(名前未設定)"}」を削除します。よろしいですか？`,
-            )
-          ) {
-            return;
-          }
-          try {
-            const all = parseReminders(action.config);
-            const next = all.filter((r) => r.id !== draft.id);
-            await api.events.actions.update(eventId, action.id, {
-              config: JSON.stringify({ reminders: next }),
-            });
-            navigate(backUrl);
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "削除に失敗しました");
-          }
-        }}
-      />
-
-      <div style={s.actionsRow}>
-        <button
-          type="button"
-          onClick={handleSave}
+      {subTab === "main" && (
+        <ReminderMainTab
+          reminder={draft}
           disabled={submitting}
-          style={s.primaryBtn}
-        >
-          {submitting ? "保存中..." : "保存"}
-        </button>
-      </div>
+          onSave={async (next) => {
+            setError(null);
+            setNotice(null);
+            try {
+              await saveReminder(next);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "保存に失敗しました");
+              throw err;
+            }
+          }}
+        />
+      )}
+
+      {/* PR-B/C 移行中: チャンネル管理 / 時刻設定タブは次 commit で専用 UI に置換 */}
+      {subTab !== "main" && (
+        <>
+          <ReminderCard
+            reminder={draft}
+            errors={errors}
+            disabled={submitting}
+            onChange={(next) => {
+              setDraft(next);
+              setNotice(null);
+            }}
+            onDelete={async () => {
+              if (
+                !confirm(
+                  `リマインド「${draft.name || "(名前未設定)"}」を削除します。よろしいですか？`,
+                )
+              ) {
+                return;
+              }
+              try {
+                const all = parseReminders(action.config);
+                const next = all.filter((r) => r.id !== draft.id);
+                await api.events.actions.update(eventId, action.id, {
+                  config: JSON.stringify({ reminders: next }),
+                });
+                navigate(backUrl);
+              } catch (err) {
+                setError(
+                  err instanceof Error ? err.message : "削除に失敗しました",
+                );
+              }
+            }}
+          />
+
+          <div style={s.actionsRow}>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={submitting}
+              style={s.primaryBtn}
+            >
+              {submitting ? "保存中..." : "保存"}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
