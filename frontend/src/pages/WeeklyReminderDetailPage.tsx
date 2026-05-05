@@ -11,6 +11,7 @@ import {
   type ReminderError,
 } from "../components/ReminderCard";
 import { ReminderMainTab } from "../components/ReminderMainTab";
+import { ReminderTimeTab } from "../components/ReminderTimeTab";
 import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
@@ -196,8 +197,25 @@ export function WeeklyReminderDetailPage() {
         />
       )}
 
-      {/* PR-B/C 移行中: チャンネル管理 / 時刻設定タブは次 commit で専用 UI に置換 */}
-      {subTab !== "main" && (
+      {subTab === "time" && (
+        <ReminderTimeTab
+          reminder={draft}
+          disabled={submitting}
+          onSave={async (next) => {
+            setError(null);
+            setNotice(null);
+            try {
+              await saveReminder(next);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "保存に失敗しました");
+              throw err;
+            }
+          }}
+        />
+      )}
+
+      {/* PR-B/C 移行中: チャンネル管理タブは次 commit で専用 UI に置換 */}
+      {subTab === "channels" && (
         <>
           <ReminderCard
             reminder={draft}
