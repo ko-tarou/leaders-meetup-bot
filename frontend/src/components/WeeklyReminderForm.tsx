@@ -107,10 +107,12 @@ export function WeeklyReminderMain({ action }: { action: EventAction }) {
 export function WeeklyReminderForm({
   eventId,
   action,
+  workspaceId,
   onSaved,
 }: {
   eventId: string;
   action: EventAction;
+  workspaceId?: string;
   onSaved: () => void;
 }) {
   const [reminders, setReminders] = useState<ReminderDraft[]>(() => parseConfig(action.config));
@@ -180,6 +182,7 @@ export function WeeklyReminderForm({
           reminder={r}
           errors={errors[r.id] ?? {}}
           disabled={submitting}
+          workspaceId={workspaceId}
           onChange={(next) => updateAt(idx, next)}
           onDelete={() => removeAt(idx)}
         />
