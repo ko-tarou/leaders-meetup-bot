@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import type { EventAction } from "../types";
 import { api } from "../api";
+import { ChannelSelector } from "./ChannelSelector";
 
 // Sprint 23 PR2: attendance_check アクション専用の設定フォーム + メイン表示。
 //
@@ -106,10 +107,12 @@ export function AttendanceCheckMain({ action }: { action: EventAction }) {
 export function AttendanceCheckForm({
   eventId,
   action,
+  workspaceId,
   onSaved,
 }: {
   eventId: string;
   action: EventAction;
+  workspaceId?: string;
   onSaved: () => void;
 }) {
   const initial = parseConfig(action.config);
@@ -226,13 +229,11 @@ export function AttendanceCheckForm({
         </div>
       )}
 
-      <Field label="投稿チャンネル ID">
-        <input
+      <Field label="投稿チャンネル">
+        <ChannelSelector
           value={channelId}
-          onChange={(e) => setChannelId(e.target.value)}
-          disabled={submitting}
-          placeholder="C_HACKIT_OPS"
-          style={styles.input}
+          onChange={(id) => setChannelId(id)}
+          workspaceId={workspaceId}
         />
       </Field>
 
