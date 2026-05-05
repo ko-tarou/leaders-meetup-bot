@@ -61,8 +61,11 @@ export function EventProvider({ children }: { children: ReactNode }) {
           }
         }
       })
-      .catch(() => {
+      .catch((err) => {
         // 失敗時は空のまま。EventSwitcher 側は events.length===0 で表示しない。
+        // 本番で「イベントがありません」が出たままになる現象の調査用に
+        // ブラウザ DevTools から原因を確認できるよう console.error を残す。
+        console.error("[EventContext] api.events.list() failed:", err);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
