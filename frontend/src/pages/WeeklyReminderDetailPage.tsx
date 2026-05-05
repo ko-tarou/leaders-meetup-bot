@@ -12,6 +12,7 @@ import {
 } from "../components/ReminderCard";
 import { ReminderMainTab } from "../components/ReminderMainTab";
 import { ReminderTimeTab } from "../components/ReminderTimeTab";
+import { ReminderChannelTab } from "../components/ReminderChannelTab";
 import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
@@ -214,51 +215,21 @@ export function WeeklyReminderDetailPage() {
         />
       )}
 
-      {/* PR-B/C 移行中: チャンネル管理タブは次 commit で専用 UI に置換 */}
       {subTab === "channels" && (
-        <>
-          <ReminderCard
-            reminder={draft}
-            errors={errors}
-            disabled={submitting}
-            onChange={(next) => {
-              setDraft(next);
-              setNotice(null);
-            }}
-            onDelete={async () => {
-              if (
-                !confirm(
-                  `リマインド「${draft.name || "(名前未設定)"}」を削除します。よろしいですか？`,
-                )
-              ) {
-                return;
-              }
-              try {
-                const all = parseReminders(action.config);
-                const next = all.filter((r) => r.id !== draft.id);
-                await api.events.actions.update(eventId, action.id, {
-                  config: JSON.stringify({ reminders: next }),
-                });
-                navigate(backUrl);
-              } catch (err) {
-                setError(
-                  err instanceof Error ? err.message : "削除に失敗しました",
-                );
-              }
-            }}
-          />
-
-          <div style={s.actionsRow}>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={submitting}
-              style={s.primaryBtn}
-            >
-              {submitting ? "保存中..." : "保存"}
-            </button>
-          </div>
-        </>
+        <ReminderChannelTab
+          reminder={draft}
+          disabled={submitting}
+          onSave={async (next) => {
+            setError(null);
+            setNotice(null);
+            try {
+              await saveReminder(next);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "保存に失敗しました");
+              throw err;
+            }
+          }}
+        />
       )}
     </div>
   );
