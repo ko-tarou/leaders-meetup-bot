@@ -16,6 +16,7 @@ type EventContextValue = {
   setCurrentEventId: (id: string) => void;
   refreshEvents: () => Promise<void>;
   loading: boolean;
+  fetchError: string | null;
 };
 
 const EventContext = createContext<EventContextValue | null>(null);
@@ -30,6 +31,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
     }
   });
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +68,17 @@ export function EventProvider({ children }: { children: ReactNode }) {
         // 本番で「イベントがありません」が出たままになる現象の調査用に
         // ブラウザ DevTools から原因を確認できるよう console.error を残す。
         console.error("[EventContext] api.events.list() failed:", err);
+        if (cancelled) return;
+        // ブラウザの広告ブロッカー / プライバシー保護で API が遮断されているケース
+        // (Arc / Brave / uBlock 等) を区別して案内する。
+        // fetch が拡張機能でブロックされると TypeError("Failed to fetch") になる。
+        const isBlocked =
+          err instanceof TypeError && /Failed to fetch/i.test(err.message);
+        setFetchError(
+          isBlocked
+            ? "API へのリクエストがブロックされました。広告ブロッカー / プライバシー拡張機能 / ブラウザのトラッキング保護を一時的に無効にしてください。"
+            : "イベント一覧の取得に失敗しました。再読み込みしてください。",
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -101,7 +114,7 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   return (
     <EventContext.Provider
-      value={{ events, currentEvent, setCurrentEventId, refreshEvents, loading }}
+      value={{ events, currentEvent, setCurrentEventId, refreshEvents, loading, fetchError }}
     >
       {children}
     </EventContext.Provider>
