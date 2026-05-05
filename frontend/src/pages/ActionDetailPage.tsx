@@ -14,6 +14,10 @@ import {
   WeeklyReminderForm,
   WeeklyReminderMain,
 } from "../components/WeeklyReminderForm";
+import {
+  AttendanceCheckForm,
+  AttendanceCheckMain,
+} from "../components/AttendanceCheckForm";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -306,6 +310,8 @@ function ActionMainContent({
       );
     case "weekly_reminder":
       return <WeeklyReminderMain action={action} />;
+    case "attendance_check":
+      return <AttendanceCheckMain action={action} />;
     default:
       return null;
   }
@@ -345,6 +351,14 @@ function ActionSettingsContent({
     case "weekly_reminder":
       return (
         <WeeklyReminderForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "attendance_check":
+      return (
+        <AttendanceCheckForm
           eventId={eventId}
           action={action}
           onSaved={onSaved}
