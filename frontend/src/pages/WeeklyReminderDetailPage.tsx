@@ -4,12 +4,7 @@ import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
 import type { EventAction } from "../types";
 import { ACTION_META } from "../lib/eventTabs";
-import {
-  ReminderCard,
-  validateReminderDraft,
-  type ReminderDraft,
-  type ReminderError,
-} from "../components/ReminderCard";
+import type { ReminderDraft } from "../components/ReminderCard";
 import { ReminderMainTab } from "../components/ReminderMainTab";
 import { ReminderTimeTab } from "../components/ReminderTimeTab";
 import { ReminderChannelTab } from "../components/ReminderChannelTab";
@@ -17,8 +12,8 @@ import { parseReminders } from "./WeeklyReminderListPage";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
 // Sprint 23 PR-B/C: 3 サブタブ (メイン / チャンネル管理 / 時刻設定) に再構成。
-// この commit ではタブ navigation の骨格のみ追加し、本体は次 commit で各タブ
-// コンポーネントに置き換える。
+// 各タブが個別に保存ボタンを持ち、共通の saveReminder ヘルパで
+// event_action.config の reminders 配列を更新する。
 
 type SubTab = "main" | "channels" | "time";
 
@@ -37,9 +32,7 @@ export function WeeklyReminderDetailPage() {
   const { events } = useEvents();
   const [action, setAction] = useState<EventAction | null>(null);
   const [draft, setDraft] = useState<ReminderDraft | null>(null);
-  const [errors, setErrors] = useState<ReminderError>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [subTab, setSubTab] = useState<SubTab>("main");
@@ -98,8 +91,8 @@ export function WeeklyReminderDetailPage() {
     );
   }
 
-  // 全フォーム共通の保存処理。reminder を引数で受け取り、event_action.config の
-  // reminders 配列を書き換えて PUT する。
+  // 全タブ共通の保存処理。reminder を引数で受け取り、event_action.config の
+  // reminders 配列を書き換えて PUT する。各タブから onSave 経由で呼ばれる。
   const saveReminder = async (next: ReminderDraft) => {
     if (!action) throw new Error("action が読み込まれていません");
     const all = parseReminders(action.config);
@@ -112,23 +105,14 @@ export function WeeklyReminderDetailPage() {
     setNotice("保存しました");
   };
 
-  const handleSave = async () => {
+  const wrapSave = async (next: ReminderDraft) => {
     setError(null);
     setNotice(null);
-    const e = validateReminderDraft(draft);
-    if (e.name || e.times || e.channelIds) {
-      setErrors(e);
-      setError("入力エラーがあります。赤色のフィールドを確認してください。");
-      return;
-    }
-    setErrors({});
-    setSubmitting(true);
     try {
-      await saveReminder(draft);
+      await saveReminder(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存に失敗しました");
-    } finally {
-      setSubmitting(false);
+      throw err;
     }
   };
 
@@ -182,54 +166,13 @@ export function WeeklyReminderDetailPage() {
       {notice && <div style={s.noticeBanner}>{notice}</div>}
 
       {subTab === "main" && (
-        <ReminderMainTab
-          reminder={draft}
-          disabled={submitting}
-          onSave={async (next) => {
-            setError(null);
-            setNotice(null);
-            try {
-              await saveReminder(next);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "保存に失敗しました");
-              throw err;
-            }
-          }}
-        />
+        <ReminderMainTab reminder={draft} onSave={wrapSave} />
       )}
-
       {subTab === "time" && (
-        <ReminderTimeTab
-          reminder={draft}
-          disabled={submitting}
-          onSave={async (next) => {
-            setError(null);
-            setNotice(null);
-            try {
-              await saveReminder(next);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "保存に失敗しました");
-              throw err;
-            }
-          }}
-        />
+        <ReminderTimeTab reminder={draft} onSave={wrapSave} />
       )}
-
       {subTab === "channels" && (
-        <ReminderChannelTab
-          reminder={draft}
-          disabled={submitting}
-          onSave={async (next) => {
-            setError(null);
-            setNotice(null);
-            try {
-              await saveReminder(next);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "保存に失敗しました");
-              throw err;
-            }
-          }}
-        />
+        <ReminderChannelTab reminder={draft} onSave={wrapSave} />
       )}
     </div>
   );
@@ -297,18 +240,5 @@ const s: Record<string, CSSProperties> = {
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
     marginBottom: "0.75rem",
-  },
-  actionsRow: {
-    display: "flex",
-    justifyContent: "flex-end",
-    marginTop: "1rem",
-  },
-  primaryBtn: {
-    background: "#2563eb",
-    color: "white",
-    border: "none",
-    padding: "0.5rem 1.25rem",
-    borderRadius: "0.25rem",
-    cursor: "pointer",
   },
 };
