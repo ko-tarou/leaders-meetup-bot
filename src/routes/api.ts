@@ -771,6 +771,7 @@ api.post("/events/:eventId/actions", async (c) => {
     "pr_review_list",
     "member_application",
     "weekly_reminder",
+    "attendance_check",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
