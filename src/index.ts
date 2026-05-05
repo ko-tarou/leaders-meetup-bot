@@ -5,6 +5,7 @@ import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
+import { processWeeklyReminders } from "./services/weekly-reminder";
 import { SlackClient } from "./services/slack-api";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -34,6 +35,7 @@ export default {
       Promise.all([
         processScheduledJobs(env.DB, client),
         processAutoCycles(env.DB, client),
+        processWeeklyReminders(env.DB, client),
       ]),
     );
   },

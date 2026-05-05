@@ -13,7 +13,8 @@ export type EventActionType =
   | "task_management"
   | "member_welcome"
   | "pr_review_list"
-  | "member_application";
+  | "member_application"
+  | "weekly_reminder";
 
 export type EventAction = {
   id: string;

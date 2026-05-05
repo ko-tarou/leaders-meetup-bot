@@ -13,6 +13,7 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "task_management",
   "member_welcome",
   "pr_review_list",
+  "weekly_reminder",
 ];
 
 type Props = {

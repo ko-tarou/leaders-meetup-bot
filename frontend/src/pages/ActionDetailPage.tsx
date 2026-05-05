@@ -10,6 +10,10 @@ import { MemberApplicationListTab } from "../components/MemberApplicationListTab
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
+import {
+  WeeklyReminderForm,
+  WeeklyReminderMain,
+} from "../components/WeeklyReminderForm";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -224,6 +228,7 @@ export function ActionDetailPage() {
         <ActionMainContent
           eventId={eventId}
           actionType={actionType as EventActionType}
+          action={action}
         />
       )}
       {subTab === "channels" && hasChannelsTab(actionType as EventActionType) && (
@@ -278,9 +283,11 @@ export function ActionDetailPage() {
 function ActionMainContent({
   eventId,
   actionType,
+  action,
 }: {
   eventId: string;
   actionType: EventActionType;
+  action: EventAction;
 }) {
   switch (actionType) {
     case "task_management":
@@ -297,6 +304,8 @@ function ActionMainContent({
       return (
         <PlaceholderContent label="新メンバー対応に状態画面はありません。「設定」タブで動作を構成してください。" />
       );
+    case "weekly_reminder":
+      return <WeeklyReminderMain action={action} />;
     default:
       return null;
   }
@@ -332,6 +341,14 @@ function ActionSettingsContent({
     case "schedule_polling":
       return (
         <PlaceholderContent label="このアクションには専用設定がまだありません" />
+      );
+    case "weekly_reminder":
+      return (
+        <WeeklyReminderForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
       );
     default:
       return null;
