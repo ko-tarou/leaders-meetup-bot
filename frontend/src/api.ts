@@ -55,6 +55,17 @@ export function clearAdminToken(): void {
   }
 }
 
+export class APIError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body: string,
+  ) {
+    super(`HTTP ${status} ${statusText}: ${body.slice(0, 200)}`);
+    this.name = "APIError";
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -68,16 +79,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   });
 
-  // 005-1: 401 を検出した場合は明示的にエラーを投げる。
-  // 005-2 (APIError) と協調するため err.message と err.status の両方を持たせる。
-  if (res.status === 401) {
-    const err = new Error("HTTP 401 Unauthorized") as Error & {
-      status?: number;
-    };
-    err.status = 401;
-    throw err;
+  // #113 (APIError) でカバーされるので、#114 の手書き 401 throw は不要
+  if (!res.ok) {
+    let body = "";
+    try {
+      body = await res.text();
+    } catch {
+      // noop
+    }
+    throw new APIError(res.status, res.statusText, body);
   }
-  return res.json() as Promise<T>;
+  // 一部の API（DELETE 等）は body 空のことがあるので、204 はそのまま undefined を返す
+  if (res.status === 204) return undefined as T;
+  // body が空文字列の場合 res.json() は SyntaxError を投げるので守る
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new APIError(res.status, res.statusText, text);
+  }
 }
 
 export const api = {
