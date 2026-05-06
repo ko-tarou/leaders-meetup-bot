@@ -445,20 +445,6 @@ function ApplicationDetailModal({
           </div>
         </Section>
 
-        {/* 後方互換: Sprint 16 旧フォームの応募データを表示。
-            新フォームからの応募は両方 null となり「（未記入）」表示。 */}
-        <Section label="志望動機">
-          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-            {application.motivation || "（未記入）"}
-          </div>
-        </Section>
-
-        <Section label="自己紹介">
-          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-            {application.introduction || "（未記入）"}
-          </div>
-        </Section>
-
         <Section label={`面談確定日時 (希望日時から選択 / ${slots.length}枠)`}>
           <SlotPicker
             slots={slots}
