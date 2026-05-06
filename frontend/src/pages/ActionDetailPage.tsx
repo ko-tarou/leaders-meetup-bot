@@ -10,6 +10,7 @@ import { MemberApplicationListTab } from "../components/MemberApplicationListTab
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
+import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
 import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import {
   AttendanceCheckForm,
@@ -44,10 +45,12 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
     ];
   }
   // Sprint 19 PR1: member_application は「候補日時設定」サブタブを持つ
+  // Sprint 24: 「メール」サブタブを追加 (複数テンプレ管理)
   if (actionType === "member_application") {
     return [
       { id: "main", label: "メイン" },
       { id: "availability", label: "候補日時設定" },
+      { id: "email", label: "メール" },
       { id: "settings", label: "その他設定" },
     ];
   }
@@ -285,6 +288,13 @@ export function ActionDetailPage() {
           onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
+      {subTab === "email" && actionType === "member_application" && (
+        <EmailTemplatesEditor
+          eventId={eventId}
+          action={action}
+          onChange={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
       {actionType !== "weekly_reminder" && subTab === "settings" && (
         <div>
           <ActionSettingsContent
@@ -336,7 +346,7 @@ function ActionMainContent({
     case "pr_review_list":
       return <PRReviewListTab eventId={eventId} />;
     case "member_application":
-      return <MemberApplicationListTab eventId={eventId} />;
+      return <MemberApplicationListTab eventId={eventId} action={action} />;
     case "schedule_polling":
       return (
         <PlaceholderContent label="日程調整のメイン画面（既存リーダー雑談会機能を将来統合予定）" />

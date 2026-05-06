@@ -1,6 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import type { Application, ApplicationStatus } from "../types";
+import type {
+  Application,
+  ApplicationStatus,
+  EmailTemplate,
+  EventAction,
+} from "../types";
 import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
 
@@ -198,9 +203,13 @@ const styles = {
   } as CSSProperties,
 };
 
-type Props = { eventId: string };
+type Props = { eventId: string; action: EventAction };
 
-export function MemberApplicationListTab({ eventId }: Props) {
+export function MemberApplicationListTab({ eventId, action }: Props) {
+  const templates = useMemo(
+    () => parseEmailTemplates(action.config),
+    [action.config],
+  );
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +293,7 @@ export function MemberApplicationListTab({ eventId }: Props) {
       {editing && (
         <ApplicationDetailModal
           application={editing}
+          templates={templates}
           onClose={() => setEditing(null)}
           onChange={() => {
             setEditing(null);
@@ -331,10 +341,12 @@ function ApplicationCard({
 
 function ApplicationDetailModal({
   application,
+  templates,
   onClose,
   onChange,
 }: {
   application: Application;
+  templates: EmailTemplate[];
   onClose: () => void;
   onChange: () => void;
 }) {
@@ -343,9 +355,9 @@ function ApplicationDetailModal({
     application.decisionNote || "",
   );
   const [interviewAt, setInterviewAt] = useState(application.interviewAt || "");
-  const [emailKind, setEmailKind] = useState<
-    "interview" | "passed" | "failed"
-  >("interview");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
+    () => templates[0]?.id ?? "",
+  );
 
   const slots = parseSlots(application.availableSlots);
 
@@ -377,13 +389,21 @@ function ApplicationDetailModal({
   };
 
   // メールテンプレート生成（kota が手動コピー → 自分のメーラーで送信）
-  const emailText = generateEmailTemplate(
-    emailKind,
-    application.name,
-    interviewAt,
-  );
+  // Sprint 24: hardcoded 3 種を廃止し、保存テンプレ (event_actions.config.emailTemplates)
+  // から選んでプレースホルダ展開する方式に変更。
+  const selectedTemplate =
+    templates.find((t) => t.id === selectedTemplateId) ?? templates[0] ?? null;
+  const emailText = selectedTemplate
+    ? applyPlaceholders(selectedTemplate.body, {
+        name: application.name,
+        email: application.email,
+        studentId: application.studentId || "",
+        interviewAt,
+      })
+    : "";
 
   const copyEmail = () => {
+    if (!emailText) return;
     navigator.clipboard
       ?.writeText(emailText)
       .then(() => alert("コピーしました"))
@@ -463,23 +483,44 @@ function ApplicationDetailModal({
         </Section>
 
         <Section label="メールテンプレート">
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-            <select
-              value={emailKind}
-              onChange={(e) =>
-                setEmailKind(e.target.value as "interview" | "passed" | "failed")
-              }
-            >
-              <option value="interview">面談確定の連絡</option>
-              <option value="passed">合格通知</option>
-              <option value="failed">不合格通知</option>
-            </select>
-            <button onClick={copyEmail} type="button">
-              📋 コピー
-            </button>
-          </div>
-          <textarea value={emailText} readOnly rows={8} style={styles.emailArea} />
-          <div style={styles.hint}>メーラーで貼り付けて送信してください</div>
+          {templates.length === 0 ? (
+            <div style={styles.hint}>
+              テンプレが登録されていません。「メール」サブタブで追加してください。
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                <select
+                  value={selectedTemplate?.id ?? ""}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                >
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={copyEmail} type="button">
+                  📋 コピー
+                </button>
+              </div>
+              <textarea
+                value={emailText}
+                readOnly
+                rows={8}
+                style={styles.emailArea}
+              />
+              <div style={styles.hint}>
+                メーラーで貼り付けて送信してください
+              </div>
+            </>
+          )}
         </Section>
 
         <div style={styles.actions}>
@@ -628,42 +669,52 @@ function btnStyle(color: string): CSSProperties {
   };
 }
 
-function generateEmailTemplate(
-  kind: "interview" | "passed" | "failed",
-  name: string,
-  interviewAt: string,
+// Sprint 24: 保存テンプレの本文中プレースホルダを応募データで置換する。
+// 仕様:
+//   {name}        → application.name
+//   {email}       → application.email
+//   {studentId}   → application.studentId
+//   {interviewAt} → formatJst(application.interviewAt) / 未設定時 [未設定]
+function applyPlaceholders(
+  body: string,
+  ctx: {
+    name: string;
+    email: string;
+    studentId: string;
+    interviewAt: string;
+  },
 ): string {
-  const formatted = interviewAt ? formatJst(interviewAt) : "[未設定]";
-  if (kind === "interview") {
-    return `${name} 様
+  return body
+    .replaceAll("{name}", ctx.name || "")
+    .replaceAll("{email}", ctx.email || "")
+    .replaceAll("{studentId}", ctx.studentId || "")
+    .replaceAll(
+      "{interviewAt}",
+      ctx.interviewAt ? formatJst(ctx.interviewAt) : "[未設定]",
+    );
+}
 
-ご応募ありがとうございました。
-面談日時を以下に設定させていただきました。
-
-日時: ${formatted}
-場所: [Google Meet / Zoom URL]
-
-ご都合つかない場合はご返信ください。
-
-よろしくお願いいたします。`;
+// event_actions.config からテンプレ一覧をパース。
+// 既存の他フィールド (leaderAvailableSlots 等) は無視。
+function parseEmailTemplates(
+  configRaw: string | null | undefined,
+): EmailTemplate[] {
+  try {
+    const cfg = JSON.parse(configRaw || "{}");
+    if (cfg && Array.isArray(cfg.emailTemplates)) {
+      return cfg.emailTemplates.filter(
+        (t: unknown): t is EmailTemplate =>
+          typeof t === "object" &&
+          t !== null &&
+          typeof (t as EmailTemplate).id === "string" &&
+          typeof (t as EmailTemplate).name === "string" &&
+          typeof (t as EmailTemplate).body === "string",
+      );
+    }
+    return [];
+  } catch {
+    return [];
   }
-  if (kind === "passed") {
-    return `${name} 様
-
-面談ありがとうございました。
-合格となりましたので、ご連絡いたします。
-
-[次のステップを記載]
-
-よろしくお願いいたします。`;
-  }
-  return `${name} 様
-
-面談ありがとうございました。
-慎重に検討させていただいた結果、今回はご縁がなかったとさせていただきます。
-
-ご応募いただきありがとうございました。
-今後ともよろしくお願いいたします。`;
 }
 
 function parseSlots(json: string): string[] {

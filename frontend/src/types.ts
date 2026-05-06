@@ -262,6 +262,16 @@ export const INTERVIEW_LOCATION_LABEL: Record<InterviewLocation, string> = {
   lab206: "11号館Lab206",
 };
 
+// メールテンプレート（Sprint 24: member_application 用）
+// event_actions.config.emailTemplates に保存される。
+// body 内のプレースホルダ {name} / {email} / {studentId} / {interviewAt} を
+// 応募データで置換した文字列を、kota が手動でコピーしてメーラーで送信する。
+export type EmailTemplate = {
+  id: string;
+  name: string;
+  body: string;
+};
+
 export type Application = {
   id: string;
   eventId: string;
