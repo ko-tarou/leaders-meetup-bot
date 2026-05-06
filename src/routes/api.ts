@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { processScheduledJobs } from "../services/scheduler";
 import { processAutoCycles } from "../services/auto-cycle";
@@ -2303,10 +2303,27 @@ api.get("/apply/:eventId/availability", async (c) => {
       )
     : [];
 
+  // 確定済み面談 (interviewAt が設定済み) の slot を集計し、新規応募候補から除外する。
+  // 同一 slot に複数応募者を重ねないための整合性ガード。
+  const booked = await db
+    .select({ interviewAt: applications.interviewAt })
+    .from(applications)
+    .where(
+      and(
+        eq(applications.eventId, eventId),
+        isNotNull(applications.interviewAt),
+      ),
+    )
+    .all();
+  const bookedSet = new Set(
+    booked.map((b) => b.interviewAt).filter((s): s is string => !!s),
+  );
+  const availableSlots = slots.filter((s) => !bookedSet.has(s));
+
   return c.json({
     enabled: true,
     eventName: event.name,
-    leaderAvailableSlots: slots,
+    leaderAvailableSlots: availableSlots,
   });
 });
 
