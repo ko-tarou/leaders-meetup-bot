@@ -119,6 +119,54 @@ const styles = {
     background: "#f9fafb",
     borderRadius: "0.25rem",
   } as CSSProperties,
+  slotSelectable: {
+    padding: "0.5rem 0.75rem",
+    background: "white",
+    border: "1px solid #d1d5db",
+    borderRadius: "0.375rem",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+    transition: "border-color 0.1s, background 0.1s",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  } as CSSProperties,
+  slotSelectableHover: {
+    borderColor: "#9ca3af",
+    background: "#f9fafb",
+  } as CSSProperties,
+  slotSelected: {
+    padding: "0.5rem 0.75rem",
+    background: "#2563eb",
+    color: "white",
+    border: "1px solid #2563eb",
+    borderRadius: "0.375rem",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+    fontWeight: 600,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  } as CSSProperties,
+  slotOrphan: {
+    padding: "0.5rem 0.75rem",
+    background: "#fef3c7",
+    border: "1px solid #f59e0b",
+    borderRadius: "0.375rem",
+    fontSize: "0.875rem",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  } as CSSProperties,
+  clearBtn: {
+    marginLeft: "auto",
+    padding: "0.25rem 0.5rem",
+    background: "white",
+    border: "1px solid #d1d5db",
+    borderRadius: "0.25rem",
+    cursor: "pointer",
+    fontSize: "0.75rem",
+  } as CSSProperties,
   emailArea: {
     width: "100%",
     padding: "0.5rem",
@@ -300,7 +348,6 @@ function ApplicationDetailModal({
   >("interview");
 
   const slots = parseSlots(application.availableSlots);
-  const slotDisplay = slots.map((s) => formatJst(s));
 
   const handleStatusChange = async (newStatus: ApplicationStatus) => {
     setSubmitting(true);
@@ -398,48 +445,12 @@ function ApplicationDetailModal({
           </div>
         </Section>
 
-        {/* 後方互換: Sprint 16 旧フォームの応募データを表示。
-            新フォームからの応募は両方 null となり「（未記入）」表示。 */}
-        <Section label="志望動機">
-          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-            {application.motivation || "（未記入）"}
-          </div>
-        </Section>
-
-        <Section label="自己紹介">
-          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-            {application.introduction || "（未記入）"}
-          </div>
-        </Section>
-
-        <Section label={`希望日時 (${slots.length}枠)`}>
-          {slotDisplay.length === 0 ? (
-            <div style={{ fontSize: "0.875rem", color: "#6b7280" }}>
-              （希望日時なし）
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: "0.25rem", fontSize: "0.875rem" }}>
-              {slotDisplay.map((s, i) => (
-                <div key={i} style={styles.slot}>
-                  {s}
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
-
-        <Section label="面談確定日時">
-          <input
-            type="datetime-local"
-            value={interviewAt ? toLocalInput(interviewAt) : ""}
-            onChange={(e) =>
-              setInterviewAt(
-                e.target.value ? new Date(e.target.value).toISOString() : "",
-              )
-            }
-            style={styles.field}
+        <Section label={`面談確定日時 (希望日時から選択 / ${slots.length}枠)`}>
+          <SlotPicker
+            slots={slots}
+            interviewAt={interviewAt}
+            onSelect={setInterviewAt}
           />
-          <div style={styles.hint}>希望日時から1つ選んで設定してください</div>
         </Section>
 
         <Section label="決定メモ（kota 用、応募者には送られません）">
@@ -526,6 +537,77 @@ function ApplicationDetailModal({
   );
 }
 
+function SlotPicker({
+  slots,
+  interviewAt,
+  onSelect,
+}: {
+  slots: string[];
+  interviewAt: string;
+  onSelect: (slot: string) => void;
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const isOrphan = interviewAt !== "" && !slots.includes(interviewAt);
+
+  if (slots.length === 0) {
+    return (
+      <div style={{ fontSize: "0.875rem", color: "#6b7280" }}>
+        （希望日時なし）
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "grid", gap: "0.375rem" }}>
+        {slots.map((slot, i) => {
+          const selected = slot === interviewAt;
+          const baseStyle = selected
+            ? styles.slotSelected
+            : hoverIdx === i
+              ? { ...styles.slotSelectable, ...styles.slotSelectableHover }
+              : styles.slotSelectable;
+          return (
+            <div
+              key={slot}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(selected ? "" : slot)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(selected ? "" : slot);
+                }
+              }}
+              onMouseEnter={() => setHoverIdx(i)}
+              onMouseLeave={() => setHoverIdx(null)}
+              style={baseStyle}
+            >
+              <span>{selected ? "✓" : "○"}</span>
+              <span>{formatJst(slot)}</span>
+            </div>
+          );
+        })}
+      </div>
+      {isOrphan && (
+        <div style={{ ...styles.slotOrphan, marginTop: "0.5rem" }}>
+          <span>現在の確定日時: {formatJst(interviewAt)} (希望日時に含まれません)</span>
+          <button
+            type="button"
+            onClick={() => onSelect("")}
+            style={styles.clearBtn}
+          >
+            解除
+          </button>
+        </div>
+      )}
+      <div style={styles.hint}>
+        クリックすると面談確定日時として設定されます。再クリックで解除。
+      </div>
+    </div>
+  );
+}
+
 function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: "0.75rem" }}>
@@ -605,9 +687,3 @@ function formatJst(utcIso: string): string {
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 }
 
-function toLocalInput(utcIso: string): string {
-  const d = new Date(utcIso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
