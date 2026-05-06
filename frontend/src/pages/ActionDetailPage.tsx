@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
-import type { EventAction, EventActionType } from "../types";
+import type { EventAction, EventActionType, Meeting } from "../types";
 import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
@@ -11,6 +11,7 @@ import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
+import { MeetingDetail } from "../components/MeetingDetail";
 import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import {
   AttendanceCheckForm,
@@ -348,9 +349,7 @@ function ActionMainContent({
     case "member_application":
       return <MemberApplicationListTab eventId={eventId} action={action} />;
     case "schedule_polling":
-      return (
-        <PlaceholderContent label="日程調整のメイン画面（既存リーダー雑談会機能を将来統合予定）" />
-      );
+      return <SchedulePollingMain eventId={eventId} />;
     case "member_welcome":
       return (
         <PlaceholderContent label="新メンバー対応に状態画面はありません。「設定」タブで動作を構成してください。" />
@@ -406,6 +405,91 @@ function ActionSettingsContent({
   }
 }
 
+// schedule_polling のメイン画面。
+// eventId に紐づく meetings を取得し、
+//   0件 → /meetup コマンドへの誘導
+//   1件 → そのまま MeetingDetail を埋め込み
+//   N件 → 一覧 → 選択で MeetingDetail
+// を出し分ける。MeetingDetail は自身でロード・サブタブまで描画する。
+function SchedulePollingMain({ eventId }: { eventId: string }) {
+  const [meetings, setMeetings] = useState<Meeting[] | null>(null);
+  const [error, setError] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMeetings(null);
+    setError(false);
+    api
+      .getMeetings(eventId)
+      .then((list) => {
+        if (cancelled) return;
+        setMeetings(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  if (error) {
+    return (
+      <PlaceholderContent label="ミーティング情報の取得に失敗しました。再読み込みしてください。" />
+    );
+  }
+  if (meetings === null) {
+    return <PlaceholderContent label="読み込み中..." />;
+  }
+  if (meetings.length === 0) {
+    return (
+      <PlaceholderContent label="このイベントにはミーティングがまだ登録されていません。Slack で /meetup コマンドから作成してください。" />
+    );
+  }
+  if (meetings.length === 1) {
+    return <MeetingDetail meetingId={meetings[0].id} onBack={() => {}} />;
+  }
+  if (selectedId) {
+    return (
+      <div>
+        <button
+          onClick={() => setSelectedId(null)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#2563eb",
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: "0.75rem",
+            fontSize: "0.875rem",
+          }}
+        >
+          ← ミーティング一覧に戻る
+        </button>
+        <MeetingDetail meetingId={selectedId} onBack={() => setSelectedId(null)} />
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      {meetings.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => setSelectedId(m.id)}
+          style={meetingCardStyle}
+        >
+          <div style={{ fontWeight: 600 }}>{m.name}</div>
+          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+            #{m.channelId}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PlaceholderContent({ label }: { label: string }) {
   return (
     <div
@@ -438,5 +522,14 @@ const secondaryBtnStyle: React.CSSProperties = {
   border: "1px solid #d1d5db",
   background: "white",
   borderRadius: "0.25rem",
+  cursor: "pointer",
+};
+
+const meetingCardStyle: React.CSSProperties = {
+  textAlign: "left",
+  padding: "0.75rem 1rem",
+  border: "1px solid #e5e7eb",
+  background: "white",
+  borderRadius: "0.375rem",
   cursor: "pointer",
 };
