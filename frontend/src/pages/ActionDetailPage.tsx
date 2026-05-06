@@ -346,7 +346,7 @@ function ActionMainContent({
     case "pr_review_list":
       return <PRReviewListTab eventId={eventId} />;
     case "member_application":
-      return <MemberApplicationListTab eventId={eventId} />;
+      return <MemberApplicationListTab eventId={eventId} action={action} />;
     case "schedule_polling":
       return (
         <PlaceholderContent label="日程調整のメイン画面（既存リーダー雑談会機能を将来統合予定）" />
