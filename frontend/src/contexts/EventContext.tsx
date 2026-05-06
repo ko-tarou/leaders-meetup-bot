@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Event } from "../types";
-import { api } from "../api";
+import { api, getAdminToken } from "../api";
 
 const STORAGE_KEY = "devhub_ops:current_event_id";
 
@@ -17,6 +17,9 @@ type EventContextValue = {
   refreshEvents: () => Promise<void>;
   loading: boolean;
   fetchError: string | null;
+  // 005-1: admin token が未設定 / 不正な場合に true。
+  // App / HomePage 側で AdminTokenPrompt の表示判定に使う。
+  tokenInvalid: boolean;
 };
 
 const EventContext = createContext<EventContextValue | null>(null);
@@ -32,6 +35,10 @@ export function EventProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // 005-1: token 未設定なら初期値 true（fetch 試行前から prompt 表示可能）
+  const [tokenInvalid, setTokenInvalid] = useState<boolean>(
+    () => !getAdminToken(),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +81,19 @@ export function EventProvider({ children }: { children: ReactNode }) {
         // fetch が拡張機能でブロックされると TypeError("Failed to fetch") になる。
         const isBlocked =
           err instanceof TypeError && /Failed to fetch/i.test(err.message);
+        // 005-1: 401 検出。err.status (005-2 の APIError) と err.message の両方をチェックして
+        // 005-2 の merge 状態に依存せず動くようにする。
+        const status = (err as { status?: number } | null)?.status;
+        const message = err instanceof Error ? err.message : "";
+        const isUnauthorized =
+          status === 401 || /HTTP 401/i.test(message);
+        if (isUnauthorized) {
+          setTokenInvalid(true);
+          setFetchError(
+            "管理トークンが未設定または不正です。ADMIN_TOKEN を入力してください。",
+          );
+          return;
+        }
         setFetchError(
           isBlocked
             ? "API へのリクエストがブロックされました。広告ブロッカー / プライバシー拡張機能 / ブラウザのトラッキング保護を一時的に無効にしてください。"
@@ -114,7 +134,15 @@ export function EventProvider({ children }: { children: ReactNode }) {
 
   return (
     <EventContext.Provider
-      value={{ events, currentEvent, setCurrentEventId, refreshEvents, loading, fetchError }}
+      value={{
+        events,
+        currentEvent,
+        setCurrentEventId,
+        refreshEvents,
+        loading,
+        fetchError,
+        tokenInvalid,
+      }}
     >
       {children}
     </EventContext.Provider>
