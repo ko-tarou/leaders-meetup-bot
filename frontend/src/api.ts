@@ -27,12 +27,44 @@ import type {
 
 const BASE = "/api";
 
+export class APIError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly statusText: string,
+    public readonly body: string,
+  ) {
+    super(`HTTP ${status} ${statusText}: ${body.slice(0, 200)}`);
+    this.name = "APIError";
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers ?? {}),
+    },
     ...options,
   });
-  return res.json() as Promise<T>;
+  if (!res.ok) {
+    let body = "";
+    try {
+      body = await res.text();
+    } catch {
+      // noop
+    }
+    throw new APIError(res.status, res.statusText, body);
+  }
+  // 一部の API（DELETE 等）は body 空のことがあるので、204 はそのまま undefined を返す
+  if (res.status === 204) return undefined as T;
+  // body が空文字列の場合 res.json() は SyntaxError を投げるので守る
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new APIError(res.status, res.statusText, text);
+  }
 }
 
 export const api = {
