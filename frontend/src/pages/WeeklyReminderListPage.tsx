@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { EventAction } from "../types";
 import { api } from "../api";
 import type { ReminderDraft } from "../components/ReminderCard";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 // Sprint 23 PR-A: weekly_reminder アクションの一覧画面。
 // 旧「メイン」「設定」タブ廃止に伴い、開いた直後はリマインドの一覧だけを表示し、
@@ -77,6 +78,7 @@ export function WeeklyReminderListPage({
   onChanged: () => void;
 }) {
   const navigate = useNavigate();
+  const { confirm } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reminders = parseReminders(action.config);
@@ -119,9 +121,12 @@ export function WeeklyReminderListPage({
   };
 
   const handleDelete = async (r: ReminderDraft) => {
-    if (!confirm(`リマインド「${r.name || "(名前未設定)"}」を削除します。よろしいですか？`)) {
-      return;
-    }
+    const ok = await confirm({
+      message: `リマインド「${r.name || "(名前未設定)"}」を削除します。よろしいですか？`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     setError(null);
     setBusy(r.id);
     try {

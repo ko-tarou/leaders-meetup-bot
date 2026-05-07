@@ -8,6 +8,7 @@ import {
 } from "./schedule/AutoScheduleConfigPanel";
 import { RemindersPanel, withLocalIds } from "./schedule/RemindersPanel";
 import { InstantSendPanel } from "./schedule/InstantSendPanel";
+import { useToast } from "./ui/Toast";
 
 type Props = { meetingId: string; onChange?: () => void };
 
@@ -29,6 +30,7 @@ const INITIAL_CONFIG: AutoScheduleConfig = {
 };
 
 export function ScheduleSection({ meetingId, onChange }: Props) {
+  const toast = useToast();
   const [schedule, setSchedule] = useState<AutoSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasOpenPoll, setHasOpenPoll] = useState(false);
@@ -165,7 +167,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
       await load();
       onChange?.();
     } catch {
-      alert("保存に失敗しました");
+      toast.error("保存に失敗しました");
     }
     setSaving(false);
   };

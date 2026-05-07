@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { Meeting, Workspace } from "../types";
 import { ChannelSelector } from "./ChannelSelector";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 type Props = { onSelect: (id: string) => void };
 
 export function MeetingList({ onSelect }: Props) {
+  const { confirm } = useConfirm();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
@@ -69,7 +71,12 @@ export function MeetingList({ onSelect }: Props) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("削除しますか？")) return;
+    const ok = await confirm({
+      message: "削除しますか？",
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     await api.deleteMeeting(id);
     load();
   };

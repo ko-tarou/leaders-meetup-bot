@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { Poll } from "../types";
+import { useToast } from "./ui/Toast";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 type Props = { meetingId: string };
 
 export function HistorySection({ meetingId }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [polls, setPolls] = useState<Poll[]>([]);
 
   useEffect(() => {
@@ -12,18 +16,19 @@ export function HistorySection({ meetingId }: Props) {
   }, [meetingId]);
 
   const handleDelete = async (pollId: string) => {
-    if (
-      !confirm(
+    const ok = await confirm({
+      message:
         "この投票を削除しますか？\n投票結果とリマインダーも合わせて削除されます。",
-      )
-    )
-      return;
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     try {
       await api.deletePoll(pollId);
       const updated = await api.getPolls(meetingId);
       setPolls(updated);
     } catch {
-      alert("削除に失敗しました");
+      toast.error("削除に失敗しました");
     }
   };
 

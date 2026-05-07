@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { api } from "../../api";
+import { useToast } from "../ui/Toast";
+import { useConfirm } from "../ui/ConfirmDialog";
 
 type Props = {
   meetingId: string;
@@ -26,6 +28,8 @@ export function InstantSendPanel({
   onAfterSend,
   onAfterClose,
 }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [instantDates, setInstantDates] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -54,7 +58,7 @@ export function InstantSendPanel({
   const handleInstantSend = async () => {
     const dateList = instantDates.split(/[,\s]+/).filter(Boolean);
     if (dateList.length === 0) {
-      alert("候補日を入力してください");
+      toast.error("候補日を入力してください");
       return;
     }
     setSending(true);
@@ -67,18 +71,22 @@ export function InstantSendPanel({
       setInstantDates("");
       await onAfterSend();
     } catch {
-      alert("送信に失敗しました");
+      toast.error("送信に失敗しました");
     }
     setSending(false);
   };
 
   const handleClose = async () => {
-    if (!confirm("投票を締め切りますか？")) return;
+    const ok = await confirm({
+      message: "投票を締め切りますか？",
+      confirmLabel: "締め切る",
+    });
+    if (!ok) return;
     try {
       await api.closePoll(meetingId);
       await onAfterClose();
     } catch {
-      alert("締め切りに失敗しました");
+      toast.error("締め切りに失敗しました");
     }
   };
 

@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { Workspace } from "../types";
 import type { ReminderDraft } from "./ReminderCard";
 import { ChannelPicker, type SlackChannelLike } from "./ui/ChannelPicker";
+import { useToast } from "./ui/Toast";
 
 // Sprint 23 PR-B/C: weekly_reminder 詳細画面の「チャンネル管理」タブ。
 // task_management の ChannelManagementSection と同等の UX:
@@ -33,6 +34,7 @@ type RegisteredRow = {
 };
 
 export function ReminderChannelTab({ reminder, disabled, onSave }: Props) {
+  const toast = useToast();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [wsLoading, setWsLoading] = useState(true);
   const [wsError, setWsError] = useState<string | null>(null);
@@ -115,7 +117,7 @@ export function ReminderChannelTab({ reminder, disabled, onSave }: Props) {
       };
       await onSave(next);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "追加に失敗しました");
+      toast.error(e instanceof Error ? e.message : "追加に失敗しました");
     } finally {
       setPendingChannelId(null);
     }
@@ -130,7 +132,7 @@ export function ReminderChannelTab({ reminder, disabled, onSave }: Props) {
       };
       await onSave(next);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除に失敗しました");
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     } finally {
       setPendingChannelId(null);
     }
