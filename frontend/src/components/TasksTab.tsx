@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Task, TaskAssignee, TaskFilters } from "../types";
 import { api } from "../api";
 import { TaskFormModal } from "./TaskFormModal";
+import { colors } from "../styles/tokens";
 
 // ADR-0002: hackathon の tasks タブ用のタスク一覧。
 // PR2 で フィルタ UI を追加。PR3 で作成/編集/削除モーダルを統合。
@@ -13,7 +14,7 @@ type FilterState = TaskFilters & { showDone: boolean; parentOnly: boolean };
 const INITIAL_FILTERS: FilterState = { showDone: false, parentOnly: false };
 
 const STATUS_LABEL: Record<string, string> = { todo: "未着手", doing: "進行中", done: "完了" };
-const STATUS_COLOR: Record<string, string> = { todo: "#6b7280", doing: "#2563eb", done: "#16a34a" };
+const STATUS_COLOR: Record<string, string> = { todo: colors.textSecondary, doing: colors.primary, done: colors.success };
 const PRIORITY_LABEL: Record<string, string> = { low: "低", mid: "中", high: "高" };
 const PRIORITY_EMOJI: Record<string, string> = { low: "🟢", mid: "🟡", high: "🔴" };
 
@@ -91,7 +92,7 @@ export function TasksTab({ eventId }: { eventId: string }) {
       <div
         style={{
           padding: "0.75rem",
-          background: "#f9fafb",
+          background: colors.surface,
           borderRadius: "0.375rem",
           display: "flex",
           flexWrap: "wrap",
@@ -156,7 +157,7 @@ export function TasksTab({ eventId }: { eventId: string }) {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          style={{ background: "#2563eb", color: "white" }}
+          style={{ background: colors.primary, color: colors.textInverse }}
         >
           + 新規タスク
         </button>
@@ -203,10 +204,10 @@ function TaskList({
   onSelect: (task: TaskWithAssignees) => void;
 }) {
   if (loading) return <div>読み込み中...</div>;
-  if (error) return <div style={{ color: "#dc2626" }}>エラー: {error}</div>;
+  if (error) return <div style={{ color: colors.danger }}>エラー: {error}</div>;
   if (tasks.length === 0) {
     return (
-      <div style={{ padding: "1.5rem", textAlign: "center", color: "#6b7280" }}>
+      <div style={{ padding: "1.5rem", textAlign: "center", color: colors.textSecondary }}>
         該当するタスクがありません。
       </div>
     );
@@ -269,11 +270,11 @@ function TaskItem({
         }
       }}
       style={{
-        border: "1px solid #e5e7eb",
+        border: `1px solid ${colors.border}`,
         borderRadius: "0.375rem",
         padding: "0.75rem",
         margin: "0.5rem 0",
-        background: isSubtask ? "#f9fafb" : "white",
+        background: isSubtask ? colors.surface : colors.background,
         cursor: onClick ? "pointer" : "default",
       }}
     >
@@ -288,14 +289,14 @@ function TaskItem({
             padding: "0.125rem 0.5rem",
             borderRadius: "0.25rem",
             background: STATUS_COLOR[task.status],
-            color: "white",
+            color: colors.textInverse,
           }}
         >
           {STATUS_LABEL[task.status] || task.status}
         </span>
       </div>
       {task.description && (
-        <div style={{ marginTop: "0.5rem", color: "#4b5563", fontSize: "0.875rem" }}>{task.description}</div>
+        <div style={{ marginTop: "0.5rem", color: colors.text, fontSize: "0.875rem" }}>{task.description}</div>
       )}
       <div
         style={{
@@ -303,7 +304,7 @@ function TaskItem({
           display: "flex",
           gap: "1rem",
           fontSize: "0.75rem",
-          color: "#6b7280",
+          color: colors.textSecondary,
           flexWrap: "wrap",
         }}
       >
