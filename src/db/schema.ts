@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
-import { unique } from "drizzle-orm/sqlite-core";
+import { unique, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Slack ワークスペース登録（ADR-0006）
 // 複数 Slack workspace（Developers Hub / HackIt 等）を一元管理するためのトップレベル登録
@@ -52,30 +52,37 @@ export const eventActions = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
-  (t) => [unique("event_actions_event_type_uniq").on(t.eventId, t.actionType)],
+  (t) => [
+    unique("event_actions_event_type_uniq").on(t.eventId, t.actionType),
+    index("idx_event_actions_event_id").on(t.eventId),
+  ],
 );
 
 // タスク（HackIt等のハッカソン運営タスク管理用、ADR-0002）
-export const tasks = sqliteTable("tasks", {
-  id: text("id").primaryKey(),
-  eventId: text("event_id")
-    .notNull()
-    .references(() => events.id),
-  // 1階層のサブタスク。アプリ層で深さ強制（ADR-0002）
-  // self-referential FK は Drizzle の循環参照を避けるため省略し、アプリ層で整合性保証
-  parentTaskId: text("parent_task_id"),
-  title: text("title").notNull(),
-  description: text("description"),
-  // ADR-0002 (Gemini): UTC ISO 8601 (Z付き) で保存、表示時にJST変換
-  dueAt: text("due_at"),
-  // ADR-0006: タスク開始日（UTC ISO 8601、Z付き）
-  startAt: text("start_at"),
-  status: text("status").notNull().default("todo"), // 'todo' | 'doing' | 'done'
-  priority: text("priority").notNull().default("mid"), // 'low' | 'mid' | 'high'
-  createdBySlackId: text("created_by_slack_id").notNull(),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-});
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    // 1階層のサブタスク。アプリ層で深さ強制（ADR-0002）
+    // self-referential FK は Drizzle の循環参照を避けるため省略し、アプリ層で整合性保証
+    parentTaskId: text("parent_task_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    // ADR-0002 (Gemini): UTC ISO 8601 (Z付き) で保存、表示時にJST変換
+    dueAt: text("due_at"),
+    // ADR-0006: タスク開始日（UTC ISO 8601、Z付き）
+    startAt: text("start_at"),
+    status: text("status").notNull().default("todo"), // 'todo' | 'doing' | 'done'
+    priority: text("priority").notNull().default("mid"), // 'low' | 'mid' | 'high'
+    createdBySlackId: text("created_by_slack_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_tasks_event_id").on(t.eventId)],
+);
 
 // タスク担当者（多対多、ADR-0002 Geminiレビューで正規化採用）
 export const taskAssignees = sqliteTable(
@@ -88,65 +95,76 @@ export const taskAssignees = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     assignedAt: text("assigned_at").notNull(), // UTC ISO
   },
-  (t) => [unique("task_assignees_task_user_uniq").on(t.taskId, t.slackUserId)]
+  (t) => [
+    unique("task_assignees_task_user_uniq").on(t.taskId, t.slackUserId),
+    index("idx_task_assignees_task_id").on(t.taskId),
+  ],
 );
 
 // ADR-0008 / Sprint 16: 新メンバー入会フロー（member_application アクション用）
 // 応募者が公開フォームから入力。kota が候補から面談日時を確定 → 合否判定。
 // メール送信は POC では行わず、admin UI でテンプレ生成 → kota が手動送信。
-export const applications = sqliteTable("applications", {
-  id: text("id").primaryKey(),
-  eventId: text("event_id")
-    .notNull()
-    .references(() => events.id),
-  name: text("name").notNull(),
-  email: text("email").notNull(),
-  motivation: text("motivation"),
-  introduction: text("introduction"),
-  // === Sprint 19 PR2 新規フィールド（Google Form 「DevelopersHub 面談フォーム」準拠） ===
-  // ADR-0005 流儀: nullable + アプリ層で必須化（既存レコードと互換）
-  // 学籍番号（例: "1 EP 1 - 1"）
-  studentId: text("student_id"),
-  // どこで知ったか:
-  //   'joint_briefing' | 'welcome_event' | 'poster' | 'campus_hp' | 'friend' | 'teacher' | 'other'
-  howFound: text("how_found"),
-  // 面談場所の希望: 'online' | 'lab206'
-  interviewLocation: text("interview_location"),
-  // 既存の参加活動（任意）
-  existingActivities: text("existing_activities"),
-  // === 既存続き ===
-  // 応募者が選択した希望日時候補（UTC ISO の配列、JSON）
-  // 例: ["2026-05-10T01:00:00.000Z", "2026-05-10T02:00:00.000Z", ...]
-  availableSlots: text("available_slots").notNull().default("[]"),
-  // 'pending' | 'scheduled' | 'passed' | 'failed' | 'rejected'
-  status: text("status").notNull().default("pending"),
-  // kota が候補から確定した面談日時（UTC ISO）
-  interviewAt: text("interview_at"),
-  // 合否判定時のメモ
-  decisionNote: text("decision_note"),
-  appliedAt: text("applied_at").notNull(),
-  decidedAt: text("decided_at"),
-});
+export const applications = sqliteTable(
+  "applications",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    motivation: text("motivation"),
+    introduction: text("introduction"),
+    // === Sprint 19 PR2 新規フィールド（Google Form 「DevelopersHub 面談フォーム」準拠） ===
+    // ADR-0005 流儀: nullable + アプリ層で必須化（既存レコードと互換）
+    // 学籍番号（例: "1 EP 1 - 1"）
+    studentId: text("student_id"),
+    // どこで知ったか:
+    //   'joint_briefing' | 'welcome_event' | 'poster' | 'campus_hp' | 'friend' | 'teacher' | 'other'
+    howFound: text("how_found"),
+    // 面談場所の希望: 'online' | 'lab206'
+    interviewLocation: text("interview_location"),
+    // 既存の参加活動（任意）
+    existingActivities: text("existing_activities"),
+    // === 既存続き ===
+    // 応募者が選択した希望日時候補（UTC ISO の配列、JSON）
+    // 例: ["2026-05-10T01:00:00.000Z", "2026-05-10T02:00:00.000Z", ...]
+    availableSlots: text("available_slots").notNull().default("[]"),
+    // 'pending' | 'scheduled' | 'passed' | 'failed' | 'rejected'
+    status: text("status").notNull().default("pending"),
+    // kota が候補から確定した面談日時（UTC ISO）
+    interviewAt: text("interview_at"),
+    // 合否判定時のメモ
+    decisionNote: text("decision_note"),
+    appliedAt: text("applied_at").notNull(),
+    decidedAt: text("decided_at"),
+  },
+  (t) => [index("idx_applications_event_id").on(t.eventId)],
+);
 
 // ADR-0008: PR レビュー依頼一覧（pr_review_list アクション用）
 // タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加
-export const prReviews = sqliteTable("pr_reviews", {
-  id: text("id").primaryKey(),
-  eventId: text("event_id")
-    .notNull()
-    .references(() => events.id),
-  title: text("title").notNull(),
-  url: text("url"),
-  description: text("description"),
-  // 'open' | 'in_review' | 'merged' | 'closed'
-  status: text("status").notNull().default("open"),
-  requesterSlackId: text("requester_slack_id").notNull(),
-  // Sprint 22 で多対多化（pr_review_reviewers）。
-  // 新コードは参照しない（dead column として残す）。
-  reviewerSlackId: text("reviewer_slack_id"),
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-});
+export const prReviews = sqliteTable(
+  "pr_reviews",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    title: text("title").notNull(),
+    url: text("url"),
+    description: text("description"),
+    // 'open' | 'in_review' | 'merged' | 'closed'
+    status: text("status").notNull().default("open"),
+    requesterSlackId: text("requester_slack_id").notNull(),
+    // Sprint 22 で多対多化（pr_review_reviewers）。
+    // 新コードは参照しない（dead column として残す）。
+    reviewerSlackId: text("reviewer_slack_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_pr_reviews_event_id").on(t.eventId)],
+);
 
 // PR レビュー LGTM（多対多）
 // 同一ユーザーの重複 LGTM を UNIQUE で防止
@@ -160,7 +178,10 @@ export const prReviewLgtms = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     createdAt: text("created_at").notNull(),
   },
-  (t) => [unique("pr_review_lgtms_review_user_uniq").on(t.reviewId, t.slackUserId)],
+  (t) => [
+    unique("pr_review_lgtms_review_user_uniq").on(t.reviewId, t.slackUserId),
+    index("idx_pr_review_lgtms_review_id").on(t.reviewId),
+  ],
 );
 
 // PR レビューの担当レビュアー（多対多, ADR-0008 拡張 / Sprint 22）
@@ -175,31 +196,43 @@ export const prReviewReviewers = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     createdAt: text("created_at").notNull(),
   },
-  (t) => [unique("pr_review_reviewers_review_user_uniq").on(t.reviewId, t.slackUserId)],
+  (t) => [
+    unique("pr_review_reviewers_review_user_uniq").on(t.reviewId, t.slackUserId),
+    index("idx_pr_review_reviewers_review_id").on(t.reviewId),
+  ],
 );
 
 // ミーティング定義
-export const meetings = sqliteTable("meetings", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  channelId: text("channel_id").notNull(),
-  // ADR-0006: どの workspace の channel_id か。既存全件は default workspace にバックフィル予定（Sprint 6 PR3）。
-  // .notNull() を付けない（Drizzle Kit がテーブル再作成するリスク回避）
-  workspaceId: text("workspace_id").references(() => workspaces.id),
-  // ADR-0001/0005: events 配下に従属。NULL許容のままアプリ層 (Zod) で必須化する。
-  // .notNull() を付けると drizzle-kit が物理 NOT NULL を生成してテーブル再作成リスク。
-  eventId: text("event_id").references(() => events.id),
-  // ADR-0006: sticky bot の現在のメッセージ timestamp（"1234567890.123456" 形式）
-  // NULL なら sticky bot 未起動。set されていれば該当チャンネルで sticky board 有効。
-  taskBoardTs: text("task_board_ts"),
-  // ADR-0008: PR レビュー sticky bot のメッセージ timestamp（taskBoardTs と独立）
-  // NULL なら未起動。set されていれば該当チャンネルで PR レビュー sticky board 有効。
-  prReviewBoardTs: text("pr_review_board_ts"),
-  // ADR-0006: sticky board のフィルタ状態。1 なら未開始 (start_at > now) のタスクも表示する。
-  // デフォルト 0 = 進行中のみ表示（start_at NULL or <= now のタスクのみ）。
-  taskBoardShowUnstarted: integer("task_board_show_unstarted").notNull().default(0),
-  createdAt: text("created_at").notNull(),
-});
+export const meetings = sqliteTable(
+  "meetings",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    channelId: text("channel_id").notNull(),
+    // ADR-0006: どの workspace の channel_id か。既存全件は default workspace にバックフィル予定（Sprint 6 PR3）。
+    // .notNull() を付けない（Drizzle Kit がテーブル再作成するリスク回避）
+    workspaceId: text("workspace_id").references(() => workspaces.id),
+    // ADR-0001/0005: events 配下に従属。NULL許容のままアプリ層 (Zod) で必須化する。
+    // .notNull() を付けると drizzle-kit が物理 NOT NULL を生成してテーブル再作成リスク。
+    eventId: text("event_id").references(() => events.id),
+    // ADR-0006: sticky bot の現在のメッセージ timestamp（"1234567890.123456" 形式）
+    // NULL なら sticky bot 未起動。set されていれば該当チャンネルで sticky board 有効。
+    taskBoardTs: text("task_board_ts"),
+    // ADR-0008: PR レビュー sticky bot のメッセージ timestamp（taskBoardTs と独立）
+    // NULL なら未起動。set されていれば該当チャンネルで PR レビュー sticky board 有効。
+    prReviewBoardTs: text("pr_review_board_ts"),
+    // ADR-0006: sticky board のフィルタ状態。1 なら未開始 (start_at > now) のタスクも表示する。
+    // デフォルト 0 = 進行中のみ表示（start_at NULL or <= now のタスクのみ）。
+    taskBoardShowUnstarted: integer("task_board_show_unstarted").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    // 005-4: 並行 createPoll で同 channel に 2 行できる問題 (multi-review #10) を防止。
+    // SQLite UNIQUE は NULL を一意扱いしないため、workspace_id NULL の行は対象外。
+    uniqueIndex("idx_meetings_ws_channel").on(t.workspaceId, t.channelId),
+    index("idx_meetings_event_id").on(t.eventId),
+  ],
+);
 
 // ミーティング参加者
 export const meetingMembers = sqliteTable("meeting_members", {
@@ -212,18 +245,22 @@ export const meetingMembers = sqliteTable("meeting_members", {
 });
 
 // 日程調整の投票
-export const polls = sqliteTable("polls", {
-  id: text("id").primaryKey(),
-  meetingId: text("meeting_id")
-    .notNull()
-    .references(() => meetings.id),
-  status: text("status").notNull().default("open"),
-  slackMessageTs: text("slack_message_ts"),
-  // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
-  messageTemplate: text("message_template"),
-  createdAt: text("created_at").notNull(),
-  closedAt: text("closed_at"),
-});
+export const polls = sqliteTable(
+  "polls",
+  {
+    id: text("id").primaryKey(),
+    meetingId: text("meeting_id")
+      .notNull()
+      .references(() => meetings.id),
+    status: text("status").notNull().default("open"),
+    slackMessageTs: text("slack_message_ts"),
+    // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
+    messageTemplate: text("message_template"),
+    createdAt: text("created_at").notNull(),
+    closedAt: text("closed_at"),
+  },
+  (t) => [index("idx_polls_meeting_id").on(t.meetingId)],
+);
 
 // 投票の候補日
 export const pollOptions = sqliteTable("poll_options", {
@@ -246,7 +283,10 @@ export const pollVotes = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     votedAt: text("voted_at").notNull(),
   },
-  (t) => [unique("poll_votes_option_user_uniq").on(t.pollOptionId, t.slackUserId)]
+  (t) => [
+    unique("poll_votes_option_user_uniq").on(t.pollOptionId, t.slackUserId),
+    index("idx_poll_votes_poll_option_id").on(t.pollOptionId),
+  ],
 );
 
 // リマインド設定
@@ -344,6 +384,7 @@ export const attendancePolls = sqliteTable(
       t.postedForDate,
       t.pollKey,
     ),
+    index("idx_attendance_polls_action_id").on(t.actionId),
   ],
 );
 
@@ -362,20 +403,28 @@ export const attendanceVotes = sqliteTable(
   },
   (t) => [
     unique("attendance_votes_poll_user_uniq").on(t.pollId, t.slackUserId),
+    index("idx_attendance_votes_poll_id").on(t.pollId),
   ],
 );
 
 // スケジュール済みジョブ
-export const scheduledJobs = sqliteTable("scheduled_jobs", {
-  id: text("id").primaryKey(),
-  type: text("type").notNull(),
-  referenceId: text("reference_id").notNull(),
-  nextRunAt: text("next_run_at").notNull(),
-  status: text("status").notNull().default("pending"),
-  // ジョブ固有データ（JSON文字列）
-  // 例（reminder）: {"message": "..."}
-  payload: text("payload"),
-  // 冪等性のための一意キー（同じキーのINSERTはUNIQUE違反で弾かれる）
-  dedupKey: text("dedup_key").unique(),
-  createdAt: text("created_at").notNull(),
-});
+export const scheduledJobs = sqliteTable(
+  "scheduled_jobs",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    referenceId: text("reference_id").notNull(),
+    nextRunAt: text("next_run_at").notNull(),
+    status: text("status").notNull().default("pending"),
+    // ジョブ固有データ（JSON文字列）
+    // 例（reminder）: {"message": "..."}
+    payload: text("payload"),
+    // 冪等性のための一意キー（同じキーのINSERTはUNIQUE違反で弾かれる）
+    dedupKey: text("dedup_key").unique(),
+    createdAt: text("created_at").notNull(),
+  },
+  // 005-4: cron が 5 分ごとに WHERE status='pending' AND next_run_at <= ? で全件 scan していたのを index で解消
+  (t) => [
+    index("idx_scheduled_jobs_status_next_run").on(t.status, t.nextRunAt),
+  ],
+);
