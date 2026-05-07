@@ -9,6 +9,7 @@ import {
 import { RemindersPanel, withLocalIds } from "./schedule/RemindersPanel";
 import { InstantSendPanel } from "./schedule/InstantSendPanel";
 import { useToast } from "./ui/Toast";
+import { colors } from "../styles/tokens";
 
 type Props = { meetingId: string; onChange?: () => void };
 
@@ -203,8 +204,8 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
           disabled={saving}
           style={{
             padding: "10px 24px",
-            background: "#4A90D9",
-            color: "#fff",
+            background: colors.primary,
+            color: colors.textInverse,
             border: "none",
             borderRadius: 4,
             cursor: "pointer",
@@ -217,7 +218,7 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
       </div>
 
       <hr
-        style={{ margin: "24px 0", border: "none", borderTop: "1px solid #eee" }}
+        style={{ margin: "24px 0", border: "none", borderTop: `1px solid ${colors.border}` }}
       />
 
       {/* 手動アクション */}

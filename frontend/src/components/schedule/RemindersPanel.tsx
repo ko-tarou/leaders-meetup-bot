@@ -2,6 +2,7 @@ import type { ReminderItem, Trigger } from "../../types";
 import { MentionPicker } from "../MentionPicker";
 import { AutoTextarea } from "../AutoTextarea";
 import { TriggerSelector } from "../TriggerSelector";
+import { colors } from "../../styles/tokens";
 
 type Props = {
   meetingId: string;
@@ -60,11 +61,11 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
         <div
           key={r.id ?? i}
           style={{
-            border: "1px solid #eee",
+            border: `1px solid ${colors.border}`,
             borderRadius: 4,
             padding: 12,
             marginBottom: 8,
-            background: "#fff",
+            background: colors.background,
           }}
         >
           <div
@@ -76,7 +77,7 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontSize: 13, color: "#666", minWidth: 56 }}>
+            <span style={{ fontSize: 13, color: colors.textSecondary, minWidth: 56 }}>
               トリガー
             </span>
             <TriggerSelector
@@ -89,8 +90,8 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
               style={{
                 marginLeft: "auto",
                 padding: "4px 10px",
-                background: "#E74C3C",
-                color: "#fff",
+                background: colors.danger,
+                color: colors.textInverse,
                 border: "none",
                 borderRadius: 4,
                 cursor: "pointer",
@@ -109,7 +110,7 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
                 gap: 8,
               }}
             >
-              <span style={{ fontSize: 13, color: "#666", minWidth: 56 }}>
+              <span style={{ fontSize: 13, color: colors.textSecondary, minWidth: 56 }}>
                 時刻
               </span>
               <input
@@ -137,7 +138,7 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
               boxSizing: "border-box",
             }}
           />
-          <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+          <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
             プレースホルダ: <code>{"{date}"}</code>,{" "}
             <code>{"{meetingName}"}</code>, <code>{"{daysBefore}"}</code>,{" "}
             <code>{"{daysAfter}"}</code>
@@ -149,8 +150,8 @@ export function RemindersPanel({ meetingId, value, onChange }: Props) {
         onClick={addReminder}
         style={{
           padding: "6px 12px",
-          background: "#4A90D9",
-          color: "#fff",
+          background: colors.primary,
+          color: colors.textInverse,
           border: "none",
           borderRadius: 4,
           cursor: "pointer",
@@ -168,14 +169,14 @@ export function withLocalIds(items: ReminderItem[]): ReminderItem[] {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 16,
 };
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
 };

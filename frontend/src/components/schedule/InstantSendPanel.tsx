@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { colors } from "../../styles/tokens";
 
 type Props = {
   meetingId: string;
@@ -106,8 +107,8 @@ export function InstantSendPanel({
             onClick={handleGenerateDates}
             style={{
               padding: "8px 12px",
-              background: "#eee",
-              border: "1px solid #ddd",
+              background: colors.border,
+              border: `1px solid ${colors.borderStrong}`,
               borderRadius: 4,
               cursor: "pointer",
               whiteSpace: "nowrap",
@@ -121,8 +122,8 @@ export function InstantSendPanel({
           disabled={sending}
           style={{
             padding: "8px 16px",
-            background: "#27AE60",
-            color: "#fff",
+            background: colors.success,
+            color: colors.textInverse,
             border: "none",
             borderRadius: 4,
             cursor: "pointer",
@@ -130,7 +131,7 @@ export function InstantSendPanel({
         >
           {sending ? "送信中..." : "今すぐ送信"}
         </button>
-        <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+        <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
           上記のメッセージ本文を使って即座にSlackに送信します
         </p>
       </div>
@@ -142,8 +143,8 @@ export function InstantSendPanel({
             onClick={handleClose}
             style={{
               padding: "8px 16px",
-              background: "#E74C3C",
-              color: "#fff",
+              background: colors.danger,
+              color: colors.textInverse,
               border: "none",
               borderRadius: 4,
               cursor: "pointer",
@@ -158,8 +159,8 @@ export function InstantSendPanel({
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 16,
@@ -172,6 +173,6 @@ const labelStyle: React.CSSProperties = {
 };
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
 };
