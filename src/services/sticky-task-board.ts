@@ -11,6 +11,10 @@
 // - Block Kit テキストでは <@USER> メンションを使わずプレーンテキスト名前を使う
 // - Slack 側で再投稿のたびに通知が鳴らないよう、既存 message を必ず先に消す
 //   （消し忘れて update すると Slack の "edited" バッジが付くため避ける）
+//
+// PR 005-6: 共通ロジックは services/sticky-board-base.ts に集約。
+// このファイルは block builder + data loader + 既存 export 関数（薄いラッパー）
+// だけを残す。
 
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -18,7 +22,13 @@ import { meetings, tasks, taskAssignees } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { utcToJstFormat } from "./time-utils";
-import { createSlackClientForWorkspace } from "./workspace";
+import {
+  postInitialStickyBoard,
+  repostStickyBoard,
+  deleteStickyBoard,
+  repostStickyBoardByChannel,
+  type StickyBoardConfig,
+} from "./sticky-board-base";
 import type { Env } from "../types/env";
 
 const PRIORITY_EMOJI: Record<string, string> = {
@@ -239,6 +249,42 @@ async function resolveShowUnstarted(
 }
 
 /**
+ * task board の meeting シェイプ。
+ * 共通基盤の StickyMeeting + task board 固有フィールド。
+ */
+type TaskBoardMeeting = {
+  id: string;
+  channelId: string;
+  eventId: string | null;
+  taskBoardTs?: string | null;
+  taskBoardShowUnstarted?: number;
+};
+
+const TASK_BOARD_CONFIG: StickyBoardConfig<TaskBoardMeeting> = {
+  tsColumn: "taskBoardTs",
+  headerText: "📋 タスクボード",
+  label: "sticky board",
+  buildBlocks: async (db, client, meeting) => {
+    if (!meeting.eventId) {
+      // base 側で event_id チェック済みなのでここには来ないはずだが、型ナローイング
+      return [];
+    }
+    const showUnstarted = await resolveShowUnstarted(
+      db,
+      meeting.id,
+      meeting.taskBoardShowUnstarted,
+    );
+    return buildBoardBlocks(
+      db,
+      client,
+      meeting.id,
+      meeting.eventId,
+      showUnstarted,
+    );
+  },
+};
+
+/**
  * 初回投稿: 新規 sticky メッセージを post して meeting.task_board_ts を保存。
  * 既存 ts がある場合は repostBoard を呼ぶことを推奨（呼び出し側で判定）。
  *
@@ -255,44 +301,14 @@ export async function postInitialBoard(
     taskBoardShowUnstarted?: number;
   },
 ): Promise<{ ts: string } | { error: string }> {
-  if (!meeting.eventId) return { error: "meeting has no event_id" };
-
-  const showUnstarted = await resolveShowUnstarted(
-    db,
-    meeting.id,
-    meeting.taskBoardShowUnstarted,
-  );
-  const blocks = await buildBoardBlocks(
-    db,
-    client,
-    meeting.id,
-    meeting.eventId,
-    showUnstarted,
-  );
-  const result = await client.postMessage(
-    meeting.channelId,
-    "📋 タスクボード",
-    blocks,
-  );
-  if (!result.ok || typeof result.ts !== "string") {
-    return { error: `post failed: ${JSON.stringify(result)}` };
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ taskBoardTs: result.ts })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ts: result.ts };
+  return postInitialStickyBoard(db, client, meeting, TASK_BOARD_CONFIG);
 }
 
 /**
  * 再投稿: 既存メッセージ削除 → 新メッセージ post → ts 更新。
  *
- * delete 失敗（既に削除済み・権限失効・ネットワーク等）でも続行する。
- * 「常に最下部」を維持できないリスクより「投稿が完全に止まる」リスクの方が
- * UX 上問題が大きいため、fail-soft 方針。
+ * delete 失敗（既に削除済み・権限失効・ネットワーク等）でも続行する fail-soft。
+ * post 失敗時は ts を NULL に倒して残骸 ts を残さない（PR 005-6 で挙動追加）。
  */
 export async function repostBoard(
   db: D1Database,
@@ -305,55 +321,7 @@ export async function repostBoard(
     taskBoardShowUnstarted?: number;
   },
 ): Promise<{ ts: string } | { error: string }> {
-  if (!meeting.eventId) return { error: "meeting has no event_id" };
-
-  if (meeting.taskBoardTs) {
-    try {
-      const del = await client.deleteMessage(
-        meeting.channelId,
-        meeting.taskBoardTs,
-      );
-      if (!del.ok) {
-        console.warn(
-          `sticky board delete soft-fail (${meeting.taskBoardTs}): ${del.error ?? "unknown"}`,
-        );
-      }
-    } catch (e) {
-      console.warn(
-        `sticky board delete threw (${meeting.taskBoardTs}):`,
-        e,
-      );
-    }
-  }
-
-  const showUnstarted = await resolveShowUnstarted(
-    db,
-    meeting.id,
-    meeting.taskBoardShowUnstarted,
-  );
-  const blocks = await buildBoardBlocks(
-    db,
-    client,
-    meeting.id,
-    meeting.eventId,
-    showUnstarted,
-  );
-  const result = await client.postMessage(
-    meeting.channelId,
-    "📋 タスクボード",
-    blocks,
-  );
-  if (!result.ok || typeof result.ts !== "string") {
-    return { error: `post failed: ${JSON.stringify(result)}` };
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ taskBoardTs: result.ts })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ts: result.ts };
+  return repostStickyBoard(db, client, meeting, TASK_BOARD_CONFIG);
 }
 
 /**
@@ -366,32 +334,12 @@ export async function deleteBoard(
   client: SlackClient,
   meeting: { id: string; channelId: string; taskBoardTs: string | null },
 ): Promise<{ ok: true } | { error: string }> {
-  if (meeting.taskBoardTs) {
-    try {
-      const del = await client.deleteMessage(
-        meeting.channelId,
-        meeting.taskBoardTs,
-      );
-      if (!del.ok) {
-        console.warn(
-          `sticky board delete soft-fail (${meeting.taskBoardTs}): ${del.error ?? "unknown"}`,
-        );
-      }
-    } catch (e) {
-      console.warn(
-        `sticky board delete threw (${meeting.taskBoardTs}):`,
-        e,
-      );
-    }
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ taskBoardTs: null })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ok: true };
+  return deleteStickyBoard(
+    db,
+    client,
+    { ...meeting, eventId: null },
+    TASK_BOARD_CONFIG,
+  );
 }
 
 /**
@@ -409,27 +357,5 @@ export async function stickyRepostByChannel(
   env: Env,
   channelId: string,
 ): Promise<void> {
-  const d1 = drizzle(env.DB);
-  const meeting = await d1
-    .select()
-    .from(meetings)
-    .where(eq(meetings.channelId, channelId))
-    .get();
-  if (!meeting || !meeting.workspaceId || !meeting.taskBoardTs) return;
-
-  const client = await createSlackClientForWorkspace(env, meeting.workspaceId);
-  if (!client) {
-    console.warn(
-      `stickyRepostByChannel: no SlackClient for workspace ${meeting.workspaceId}`,
-    );
-    return;
-  }
-
-  await repostBoard(env.DB, client, {
-    id: meeting.id,
-    channelId: meeting.channelId,
-    eventId: meeting.eventId,
-    taskBoardTs: meeting.taskBoardTs,
-    taskBoardShowUnstarted: meeting.taskBoardShowUnstarted,
-  });
+  await repostStickyBoardByChannel(env, channelId, TASK_BOARD_CONFIG);
 }
