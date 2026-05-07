@@ -8,6 +8,8 @@ import type {
 } from "../types";
 import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
+import { useToast } from "./ui/Toast";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 // ADR-0008 / Sprint 16 PR3:
 // 応募管理タブ。一覧 → 詳細モーダルで合否判定 / 面談日時設定 / メールテンプレ生成。
@@ -350,6 +352,8 @@ function ApplicationDetailModal({
   onClose: () => void;
   onChange: () => void;
 }) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [submitting, setSubmitting] = useState(false);
   const [decisionNote, setDecisionNote] = useState(
     application.decisionNote || "",
@@ -371,19 +375,24 @@ function ApplicationDetailModal({
       });
       onChange();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "更新失敗");
+      toast.error(e instanceof Error ? e.message : "更新失敗");
       setSubmitting(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`「${application.name}」の応募を削除しますか？`)) return;
+    const ok = await confirm({
+      message: `「${application.name}」の応募を削除しますか？`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     setSubmitting(true);
     try {
       await api.applications.delete(application.id);
       onChange();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除失敗");
+      toast.error(e instanceof Error ? e.message : "削除失敗");
       setSubmitting(false);
     }
   };
@@ -406,8 +415,8 @@ function ApplicationDetailModal({
     if (!emailText) return;
     navigator.clipboard
       ?.writeText(emailText)
-      .then(() => alert("コピーしました"))
-      .catch(() => alert("コピー失敗"));
+      .then(() => toast.success("コピーしました"))
+      .catch(() => toast.error("コピー失敗"));
   };
 
   return (

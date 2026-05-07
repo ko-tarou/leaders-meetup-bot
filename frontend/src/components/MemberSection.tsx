@@ -1,10 +1,14 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { MeetingMember } from "../types";
+import { useToast } from "./ui/Toast";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 type Props = { meetingId: string };
 
 export function MemberSection({ meetingId }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [members, setMembers] = useState<MeetingMember[]>([]);
   const [slackUserId, setSlackUserId] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -46,27 +50,26 @@ export function MemberSection({ meetingId }: Props) {
   };
 
   const handleSyncChannel = async () => {
-    if (
-      !confirm(
+    const ok = await confirm({
+      message:
         "チャンネルの全メンバーを追加しますか？\n（既に登録されているメンバーはスキップされます）",
-      )
-    )
-      return;
+    });
+    if (!ok) return;
     setSyncing(true);
     try {
       const result = await api.syncChannelMembers(meetingId);
       if (result.ok) {
-        alert(
+        toast.success(
           `${result.added}人を追加しました（既に登録済み: ${result.skipped}人）`,
         );
         load();
       } else {
-        alert(
+        toast.error(
           `失敗しました: ${result.error ?? "不明なエラー"}\nBotがチャンネルに参加していることを確認してください。`,
         );
       }
     } catch (e) {
-      alert("エラーが発生しました");
+      toast.error("エラーが発生しました");
     }
     setSyncing(false);
   };
