@@ -5,6 +5,7 @@ import { MemberSection } from "./MemberSection";
 import { ScheduleSection } from "./ScheduleSection";
 import { HistorySection } from "./HistorySection";
 import { StatusIndicator } from "./StatusIndicator";
+import { colors } from "../styles/tokens";
 
 type Props = { meetingId: string; onBack: () => void };
 
@@ -33,7 +34,7 @@ export function MeetingDetail({ meetingId }: Props) {
   return (
     <div>
       <h2>{meeting.name}</h2>
-      <p style={{ color: "#666" }}>
+      <p style={{ color: colors.textSecondary }}>
         チャンネル: #{channelName || meeting.channelId}
       </p>
 
@@ -48,8 +49,8 @@ export function MeetingDetail({ meetingId }: Props) {
               padding: "8px 16px",
               border: "none",
               borderRadius: "4px 4px 0 0",
-              background: tab === t ? "#4A90D9" : "#eee",
-              color: tab === t ? "#fff" : "#333",
+              background: tab === t ? colors.primary : colors.border,
+              color: tab === t ? colors.textInverse : colors.text,
               cursor: "pointer",
             }}
           >

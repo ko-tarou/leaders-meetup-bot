@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { Meeting, Workspace } from "../types";
 import { ChannelSelector } from "./ChannelSelector";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 type Props = { onSelect: (id: string) => void };
 
@@ -146,7 +147,7 @@ export function MeetingList({ onSelect }: Props) {
                 >
                   {m.name}
                 </strong>
-                <span style={{ color: "#666", marginLeft: 8 }}>
+                <span style={{ color: colors.textSecondary, marginLeft: 8 }}>
                   #{channelNames[m.channelId] || m.channelId}
                 </span>
               </div>
@@ -170,33 +171,33 @@ export function MeetingList({ onSelect }: Props) {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 12,
 };
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
   flex: 1,
 };
 const selectStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
   minWidth: 160,
 };
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",
-  background: "#4A90D9",
-  color: "#fff",
+  background: colors.primary,
+  color: colors.textInverse,
   border: "none",
   borderRadius: 4,
   cursor: "pointer",
 };
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  background: "#E74C3C",
+  background: colors.danger,
 };
