@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { PRReview, PRReviewLgtm } from "../types";
+import type { PRReview } from "../types";
 import { api } from "../api";
 import { PRReviewCard, type PRReviewWithLgtm } from "./pr-review/PRReviewCard";
 import { PRReviewForm } from "./pr-review/PRReviewForm";
@@ -60,7 +60,7 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
             ...r,
             lgtmCount: (await api.prReviews.lgtms
               .list(r.id)
-              .catch(() => [] as PRReviewLgtm[])).length,
+              .catch(() => [])).length,
           })),
         );
         if (cancelled) return;
