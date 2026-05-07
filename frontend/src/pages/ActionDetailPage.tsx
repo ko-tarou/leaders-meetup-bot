@@ -11,8 +11,9 @@ import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
-import { MeetingDetail } from "../components/MeetingDetail";
-import { CreateMeetingForm } from "../components/CreateMeetingForm";
+import { ScheduleSection } from "../components/ScheduleSection";
+import { SchedulePollingMainTab } from "../components/schedule/SchedulePollingMainTab";
+import { ScheduleChannelTab } from "../components/schedule/ScheduleChannelTab";
 import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import {
   AttendanceCheckForm,
@@ -20,7 +21,6 @@ import {
 } from "../components/AttendanceCheckForm";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
-import { Button } from "../components/ui/Button";
 import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: アクション専用ページ。
@@ -64,6 +64,17 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
   if (actionType === "weekly_reminder") {
     return [];
   }
+  // Sprint 005-tabs: schedule_polling は MeetingDetail の二重タブを解消し、
+  // ActionDetailPage 直下の 5 sub-tab に再設計
+  if (actionType === "schedule_polling") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "channel", label: "チャンネル設定" },
+      { id: "candidates", label: "候補設定" },
+      { id: "reminders", label: "リマインド設定" },
+      { id: "manual", label: "手動アクション" },
+    ];
+  }
   return [
     { id: "main", label: "メイン" },
     { id: "settings", label: "設定" },
@@ -83,6 +94,14 @@ export function ActionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [subTab, setSubTab] = useState<string>("main");
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Sprint 005-tabs: actionType が切り替わったら subTab を必ず "main" に戻す。
+  // schedule_polling は他 actionType と subTab の id 体系が異なるため、
+  // 残留した古い subTab id（例: "settings"）でフォールスルーすると
+  // 何も表示されないバグになる。
+  useEffect(() => {
+    setSubTab("main");
+  }, [actionType]);
 
   useEffect(() => {
     if (!eventId || !actionType) return;
@@ -281,13 +300,21 @@ export function ActionDetailPage() {
         </div>
       )}
 
-      {actionType !== "weekly_reminder" && subTab === "main" && (
-        <ActionMainContent
-          eventId={eventId}
-          actionType={actionType as EventActionType}
-          action={action}
-        />
+      {/* Sprint 005-tabs: schedule_polling は専用の dispatcher を持つ
+          （5 sub-tab すべてで meetings 取得 + selectedId 共有が必要なため） */}
+      {actionType === "schedule_polling" && (
+        <SchedulePollingArea eventId={eventId} subTab={subTab} />
       )}
+
+      {actionType !== "weekly_reminder" &&
+        actionType !== "schedule_polling" &&
+        subTab === "main" && (
+          <ActionMainContent
+            eventId={eventId}
+            actionType={actionType as EventActionType}
+            action={action}
+          />
+        )}
       {subTab === "channels" && hasChannelsTab(actionType as EventActionType) && (
         <ChannelManagementSection
           eventId={eventId}
@@ -308,13 +335,45 @@ export function ActionDetailPage() {
           onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
-      {actionType !== "weekly_reminder" && subTab === "settings" && (
-        <div>
-          <ActionSettingsContent
-            eventId={eventId}
-            action={action}
-            onSaved={() => setRefreshKey((k) => k + 1)}
-          />
+      {actionType !== "weekly_reminder" &&
+        actionType !== "schedule_polling" &&
+        subTab === "settings" && (
+          <div>
+            <ActionSettingsContent
+              eventId={eventId}
+              action={action}
+              onSaved={() => setRefreshKey((k) => k + 1)}
+            />
+            <hr
+              style={{
+                margin: "2rem 0 1rem",
+                border: "none",
+                borderTop: `1px solid ${colors.border}`,
+              }}
+            />
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button onClick={handleToggle} style={secondaryBtnStyle}>
+                {action.enabled === 1 ? "無効化" : "有効化"}
+              </button>
+              <button
+                onClick={handleDelete}
+                style={{
+                  ...secondaryBtnStyle,
+                  background: colors.danger,
+                  color: colors.textInverse,
+                  borderColor: colors.danger,
+                }}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+        )}
+
+      {/* Sprint 005-tabs: schedule_polling 用の Toggle/Delete 操作は
+          MeetingDetail の二重タブ廃止に伴い「メイン」タブの末尾に集約 */}
+      {actionType === "schedule_polling" && subTab === "main" && (
+        <>
           <hr
             style={{
               margin: "2rem 0 1rem",
@@ -338,7 +397,7 @@ export function ActionDetailPage() {
               削除
             </button>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -361,7 +420,9 @@ function ActionMainContent({
     case "member_application":
       return <MemberApplicationListTab eventId={eventId} action={action} />;
     case "schedule_polling":
-      return <SchedulePollingMain eventId={eventId} />;
+      // Sprint 005-tabs: schedule_polling は ActionDetailPage 直下の
+      // SchedulePollingArea に置き換わったため、ここでは render しない
+      return null;
     case "member_welcome":
       return (
         <PlaceholderContent label="新メンバー対応に状態画面はありません。「設定」タブで動作を構成してください。" />
@@ -401,9 +462,10 @@ function ActionSettingsContent({
         <PlaceholderContent label="将来の追加設定がここに表示されます。チャンネル管理は「チャンネル管理」タブから行ってください。" />
       );
     case "schedule_polling":
-      return (
-        <PlaceholderContent label="このアクションには専用設定がまだありません" />
-      );
+      // Sprint 005-tabs: schedule_polling は「設定」タブを廃止し、
+      // 5 sub-tab 構造（メイン / チャンネル設定 / 候補設定 / リマインド設定 / 手動アクション）
+      // に再設計された。この分岐には到達しないが、念のためフォールバックを残す。
+      return null;
     case "attendance_check":
       return (
         <AttendanceCheckForm
@@ -417,21 +479,29 @@ function ActionSettingsContent({
   }
 }
 
-// schedule_polling のメイン画面。
-// eventId に紐づく meetings を取得し、
-//   0件 → 「+ ミーティング作成」ボタン + /meetup 案内
-//   1件 → そのまま MeetingDetail を埋め込み
-//   N件 → 「+ ミーティング作成」ボタン + 一覧 → 選択で MeetingDetail
-// を出し分ける。MeetingDetail は自身でロード・サブタブまで描画する。
+// Sprint 005-tabs: schedule_polling 用の dispatcher。
+// 5 sub-tab すべてで「meetings 取得 + selectedId 管理」を共有するため
+// ActionDetailPage の subTab を受け取り、各 sub-tab に振り分ける。
 //
-// 作成フロー:
-//   showCreate=true の間は CreateMeetingForm を描画し、
-//   作成完了で refreshKey を進めて meetings を再 fetch、新 meeting を選択状態に。
-function SchedulePollingMain({ eventId }: { eventId: string }) {
+// sub-tab の内訳:
+//   - main       : SchedulePollingMainTab（状態カード + 履歴 + メンバー + 作成 UI）
+//   - channel    : ScheduleChannelTab（workspace + channel 編集）
+//   - candidates : ScheduleSection (panels=["config"])
+//   - reminders  : ScheduleSection (panels=["reminders"])
+//   - manual     : ScheduleSection (panels=["instant"])
+//
+// meetings 0 件のときは main 以外のタブで「まずミーティングを作成 / 選択してください」
+// プレースホルダを表示する。複数 meeting で未選択のときも同様。
+function SchedulePollingArea({
+  eventId,
+  subTab,
+}: {
+  eventId: string;
+  subTab: string;
+}) {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [error, setError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -453,12 +523,6 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
     };
   }, [eventId, refreshKey]);
 
-  const handleCreated = (newMeetingId: string) => {
-    setShowCreate(false);
-    setSelectedId(newMeetingId);
-    setRefreshKey((k) => k + 1);
-  };
-
   if (error) {
     return (
       <PlaceholderContent label="ミーティング情報の取得に失敗しました。再読み込みしてください。" />
@@ -468,88 +532,47 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
     return <PlaceholderContent label="読み込み中..." />;
   }
 
-  // 作成中はフォームを最優先で表示（他の状態をマスク）
-  if (showCreate) {
+  // 1 件のみのときは自動選択（main 以外のタブでも対象 meeting が定まるように）
+  const effectiveSelectedId =
+    selectedId ?? (meetings.length === 1 ? meetings[0].id : null);
+
+  if (subTab === "main") {
     return (
-      <CreateMeetingForm
+      <SchedulePollingMainTab
         eventId={eventId}
-        onCancel={() => setShowCreate(false)}
-        onCreated={handleCreated}
+        meetings={meetings}
+        selectedId={effectiveSelectedId}
+        onSelect={setSelectedId}
+        onRefresh={() => setRefreshKey((k) => k + 1)}
       />
     );
   }
 
-  if (meetings.length === 0) {
+  // main 以外のタブは meeting が定まらないと表示できない
+  if (!effectiveSelectedId) {
     return (
-      <div
-        style={{
-          padding: "2rem",
-          textAlign: "center",
-          color: colors.textSecondary,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "0.75rem",
-        }}
-      >
-        <div>このイベントにはミーティングがまだ登録されていません。</div>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>
-          + ミーティング作成
-        </Button>
-        <div style={{ fontSize: "0.75rem", color: colors.textMuted }}>
-          または Slack で <code>/meetup</code> コマンドから作成できます
-        </div>
-      </div>
+      <PlaceholderContent label="まず「メイン」タブでミーティングを作成または選択してください" />
     );
   }
-  // 1件の場合は MeetingDetail を直接埋め込み（既存挙動を維持）。
-  // 追加作成は「設定」タブからの誘導 or 0件画面に戻る経路がないため、
-  // ここでは UI を増やさない（既存ユーザー体験を変えない方針）。
-  if (meetings.length === 1) {
-    return <MeetingDetail meetingId={meetings[0].id} onBack={() => {}} />;
+
+  switch (subTab) {
+    case "channel":
+      return <ScheduleChannelTab meetingId={effectiveSelectedId} />;
+    case "candidates":
+      return (
+        <ScheduleSection meetingId={effectiveSelectedId} panels={["config"]} />
+      );
+    case "reminders":
+      return (
+        <ScheduleSection meetingId={effectiveSelectedId} panels={["reminders"]} />
+      );
+    case "manual":
+      return (
+        <ScheduleSection meetingId={effectiveSelectedId} panels={["instant"]} />
+      );
+    default:
+      return null;
   }
-  if (selectedId) {
-    return (
-      <div>
-        <button
-          onClick={() => setSelectedId(null)}
-          style={{
-            background: "none",
-            border: "none",
-            color: colors.primary,
-            cursor: "pointer",
-            padding: 0,
-            marginBottom: "0.75rem",
-            fontSize: "0.875rem",
-          }}
-        >
-          ← ミーティング一覧に戻る
-        </button>
-        <MeetingDetail meetingId={selectedId} onBack={() => setSelectedId(null)} />
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-      <div style={{ marginBottom: "0.25rem" }}>
-        <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-          + ミーティング作成
-        </Button>
-      </div>
-      {meetings.map((m) => (
-        <button
-          key={m.id}
-          onClick={() => setSelectedId(m.id)}
-          style={meetingCardStyle}
-        >
-          <div style={{ fontWeight: 600 }}>{m.name}</div>
-          <div style={{ fontSize: "0.75rem", color: colors.textSecondary }}>
-            #{m.channelId}
-          </div>
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function PlaceholderContent({ label }: { label: string }) {
@@ -584,14 +607,5 @@ const secondaryBtnStyle: React.CSSProperties = {
   border: `1px solid ${colors.borderStrong}`,
   background: colors.background,
   borderRadius: "0.25rem",
-  cursor: "pointer",
-};
-
-const meetingCardStyle: React.CSSProperties = {
-  textAlign: "left",
-  padding: "0.75rem 1rem",
-  border: `1px solid ${colors.border}`,
-  background: colors.background,
-  borderRadius: "0.375rem",
   cursor: "pointer",
 };
