@@ -4,6 +4,7 @@ import type { Workspace } from "../types";
 import { api } from "../api";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
@@ -71,7 +72,7 @@ export function WorkspacesPage() {
   if (loading) return <div style={{ padding: "1rem" }}>読み込み中...</div>;
   if (error)
     return (
-      <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {error}</div>
+      <div style={{ padding: "1rem", color: colors.danger }}>エラー: {error}</div>
     );
 
   return (
@@ -91,8 +92,8 @@ export function WorkspacesPage() {
           href="/slack/oauth/install"
           style={{
             marginLeft: "auto",
-            background: "#4A154B", // Slack purple
-            color: "white",
+            background: "#4A154B", // Slack brand purple — keep as-is
+            color: colors.textInverse,
             padding: "0.5rem 1rem",
             borderRadius: "0.375rem",
             textDecoration: "none",
@@ -108,8 +109,8 @@ export function WorkspacesPage() {
         <div
           role="status"
           style={{
-            background: "#10b981",
-            color: "white",
+            background: colors.success,
+            color: colors.textInverse,
             padding: "0.75rem",
             borderRadius: "0.375rem",
             marginBottom: "1rem",
@@ -120,7 +121,7 @@ export function WorkspacesPage() {
       )}
 
       {workspaces.length === 0 && (
-        <div style={{ color: "#6b7280" }}>
+        <div style={{ color: colors.textSecondary }}>
           ワークスペースが登録されていません。「+ Slack でインストール」から追加してください。
         </div>
       )}
@@ -129,7 +130,7 @@ export function WorkspacesPage() {
         <div
           key={ws.id}
           style={{
-            border: "1px solid #e5e7eb",
+            border: `1px solid ${colors.border}`,
             borderRadius: "0.375rem",
             padding: "0.75rem",
             marginBottom: "0.5rem",
@@ -139,13 +140,13 @@ export function WorkspacesPage() {
         >
           <div style={{ flex: 1 }}>
             <strong>{ws.name}</strong>
-            <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+            <div style={{ fontSize: "0.75rem", color: colors.textSecondary }}>
               team_id: {ws.slackTeamId} / 登録日: {ws.createdAt.slice(0, 10)}
             </div>
           </div>
           <button
             onClick={() => handleDelete(ws)}
-            style={{ background: "#dc2626", color: "white" }}
+            style={{ background: colors.danger, color: colors.textInverse }}
             disabled={ws.id === "ws_default"}
             title={
               ws.id === "ws_default"
@@ -163,15 +164,15 @@ export function WorkspacesPage() {
         style={{
           marginTop: "2rem",
           paddingTop: "1rem",
-          borderTop: "1px solid #e5e7eb",
+          borderTop: `1px solid ${colors.border}`,
         }}
       >
         <button
           onClick={() => setShowManualForm(true)}
           style={{
             background: "transparent",
-            color: "#6b7280",
-            border: "1px solid #d1d5db",
+            color: colors.textSecondary,
+            border: `1px solid ${colors.borderStrong}`,
             padding: "0.375rem 0.75rem",
             borderRadius: "0.25rem",
             fontSize: "0.875rem",
@@ -182,7 +183,7 @@ export function WorkspacesPage() {
         <p
           style={{
             fontSize: "0.75rem",
-            color: "#9ca3af",
+            color: colors.textMuted,
             marginTop: "0.5rem",
           }}
         >
@@ -261,13 +262,13 @@ function WorkspaceCreateForm({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ marginTop: 0 }}>ワークスペース手動登録</h3>
-        <p style={{ fontSize: "0.8rem", color: "#6b7280", marginTop: 0 }}>
+        <p style={{ fontSize: "0.8rem", color: colors.textSecondary, marginTop: 0 }}>
           通常は OAuth フロー（「Slack でインストール」ボタン）を使用してください。
           既存 App の Bot Token / Signing Secret を直接登録する場合のみこちらを利用します。
         </p>
 
         {error && (
-          <div style={{ color: "#dc2626", marginBottom: "0.5rem" }}>
+          <div style={{ color: colors.danger, marginBottom: "0.5rem" }}>
             {error}
           </div>
         )}
@@ -307,7 +308,7 @@ function WorkspaceCreateForm({
         <div
           style={{
             fontSize: "0.75rem",
-            color: "#6b7280",
+            color: colors.textSecondary,
             marginBottom: "1rem",
           }}
         >
@@ -330,7 +331,7 @@ function WorkspaceCreateForm({
             disabled={
               submitting || !botToken.trim() || !signingSecret.trim()
             }
-            style={{ background: "#2563eb", color: "white" }}
+            style={{ background: colors.primary, color: colors.textInverse }}
           >
             {submitting ? "登録中..." : "登録"}
           </button>

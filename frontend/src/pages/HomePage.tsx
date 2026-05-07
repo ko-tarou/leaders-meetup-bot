@@ -1,6 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { EmptyEventState } from "../components/EmptyEventState";
+import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: アクション中心 UX。
 // "/" のランディング: 現在 event があればそのアクション一覧へ、無ければ events[0]、
@@ -10,7 +11,7 @@ export function HomePage() {
 
   if (loading) {
     return (
-      <div style={{ textAlign: "center", padding: "2rem", color: "#999" }}>
+      <div style={{ textAlign: "center", padding: "2rem", color: colors.textMuted }}>
         読み込み中...
       </div>
     );
@@ -24,14 +25,14 @@ export function HomePage() {
           maxWidth: 560,
           margin: "3rem auto",
           padding: "1.25rem 1.5rem",
-          background: "#fff8e1",
-          border: "1px solid #f0c36d",
+          background: colors.warningSubtle,
+          border: `1px solid ${colors.warning}`,
           borderRadius: 6,
-          color: "#5a4500",
+          color: colors.text,
           lineHeight: 1.6,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 18, color: "#8a5a00" }}>
+        <h2 style={{ margin: 0, fontSize: 18, color: colors.text }}>
           イベント一覧を取得できませんでした
         </h2>
         <p style={{ marginTop: 8, marginBottom: 12 }}>{fetchError}</p>
@@ -43,8 +44,8 @@ export function HomePage() {
             borderRadius: 4,
             cursor: "pointer",
             fontSize: 14,
-            background: "#4A90D9",
-            color: "#fff",
+            background: colors.primary,
+            color: colors.textInverse,
           }}
         >
           再読み込み
