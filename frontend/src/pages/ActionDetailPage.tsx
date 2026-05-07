@@ -12,6 +12,7 @@ import { ChannelManagementSection } from "../components/ChannelManagementSection
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
 import { MeetingDetail } from "../components/MeetingDetail";
+import { CreateMeetingForm } from "../components/CreateMeetingForm";
 import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import {
   AttendanceCheckForm,
@@ -19,6 +20,7 @@ import {
 } from "../components/AttendanceCheckForm";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { Button } from "../components/ui/Button";
 import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: アクション専用ページ。
@@ -417,14 +419,20 @@ function ActionSettingsContent({
 
 // schedule_polling のメイン画面。
 // eventId に紐づく meetings を取得し、
-//   0件 → /meetup コマンドへの誘導
+//   0件 → 「+ ミーティング作成」ボタン + /meetup 案内
 //   1件 → そのまま MeetingDetail を埋め込み
-//   N件 → 一覧 → 選択で MeetingDetail
+//   N件 → 「+ ミーティング作成」ボタン + 一覧 → 選択で MeetingDetail
 // を出し分ける。MeetingDetail は自身でロード・サブタブまで描画する。
+//
+// 作成フロー:
+//   showCreate=true の間は CreateMeetingForm を描画し、
+//   作成完了で refreshKey を進めて meetings を再 fetch、新 meeting を選択状態に。
 function SchedulePollingMain({ eventId }: { eventId: string }) {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [error, setError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -443,7 +451,13 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, refreshKey]);
+
+  const handleCreated = (newMeetingId: string) => {
+    setShowCreate(false);
+    setSelectedId(newMeetingId);
+    setRefreshKey((k) => k + 1);
+  };
 
   if (error) {
     return (
@@ -453,11 +467,44 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
   if (meetings === null) {
     return <PlaceholderContent label="読み込み中..." />;
   }
-  if (meetings.length === 0) {
+
+  // 作成中はフォームを最優先で表示（他の状態をマスク）
+  if (showCreate) {
     return (
-      <PlaceholderContent label="このイベントにはミーティングがまだ登録されていません。Slack で /meetup コマンドから作成してください。" />
+      <CreateMeetingForm
+        eventId={eventId}
+        onCancel={() => setShowCreate(false)}
+        onCreated={handleCreated}
+      />
     );
   }
+
+  if (meetings.length === 0) {
+    return (
+      <div
+        style={{
+          padding: "2rem",
+          textAlign: "center",
+          color: colors.textSecondary,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "0.75rem",
+        }}
+      >
+        <div>このイベントにはミーティングがまだ登録されていません。</div>
+        <Button variant="primary" onClick={() => setShowCreate(true)}>
+          + ミーティング作成
+        </Button>
+        <div style={{ fontSize: "0.75rem", color: colors.textMuted }}>
+          または Slack で <code>/meetup</code> コマンドから作成できます
+        </div>
+      </div>
+    );
+  }
+  // 1件の場合は MeetingDetail を直接埋め込み（既存挙動を維持）。
+  // 追加作成は「設定」タブからの誘導 or 0件画面に戻る経路がないため、
+  // ここでは UI を増やさない（既存ユーザー体験を変えない方針）。
   if (meetings.length === 1) {
     return <MeetingDetail meetingId={meetings[0].id} onBack={() => {}} />;
   }
@@ -484,6 +531,11 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div style={{ marginBottom: "0.25rem" }}>
+        <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+          + ミーティング作成
+        </Button>
+      </div>
       {meetings.map((m) => (
         <button
           key={m.id}
