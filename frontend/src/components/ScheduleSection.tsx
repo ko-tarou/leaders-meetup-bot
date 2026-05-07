@@ -11,7 +11,20 @@ import { InstantSendPanel } from "./schedule/InstantSendPanel";
 import { useToast } from "./ui/Toast";
 import { colors } from "../styles/tokens";
 
-type Props = { meetingId: string; onChange?: () => void };
+// Sprint 005-tabs: schedule_polling を 5 sub-tab に再編する際の panel 切替。
+//   - "config"   : AutoScheduleConfigPanel + AutoRespondSection（候補設定タブ）
+//   - "reminders": RemindersPanel（リマインド設定タブ）
+//   - "instant"  : InstantSendPanel + 締切ボタン（手動アクションタブ）
+// panels を省略すると従来挙動（全 panel を 1 ページに表示）になる。
+// 保存ボタンは "config" / "reminders" のいずれかが含まれる場合のみ表示し、
+// 保存対象は常に backend 側の AutoSchedule 全体（部分保存ではない）。
+type SchedulePanel = "config" | "reminders" | "instant";
+
+type Props = {
+  meetingId: string;
+  onChange?: () => void;
+  panels?: SchedulePanel[];
+};
 
 const DEFAULT_REMINDERS: ReminderItem[] = [
   { trigger: { type: "before_event", daysBefore: 3 }, time: "09:00", message: "" },
@@ -30,7 +43,15 @@ const INITIAL_CONFIG: AutoScheduleConfig = {
   messageTemplate: "",
 };
 
-export function ScheduleSection({ meetingId, onChange }: Props) {
+const ALL_PANELS: SchedulePanel[] = ["config", "reminders", "instant"];
+
+export function ScheduleSection({ meetingId, onChange, panels }: Props) {
+  const visible = panels ?? ALL_PANELS;
+  const showConfig = visible.includes("config");
+  const showReminders = visible.includes("reminders");
+  const showInstant = visible.includes("instant");
+  // 保存対象を含む panel が表示されているときだけ「設定を保存」ボタンを出す
+  const showSave = showConfig || showReminders;
   const toast = useToast();
   const [schedule, setSchedule] = useState<AutoSchedule | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,70 +170,87 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
 
   if (loading) return <p>読み込み中...</p>;
 
+  // config と instant の両方を表示するときだけ区切り線を出す（旧挙動互換）
+  const showDivider = showInstant && (showConfig || showReminders);
+
   return (
     <div>
-      <AutoScheduleConfigPanel
-        meetingId={meetingId}
-        value={config}
-        onChange={setConfig}
-      />
+      {showConfig && (
+        <>
+          <AutoScheduleConfigPanel
+            meetingId={meetingId}
+            value={config}
+            onChange={setConfig}
+          />
 
-      <AutoRespondSection
-        meetingId={meetingId}
-        enabled={autoRespondEnabled}
-        template={autoRespondTemplate}
-        onEnabledChange={setAutoRespondEnabled}
-        onTemplateChange={setAutoRespondTemplate}
-      />
+          <AutoRespondSection
+            meetingId={meetingId}
+            enabled={autoRespondEnabled}
+            template={autoRespondTemplate}
+            onEnabledChange={setAutoRespondEnabled}
+            onTemplateChange={setAutoRespondTemplate}
+          />
+        </>
+      )}
 
-      <RemindersPanel
-        meetingId={meetingId}
-        value={reminders}
-        onChange={setReminders}
-      />
+      {showReminders && (
+        <RemindersPanel
+          meetingId={meetingId}
+          value={reminders}
+          onChange={setReminders}
+        />
+      )}
 
-      {/* 保存ボタン */}
-      <div style={{ marginBottom: 24 }}>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            padding: "10px 24px",
-            background: colors.primary,
-            color: colors.textInverse,
-            border: "none",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontSize: 14,
-            fontWeight: 600,
-          }}
-        >
-          {saving ? "保存中..." : "設定を保存"}
-        </button>
-      </div>
+      {/* 保存ボタン: config / reminders のいずれかが表示されているときのみ */}
+      {showSave && (
+        <div style={{ marginBottom: 24 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: "10px 24px",
+              background: colors.primary,
+              color: colors.textInverse,
+              border: "none",
+              borderRadius: 4,
+              cursor: "pointer",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            {saving ? "保存中..." : "設定を保存"}
+          </button>
+        </div>
+      )}
 
-      <hr
-        style={{ margin: "24px 0", border: "none", borderTop: `1px solid ${colors.border}` }}
-      />
+      {showDivider && (
+        <hr
+          style={{ margin: "24px 0", border: "none", borderTop: `1px solid ${colors.border}` }}
+        />
+      )}
 
-      {/* 手動アクション */}
-      <h3>手動アクション</h3>
-      <InstantSendPanel
-        meetingId={meetingId}
-        weekday={config.weekday}
-        weeks={config.weeks}
-        monthOffset={config.monthOffset}
-        messageTemplate={config.messageTemplate}
-        hasOpenPoll={hasOpenPoll}
-        onAfterSend={async () => {
-          await load();
-          onChange?.();
-        }}
-        onAfterClose={async () => {
-          await load();
-          onChange?.();
-        }}
-      />
+      {showInstant && (
+        <>
+          {/* 手動アクション */}
+          <h3>手動アクション</h3>
+          <InstantSendPanel
+            meetingId={meetingId}
+            weekday={config.weekday}
+            weeks={config.weeks}
+            monthOffset={config.monthOffset}
+            messageTemplate={config.messageTemplate}
+            hasOpenPoll={hasOpenPoll}
+            onAfterSend={async () => {
+              await load();
+              onChange?.();
+            }}
+            onAfterClose={async () => {
+              await load();
+              onChange?.();
+            }}
+          />
+        </>
+      )}
     </div>
   );
 }
