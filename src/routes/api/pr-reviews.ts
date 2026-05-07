@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, type SQL } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   events,
@@ -14,17 +14,62 @@ export const prReviewsRouter = new Hono<{ Bindings: Env }>();
 // --- PR Reviews (ADR-0008 pr_review_list) ---
 // タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加していく。
 
+// 005-16: N+1 解消。フィルタを SQL 寄せ + lgtms / reviewers を batch SELECT で埋め込む。
+// 旧実装は status をメモリで filter し、各 review ごとに lgtms/reviewers を
+// FE 側で個別 fetch していた。
 prReviewsRouter.get("/orgs/:eventId/pr-reviews", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   const status = c.req.query("status");
 
-  let rows = await db.select().from(prReviews).where(eq(prReviews.eventId, eventId)).all();
-  if (status) rows = rows.filter((r) => r.status === status);
+  const conditions: SQL[] = [eq(prReviews.eventId, eventId)];
+  if (status) conditions.push(eq(prReviews.status, status));
 
-  // updatedAt 降順
+  const rows = await db
+    .select()
+    .from(prReviews)
+    .where(and(...conditions))
+    .all();
+
+  // updatedAt 降順（既存挙動維持）
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return c.json(rows);
+
+  if (rows.length === 0) return c.json([]);
+
+  // lgtms / reviewers を 1 クエリずつで batch 取得 → review ごとにグルーピング
+  const reviewIds = rows.map((r) => r.id);
+  const [allLgtms, allReviewers] = await Promise.all([
+    db
+      .select()
+      .from(prReviewLgtms)
+      .where(inArray(prReviewLgtms.reviewId, reviewIds))
+      .all(),
+    db
+      .select()
+      .from(prReviewReviewers)
+      .where(inArray(prReviewReviewers.reviewId, reviewIds))
+      .all(),
+  ]);
+
+  const lgtmsByReviewId = new Map<string, typeof allLgtms>();
+  for (const l of allLgtms) {
+    const list = lgtmsByReviewId.get(l.reviewId);
+    if (list) list.push(l);
+    else lgtmsByReviewId.set(l.reviewId, [l]);
+  }
+  const reviewersByReviewId = new Map<string, typeof allReviewers>();
+  for (const r of allReviewers) {
+    const list = reviewersByReviewId.get(r.reviewId);
+    if (list) list.push(r);
+    else reviewersByReviewId.set(r.reviewId, [r]);
+  }
+
+  const result = rows.map((r) => ({
+    ...r,
+    lgtms: lgtmsByReviewId.get(r.id) ?? [],
+    reviewers: reviewersByReviewId.get(r.id) ?? [],
+  }));
+  return c.json(result);
 });
 
 prReviewsRouter.get("/pr-reviews/:id", async (c) => {

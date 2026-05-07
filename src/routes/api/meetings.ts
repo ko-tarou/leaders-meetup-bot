@@ -125,16 +125,29 @@ meetingsRouter.get("/meetings/:id/status", async (c) => {
       .from(pollOptions)
       .where(eq(pollOptions.pollId, latest.id))
       .all();
-    let maxVotes = 0;
-    for (const opt of options) {
-      const votes = await db
+    // 005-16: 旧実装は option ごとに votes を fetch していた（N+1）。
+    // option_id IN (...) で 1 クエリにまとめ、メモリで集計する。
+    if (options.length > 0) {
+      const optionIds = options.map((o) => o.id);
+      const allVotes = await db
         .select()
         .from(pollVotes)
-        .where(eq(pollVotes.pollOptionId, opt.id))
+        .where(inArray(pollVotes.pollOptionId, optionIds))
         .all();
-      if (votes.length > maxVotes) {
-        maxVotes = votes.length;
-        winnerDate = opt.date;
+      const voteCountByOptionId = new Map<string, number>();
+      for (const v of allVotes) {
+        voteCountByOptionId.set(
+          v.pollOptionId,
+          (voteCountByOptionId.get(v.pollOptionId) ?? 0) + 1,
+        );
+      }
+      let maxVotes = 0;
+      for (const opt of options) {
+        const count = voteCountByOptionId.get(opt.id) ?? 0;
+        if (count > maxVotes) {
+          maxVotes = count;
+          winnerDate = opt.date;
+        }
       }
     }
   }
@@ -716,23 +729,52 @@ meetingsRouter.delete("/meetings/:meetingId/responders/:responderId", async (c) 
 
 // --- Polls ---
 
+// 005-16: N+1 解消。旧実装は polls → options → votes を per-row で fetch していた
+// （poll N 件 × options M 件 × votes クエリで合計 1 + N + N*M クエリ）。
+// 新実装は options を pollId IN (...)、votes を pollOptionId IN (...) の
+// batch SELECT で取得し、メモリ上で構造化する（合計 3 クエリで完結）。
 meetingsRouter.get("/meetings/:meetingId/polls", async (c) => {
   const db = drizzle(c.env.DB);
   const meetingId = c.req.param("meetingId");
   const pollList = await db.select().from(polls).where(eq(polls.meetingId, meetingId)).all();
 
-  const result = await Promise.all(
-    pollList.map(async (poll) => {
-      const options = await db.select().from(pollOptions).where(eq(pollOptions.pollId, poll.id)).all();
-      const optionsWithVotes = await Promise.all(
-        options.map(async (opt) => {
-          const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollOptionId, opt.id)).all();
-          return { ...opt, votes };
-        })
-      );
-      return { ...poll, options: optionsWithVotes };
-    })
-  );
+  if (pollList.length === 0) return c.json([]);
+
+  const pollIds = pollList.map((p) => p.id);
+  const allOptions = await db
+    .select()
+    .from(pollOptions)
+    .where(inArray(pollOptions.pollId, pollIds))
+    .all();
+
+  let allVotes: typeof pollVotes.$inferSelect[] = [];
+  if (allOptions.length > 0) {
+    const optionIds = allOptions.map((o) => o.id);
+    allVotes = await db
+      .select()
+      .from(pollVotes)
+      .where(inArray(pollVotes.pollOptionId, optionIds))
+      .all();
+  }
+
+  const votesByOptionId = new Map<string, typeof allVotes>();
+  for (const v of allVotes) {
+    const list = votesByOptionId.get(v.pollOptionId);
+    if (list) list.push(v);
+    else votesByOptionId.set(v.pollOptionId, [v]);
+  }
+  const optionsByPollId = new Map<string, Array<typeof allOptions[number] & { votes: typeof allVotes }>>();
+  for (const opt of allOptions) {
+    const enriched = { ...opt, votes: votesByOptionId.get(opt.id) ?? [] };
+    const list = optionsByPollId.get(opt.pollId);
+    if (list) list.push(enriched);
+    else optionsByPollId.set(opt.pollId, [enriched]);
+  }
+
+  const result = pollList.map((poll) => ({
+    ...poll,
+    options: optionsByPollId.get(poll.id) ?? [],
+  }));
   return c.json(result);
 });
 
@@ -817,6 +859,7 @@ meetingsRouter.delete("/polls/:pollId", async (c) => {
   return c.json({ ok: true });
 });
 
+// 005-16: N+1 解消。options 配下の votes を batch SELECT で取得。
 meetingsRouter.get("/polls/:pollId", async (c) => {
   const db = drizzle(c.env.DB);
   const pollId = c.req.param("pollId");
@@ -824,12 +867,26 @@ meetingsRouter.get("/polls/:pollId", async (c) => {
   if (!poll) return c.json({ error: "Not found" }, 404);
 
   const options = await db.select().from(pollOptions).where(eq(pollOptions.pollId, pollId)).all();
-  const optionsWithVotes = await Promise.all(
-    options.map(async (opt) => {
-      const votes = await db.select().from(pollVotes).where(eq(pollVotes.pollOptionId, opt.id)).all();
-      return { ...opt, votes };
-    })
-  );
+
+  let allVotes: typeof pollVotes.$inferSelect[] = [];
+  if (options.length > 0) {
+    const optionIds = options.map((o) => o.id);
+    allVotes = await db
+      .select()
+      .from(pollVotes)
+      .where(inArray(pollVotes.pollOptionId, optionIds))
+      .all();
+  }
+  const votesByOptionId = new Map<string, typeof allVotes>();
+  for (const v of allVotes) {
+    const list = votesByOptionId.get(v.pollOptionId);
+    if (list) list.push(v);
+    else votesByOptionId.set(v.pollOptionId, [v]);
+  }
+  const optionsWithVotes = options.map((opt) => ({
+    ...opt,
+    votes: votesByOptionId.get(opt.id) ?? [],
+  }));
   return c.json({ ...poll, options: optionsWithVotes });
 });
 

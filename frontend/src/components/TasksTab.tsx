@@ -52,13 +52,13 @@ export function TasksTab({ eventId }: { eventId: string }) {
         };
         // 親タスクのみ表示は backend 側で parentTaskId="null" で絞り込む
         if (debouncedFilters.parentOnly) apiFilters.parentTaskId = "null";
+        // 005-16: GET /api/tasks のレスポンスに assignees が埋め込まれている。
+        // 旧実装は task ごとに個別 fetch していた（N+1）。
         const taskList = await api.tasks.list(eventId, apiFilters);
-        const withAssignees = await Promise.all(
-          taskList.map(async (t) => ({
-            ...t,
-            assignees: await api.tasks.assignees.list(t.id).catch(() => []),
-          })),
-        );
+        const withAssignees: TaskWithAssignees[] = taskList.map((t) => ({
+          ...t,
+          assignees: t.assignees ?? [],
+        }));
         if (!cancelled) {
           setTasks(withAssignees);
           setLoading(false);

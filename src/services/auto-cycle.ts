@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, like } from "drizzle-orm";
+import { eq, and, like, inArray } from "drizzle-orm";
 import { autoSchedules, meetings, polls, pollOptions, pollVotes } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createPoll, closePoll } from "./poll";
@@ -199,15 +199,28 @@ async function scheduleRemindersForWinner(
 
   let maxVotes = 0;
   let winnerDate = "";
-  for (const opt of options) {
-    const votes = await d1
+  // 005-16: 旧実装は option ごとに votes を fetch していた（N+1）。
+  // option_id IN (...) で 1 クエリにまとめ、メモリで集計する。
+  if (options.length > 0) {
+    const optionIds = options.map((o) => o.id);
+    const allVotes = await d1
       .select()
       .from(pollVotes)
-      .where(eq(pollVotes.pollOptionId, opt.id))
+      .where(inArray(pollVotes.pollOptionId, optionIds))
       .all();
-    if (votes.length > maxVotes) {
-      maxVotes = votes.length;
-      winnerDate = opt.date;
+    const voteCountByOptionId = new Map<string, number>();
+    for (const v of allVotes) {
+      voteCountByOptionId.set(
+        v.pollOptionId,
+        (voteCountByOptionId.get(v.pollOptionId) ?? 0) + 1,
+      );
+    }
+    for (const opt of options) {
+      const count = voteCountByOptionId.get(opt.id) ?? 0;
+      if (count > maxVotes) {
+        maxVotes = count;
+        winnerDate = opt.date;
+      }
     }
   }
   if (!winnerDate) return;
