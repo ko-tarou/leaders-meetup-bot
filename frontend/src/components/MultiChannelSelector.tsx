@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../api";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR4: 複数チャンネル選択用 dropdown + chip コンポーネント。
 // ChannelSelector (単一) を拡張し、values: string[] を扱う。
@@ -55,7 +56,7 @@ export function MultiChannelSelector({
   };
 
   if (loading) {
-    return <span style={{ color: "#999" }}>チャンネル取得中...</span>;
+    return <span style={{ color: colors.textMuted }}>チャンネル取得中...</span>;
   }
 
   // bot 参加チャンネルが 0 件の場合は ChannelSelector と同じ警告を出す。
@@ -135,8 +136,8 @@ const s: Record<string, CSSProperties> = {
     display: "inline-flex",
     alignItems: "center",
     gap: "0.25rem",
-    background: "#e5e7eb",
-    color: "#374151",
+    background: colors.border,
+    color: colors.text,
     fontSize: "0.75rem",
     padding: "0.125rem 0.5rem",
     borderRadius: "9999px",
@@ -145,21 +146,21 @@ const s: Record<string, CSSProperties> = {
     background: "transparent",
     border: "none",
     cursor: "pointer",
-    color: "#6b7280",
+    color: colors.textSecondary,
     padding: 0,
     fontSize: "0.875rem",
     lineHeight: 1,
   },
   select: {
     padding: "8px 12px",
-    border: "1px solid #ddd",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: 4,
     minWidth: 200,
   },
   warn: {
     padding: 8,
-    background: "#FFF3CD",
-    border: "1px solid #FFE69C",
+    background: colors.warningSubtle,
+    border: `1px solid ${colors.warning}`,
     borderRadius: 4,
     fontSize: 13,
   },

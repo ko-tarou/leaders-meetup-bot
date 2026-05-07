@@ -1,4 +1,5 @@
 import type { Trigger } from "../types";
+import { colors } from "../styles/tokens";
 
 type Props = {
   trigger: Trigger;
@@ -101,7 +102,7 @@ export function TriggerSelector({ trigger, onChange }: Props) {
             onChange={(e) => handleParamChange(Number(e.target.value))}
             style={{ ...inputStyle, width: 72 }}
           />
-          <span style={{ fontSize: 13, color: "#666" }}>{option.paramLabel}</span>
+          <span style={{ fontSize: 13, color: colors.textSecondary }}>{option.paramLabel}</span>
         </>
       )}
     </div>
@@ -110,6 +111,6 @@ export function TriggerSelector({ trigger, onChange }: Props) {
 
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
 };

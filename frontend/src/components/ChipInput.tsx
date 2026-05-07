@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from "react";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR3: 共通 chip 入力コンポーネント。
 // 入力 + 追加ボタン → チップ表示 → × で削除。重複や形式エラーは validateAdd で拒否できる。
@@ -89,22 +90,22 @@ const s: Record<string, CSSProperties> = {
   row: { display: "flex", flexWrap: "wrap", gap: "0.25rem", marginBottom: "0.5rem" },
   chip: {
     display: "inline-flex", alignItems: "center", gap: "0.25rem",
-    background: "#e5e7eb", color: "#374151", fontSize: "0.75rem",
+    background: colors.border, color: colors.text, fontSize: "0.75rem",
     padding: "0.125rem 0.5rem", borderRadius: "9999px",
   },
   x: {
     background: "transparent", border: "none", cursor: "pointer",
-    color: "#6b7280", padding: 0, fontSize: "0.875rem", lineHeight: 1,
+    color: colors.textSecondary, padding: 0, fontSize: "0.875rem", lineHeight: 1,
   },
   inputRow: { display: "flex", gap: "0.25rem" },
   input: {
-    flex: 1, padding: "0.5rem", border: "1px solid #d1d5db",
+    flex: 1, padding: "0.5rem", border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem", boxSizing: "border-box",
   },
   add: {
-    background: "#2563eb", color: "white", border: "none",
+    background: colors.primary, color: colors.textInverse, border: "none",
     padding: "0.25rem 0.75rem", borderRadius: "0.25rem",
     cursor: "pointer", fontSize: "0.875rem",
   },
-  err: { color: "#dc2626", fontSize: "0.75rem", marginTop: "0.25rem" },
+  err: { color: colors.danger, fontSize: "0.75rem", marginTop: "0.25rem" },
 };

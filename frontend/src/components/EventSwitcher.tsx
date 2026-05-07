@@ -1,16 +1,17 @@
 import { useNavigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
+import { colors } from "../styles/tokens";
 
 const labelStyle: React.CSSProperties = {
-  color: "#999",
+  color: colors.textMuted,
   fontSize: 13,
 };
 
 const selectStyle: React.CSSProperties = {
   padding: "6px 10px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
-  background: "#fff",
+  background: colors.background,
   fontSize: 14,
   minWidth: 220,
   cursor: "pointer",
