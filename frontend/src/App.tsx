@@ -1,6 +1,7 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
 import { EventSwitcher } from "./components/EventSwitcher";
-import { EventProvider } from "./contexts/EventContext";
+import { EventProvider, useEvents } from "./contexts/EventContext";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
@@ -30,69 +31,81 @@ export function App() {
 
   return (
     <EventProvider>
-      <div
+      <AppShell />
+    </EventProvider>
+  );
+}
+
+// 005-1: token 未設定 / 401 検出時は AdminTokenPrompt を最優先で表示する。
+// useEvents は EventProvider 配下でしか使えないので、子コンポーネントとして分離。
+function AppShell() {
+  const { tokenInvalid, fetchError } = useEvents();
+  if (tokenInvalid) {
+    return <AdminTokenPrompt message={fetchError ?? undefined} />;
+  }
+  return (
+    <div
+      style={{
+        maxWidth: 800,
+        margin: "0 auto",
+        padding: 20,
+        fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+      }}
+    >
+      <header
         style={{
-          maxWidth: 800,
-          margin: "0 auto",
-          padding: 20,
-          fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+          marginBottom: 24,
+          borderBottom: "1px solid #eee",
+          paddingBottom: 12,
         }}
       >
-        <header
+        <div
           style={{
-            marginBottom: 24,
-            borderBottom: "1px solid #eee",
-            paddingBottom: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
           }}
         >
+          <Link to="/" style={titleLinkStyle}>
+            <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
+          </Link>
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
               gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <Link to="/" style={titleLinkStyle}>
-              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
+            <EventSwitcher />
+            <Link to="/workspaces" style={workspacesLinkStyle}>
+              Workspace管理
             </Link>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <EventSwitcher />
-              <Link to="/workspaces" style={workspacesLinkStyle}>
-                Workspace管理
-              </Link>
-            </div>
           </div>
-          <BackLink />
-        </header>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/events/:eventId" element={<EventIndexRedirect />} />
-          {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
-              より具体的なルートを上に置いてマッチを優先させる。 */}
-          <Route
-            path="/events/:eventId/actions/weekly_reminder/:reminderId"
-            element={<WeeklyReminderDetailPage />}
-          />
-          {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
-          <Route
-            path="/events/:eventId/actions/:actionType"
-            element={<ActionDetailPage />}
-          />
-          <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
-          <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-        </Routes>
-      </div>
-    </EventProvider>
+        </div>
+        <BackLink />
+      </header>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+        {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
+            より具体的なルートを上に置いてマッチを優先させる。 */}
+        <Route
+          path="/events/:eventId/actions/weekly_reminder/:reminderId"
+          element={<WeeklyReminderDetailPage />}
+        />
+        {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
+        <Route
+          path="/events/:eventId/actions/:actionType"
+          element={<ActionDetailPage />}
+        />
+        <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
+        <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+      </Routes>
+    </div>
   );
 }
 

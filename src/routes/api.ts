@@ -55,17 +55,51 @@ import {
   createSlackClientForWorkspace,
   getDecryptedWorkspace,
 } from "../services/workspace";
+import { adminAuth } from "../middleware/admin-auth";
 
 const api = new Hono<{ Bindings: Env }>();
+
+// 005-1: CORS 設定。
+// - 本番 Worker ドメイン + 開発用 localhost を allowlist 化（origin: "*" 廃止）
+// - x-admin-token header を許可
+const ALLOWED_ORIGINS = [
+  "https://leaders-meetup-bot.akokoa1221.workers.dev",
+  "http://localhost:5173",
+  "http://localhost:8787",
+];
 
 api.use(
   "/*",
   cors({
-    origin: "*",
+    origin: (origin) => {
+      // same-origin リクエスト（origin ヘッダーなし）は許可
+      if (!origin) return origin;
+      return ALLOWED_ORIGINS.includes(origin) ? origin : null;
+    },
     allowMethods: ["GET", "POST", "PUT", "DELETE"],
-    allowHeaders: ["Content-Type"],
+    allowHeaders: ["Content-Type", "x-admin-token"],
   })
 );
+
+// 005-1: admin 認証ミドルウェア。
+// 公開エンドポイント (health / apply 公開フォーム) は除外し、
+// それ以外の admin CRUD 全般を ADMIN_TOKEN で保護する。
+//
+// 除外パス:
+//   - /health: ヘルスチェック
+//   - /apply/:eventId (POST), /apply/:eventId/availability (GET): 応募者向け公開フォーム
+//
+// 注意: /slack/oauth, /slack/events 等の Slack 連携は app.route("/slack", ...) の
+//       別ルートにマウントされており、本ミドルウェアの管轄外。
+api.use("/*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  // /api prefix を除いた部分でマッチング
+  const sub = path.replace(/^\/api/, "");
+  if (sub === "/health" || sub.startsWith("/apply/")) {
+    return next();
+  }
+  return adminAuth(c, next);
+});
 
 api.get("/health", async (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });

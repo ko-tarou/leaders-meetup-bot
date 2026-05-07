@@ -27,6 +27,34 @@ import type {
 
 const BASE = "/api";
 
+// 005-1: admin Bearer トークン管理
+// localStorage に保存し、各 API リクエストに x-admin-token header として自動注入する。
+const ADMIN_TOKEN_KEY = "devhub_ops:admin_token";
+
+export function getAdminToken(): string | null {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAdminToken(token: string): void {
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } catch {
+    // noop（Private mode 等で localStorage 使用不可）
+  }
+}
+
+export function clearAdminToken(): void {
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    // noop
+  }
+}
+
 export class APIError extends Error {
   constructor(
     public readonly status: number,
@@ -39,13 +67,19 @@ export class APIError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> | undefined),
+  };
+  const token = getAdminToken();
+  if (token) headers["x-admin-token"] = token;
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {}),
-    },
     ...options,
+    headers,
   });
+
+  // #113 (APIError) でカバーされるので、#114 の手書き 401 throw は不要
   if (!res.ok) {
     let body = "";
     try {

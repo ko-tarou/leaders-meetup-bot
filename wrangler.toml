@@ -15,3 +15,12 @@ crons = ["*/5 * * * *"]
 directory = "./public"
 not_found_handling = "single-page-application"
 binding = "ASSETS"
+
+# 005-1: 必須 secret
+# ADMIN_TOKEN: /api/* (admin) を保護する Bearer トークン
+# 設定方法: `npx wrangler secret put ADMIN_TOKEN`
+# 推奨生成: `openssl rand -hex 32`
+# 未設定の場合、admin API は 500 を返す（fail closed）。
+# その他の必須 secrets:
+# - SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET
+# - WORKSPACE_TOKEN_KEY, OAUTH_REDIRECT_URL

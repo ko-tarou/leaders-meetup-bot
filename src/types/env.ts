@@ -20,4 +20,9 @@ export type Env = {
 
   // Cloudflare Workers Assets binding（SPA fallback で env.ASSETS.fetch から index.html を返す）
   ASSETS: Fetcher;
+
+  // 005-1: admin API 認証用 Bearer トークン
+  // Wrangler secrets で管理（kota が手動で設定: `npx wrangler secret put ADMIN_TOKEN`）
+  // 未設定の場合、保護対象 API は 500 を返す。
+  ADMIN_TOKEN: string;
 };
