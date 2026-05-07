@@ -271,8 +271,13 @@ export type HandleTaskAddSubmissionOptions = {
   missingEventErrorText: string;
 };
 
-export async function handleTaskAddSubmission(
-  c: Context<{ Bindings: Env }>,
+export async function handleTaskAddSubmission<
+  V extends Record<string, unknown> = Record<string, unknown>,
+>(
+  // 呼び出し側の Variables 型に依存しないよう generic にする。
+  // Hono の Context<Env> は Set<Env> が invariant のため、固定型では
+  // SlackVariables を持つ Context を渡せない（multi-review #32 R2 対応の副次的影響）。
+  c: Context<{ Bindings: Env; Variables: V }>,
   payload: ViewSubmissionPayload,
   options: HandleTaskAddSubmissionOptions,
 ): Promise<Response> {
