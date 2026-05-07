@@ -5,10 +5,17 @@ import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
 import {
   HOW_FOUND_LABEL,
   INTERVIEW_LOCATION_LABEL,
-  type Event,
   type HowFound,
   type InterviewLocation,
 } from "../types";
+
+// 005-hotfix: 公開エンドポイント /api/apply/:eventId/event が返す
+// 最小フィールドのみを表現する型。フォーム上部の表示に必要な情報のみ。
+type PublicEvent = {
+  id: string;
+  name: string;
+  type: string;
+};
 
 // Sprint 19 PR1: 公開エンドポイントから取得する availability の型
 type Availability = {
@@ -20,7 +27,7 @@ type Availability = {
 export function PublicApplyPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
-  const [event, setEvent] = useState<Event | null>(null);
+  const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [name, setName] = useState("");
@@ -36,13 +43,20 @@ export function PublicApplyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 005-hotfix: 公開エンドポイント経由で event を取得する。
+  // 旧実装は api.events.get() を呼んでおり、これは admin auth (x-admin-token)
+  // が必須の /api/orgs/:eventId を叩くため応募者は 401 になる。
+  // 既存の availability fetch と同じく fetch を直接使い、token を注入しない。
   useEffect(() => {
     if (!eventId) {
       setLoading(false);
       return;
     }
-    api.events
-      .get(eventId)
+    fetch(`/api/apply/${eventId}/event`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("event fetch failed");
+        return (await res.json()) as PublicEvent;
+      })
       .then((e) => {
         setEvent(e);
         setLoading(false);

@@ -8,6 +8,27 @@ export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
 // === applications (Sprint 16: 新メンバー入会フロー) ===
 
+// 005-hotfix: 公開応募フォーム用に event の最小情報を返す。
+// 応募ページ (PublicApplyPage) は誰でもアクセスできる必要があるため、
+// admin auth (x-admin-token) を通さない /apply/* 配下に置く。
+// 必要最小限の field (id / name / type) のみ返却し、
+// slack workspace 等の管理情報は漏らさない。
+applicationsRouter.get("/apply/:eventId/event", async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const event = await db
+    .select()
+    .from(events)
+    .where(eq(events.id, eventId))
+    .get();
+  if (!event) return c.json({ error: "not_found" }, 404);
+  return c.json({
+    id: event.id,
+    name: event.name,
+    type: event.type,
+  });
+});
+
 // Sprint 19 PR1: 公開エンドポイント。eventId の member_application アクションから
 // リーダーが事前にマークした候補日時 (leaderAvailableSlots) を返す。認証不要。
 // 応募ページはこの結果を WeekCalendarPicker.restrictTo に渡し、
