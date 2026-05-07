@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { colors } from "../styles/tokens";
 
 type Props = {
   value: string;
@@ -25,7 +26,7 @@ export function ChannelSelector({ value, onChange, workspaceId }: Props) {
   }, [workspaceId]);
 
   if (loading) {
-    return <span style={{ color: "#999" }}>チャンネル取得中...</span>;
+    return <span style={{ color: colors.textMuted }}>チャンネル取得中...</span>;
   }
 
   if (channels.length === 0) {
@@ -33,8 +34,8 @@ export function ChannelSelector({ value, onChange, workspaceId }: Props) {
       <div
         style={{
           padding: 8,
-          background: "#FFF3CD",
-          border: "1px solid #FFE69C",
+          background: colors.warningSubtle,
+          border: `1px solid ${colors.warning}`,
           borderRadius: 4,
           fontSize: 13,
         }}
@@ -55,7 +56,7 @@ export function ChannelSelector({ value, onChange, workspaceId }: Props) {
       }}
       style={{
         padding: "8px 12px",
-        border: "1px solid #ddd",
+        border: `1px solid ${colors.borderStrong}`,
         borderRadius: 4,
         minWidth: 200,
       }}

@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { ChipInput } from "./ChipInput";
 import { MultiChannelSelector } from "./MultiChannelSelector";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR3: weekly_reminder の 1 件分 (= 1 reminder) を編集するカード。
 // 折りたたみ可能なヘッダ (名前 + on/off + 削除) と、展開時の詳細フォームを持つ。
@@ -48,7 +49,7 @@ export function ReminderCard({
     onChange({ ...reminder, [k]: v });
 
   return (
-    <div style={{ ...s.card, ...(hasError ? { borderColor: "#dc2626" } : null) }}>
+    <div style={{ ...s.card, ...(hasError ? { borderColor: colors.danger } : null) }}>
       <div style={s.header}>
         <button
           type="button"
@@ -59,7 +60,7 @@ export function ReminderCard({
         <div style={s.label}>
           {reminder.name.trim() || "(名前未設定)"}
           {!reminder.enabled && <span style={s.tag}>無効</span>}
-          {hasError && <span style={{ ...s.tag, background: "#dc2626" }}>エラー</span>}
+          {hasError && <span style={{ ...s.tag, background: colors.danger }}>エラー</span>}
         </div>
         <label style={s.enabledLabel}>
           <input
@@ -155,49 +156,49 @@ function Field({ label, error, children }: { label: string; error?: string; chil
     <div style={{ marginBottom: "0.75rem" }}>
       <label style={s.fieldLabel}>{label}</label>
       {children}
-      {error && <div style={{ color: "#dc2626", fontSize: "0.75rem", marginTop: "0.25rem" }}>{error}</div>}
+      {error && <div style={{ color: colors.danger, fontSize: "0.75rem", marginTop: "0.25rem" }}>{error}</div>}
     </div>
   );
 }
 
 const s: Record<string, CSSProperties> = {
   card: {
-    border: "1px solid #e5e7eb", borderRadius: "0.375rem",
-    background: "white", marginBottom: "0.75rem",
+    border: `1px solid ${colors.border}`, borderRadius: "0.375rem",
+    background: colors.background, marginBottom: "0.75rem",
   },
   header: {
     display: "flex", alignItems: "center", gap: "0.5rem",
-    padding: "0.5rem 0.75rem", borderBottom: "1px solid #f3f4f6",
+    padding: "0.5rem 0.75rem", borderBottom: `1px solid ${colors.surface}`,
   },
   toggle: {
     background: "transparent", border: "none", cursor: "pointer",
-    fontSize: "0.875rem", color: "#6b7280", padding: 0, width: "1.25rem",
+    fontSize: "0.875rem", color: colors.textSecondary, padding: 0, width: "1.25rem",
   },
   label: {
-    flex: 1, fontSize: "0.875rem", fontWeight: 500, color: "#111827",
+    flex: 1, fontSize: "0.875rem", fontWeight: 500, color: colors.text,
     display: "flex", alignItems: "center", gap: "0.5rem",
   },
   tag: {
     fontSize: "0.625rem", padding: "0 0.375rem",
-    background: "#9ca3af", color: "white", borderRadius: "0.25rem",
+    background: colors.textMuted, color: colors.textInverse, borderRadius: "0.25rem",
   },
   enabledLabel: {
-    fontSize: "0.75rem", color: "#374151",
+    fontSize: "0.75rem", color: colors.text,
     display: "inline-flex", alignItems: "center", gap: "0.25rem",
   },
   del: {
-    background: "white", color: "#dc2626", border: "1px solid #dc2626",
+    background: colors.background, color: colors.danger, border: `1px solid ${colors.danger}`,
     padding: "0.125rem 0.5rem", borderRadius: "0.25rem",
     cursor: "pointer", fontSize: "0.75rem",
   },
   fieldLabel: {
-    display: "block", marginBottom: "0.25rem", fontSize: "0.875rem", color: "#374151",
+    display: "block", marginBottom: "0.25rem", fontSize: "0.875rem", color: colors.text,
   },
   input: {
-    width: "100%", padding: "0.5rem", border: "1px solid #d1d5db",
+    width: "100%", padding: "0.5rem", border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem", boxSizing: "border-box",
   },
   helper: {
-    color: "#6b7280", fontSize: "0.75rem", marginTop: "0.25rem",
+    color: colors.textSecondary, fontSize: "0.75rem", marginTop: "0.25rem",
   },
 };

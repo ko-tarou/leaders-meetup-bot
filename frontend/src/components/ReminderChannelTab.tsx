@@ -4,6 +4,7 @@ import type { Workspace } from "../types";
 import type { ReminderDraft } from "./ReminderCard";
 import { ChannelPicker, type SlackChannelLike } from "./ui/ChannelPicker";
 import { useToast } from "./ui/Toast";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR-B/C: weekly_reminder 詳細画面の「チャンネル管理」タブ。
 // task_management の ChannelManagementSection と同等の UX:
@@ -143,7 +144,7 @@ export function ReminderChannelTab({ reminder, disabled, onSave }: Props) {
   }
   if (wsError) {
     return (
-      <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {wsError}</div>
+      <div style={{ padding: "1rem", color: colors.danger }}>エラー: {wsError}</div>
     );
   }
 
@@ -203,30 +204,30 @@ export function ReminderChannelTab({ reminder, disabled, onSave }: Props) {
 
 const s: Record<string, CSSProperties> = {
   sectionHeading: { margin: "0 0 0.5rem", fontSize: "1rem" },
-  desc: { fontSize: "0.875rem", color: "#6b7280", margin: "0 0 0.75rem" },
+  desc: { fontSize: "0.875rem", color: colors.textSecondary, margin: "0 0 0.75rem" },
   registeredRow: {
     display: "flex",
     alignItems: "center",
     gap: "0.75rem",
     padding: "0.75rem",
-    border: "1px solid #e5e7eb",
+    border: `1px solid ${colors.border}`,
     borderRadius: "0.375rem",
-    background: "white",
+    background: colors.background,
     flexWrap: "wrap",
   },
-  meta: { fontSize: "0.75rem", color: "#6b7280", marginTop: "0.125rem" },
+  meta: { fontSize: "0.75rem", color: colors.textSecondary, marginTop: "0.125rem" },
   empty: {
     padding: "1.5rem",
     textAlign: "center",
-    color: "#6b7280",
-    border: "1px dashed #d1d5db",
+    color: colors.textSecondary,
+    border: `1px dashed ${colors.borderStrong}`,
     borderRadius: "0.5rem",
     fontSize: "0.875rem",
   },
   removeBtn: {
-    background: "white",
-    color: "#dc2626",
-    border: "1px solid #dc2626",
+    background: colors.background,
+    color: colors.danger,
+    border: `1px solid ${colors.danger}`,
     width: "1.75rem",
     height: "1.75rem",
     borderRadius: "0.25rem",
