@@ -924,22 +924,9 @@ meetingsRouter.get("/meetings/:meetingId/auto-schedule", async (c) => {
   return c.json({
     ...schedule,
     candidateRule: JSON.parse(schedule.candidateRule),
-    reminderDaysBefore: JSON.parse(schedule.reminderDaysBefore),
     reminders: parsedReminders,
   });
 });
-
-type ReminderDaysBeforeItem = number | { daysBefore: number; message?: string | null };
-
-function validateReminderDaysBefore(value: unknown): ReminderDaysBeforeItem[] | null {
-  if (!Array.isArray(value)) return null;
-  for (const item of value) {
-    if (typeof item === "number") continue;
-    if (item && typeof item === "object" && typeof (item as { daysBefore?: unknown }).daysBefore === "number") continue;
-    return null;
-  }
-  return value as ReminderDaysBeforeItem[];
-}
 
 meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
   const db = drizzle(c.env.DB);
@@ -954,7 +941,6 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     pollStartTime?: string;
     pollCloseDay: number;
     pollCloseTime?: string;
-    reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -984,18 +970,6 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     return c.json({ error: "pollCloseTime must be HH:MM format" }, 400);
   }
 
-  let reminderDaysBefore: ReminderDaysBeforeItem[] = [
-    { daysBefore: 3, message: null },
-    { daysBefore: 0, message: null },
-  ];
-  if (body.reminderDaysBefore !== undefined) {
-    const validated = validateReminderDaysBefore(body.reminderDaysBefore);
-    if (validated === null) {
-      return c.json({ error: "reminderDaysBefore must be an array of numbers or {daysBefore, message}" }, 400);
-    }
-    reminderDaysBefore = validated;
-  }
-
   let remindersStr = "[]";
   if (body.reminders !== undefined) {
     const validated = validateReminders(body.reminders);
@@ -1015,7 +989,6 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     pollStartTime: body.pollStartTime ?? "00:00",
     pollCloseDay: body.pollCloseDay,
     pollCloseTime: body.pollCloseTime ?? "00:00",
-    reminderDaysBefore: JSON.stringify(reminderDaysBefore),
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
@@ -1030,7 +1003,6 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     {
       ...record,
       candidateRule: body.candidateRule,
-      reminderDaysBefore,
       reminders: JSON.parse(remindersStr),
     },
     201,
@@ -1049,7 +1021,6 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
     pollStartTime?: string;
     pollCloseDay?: number;
     pollCloseTime?: string;
-    reminderDaysBefore?: ReminderDaysBeforeItem[];
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -1083,15 +1054,6 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
     return c.json({ error: "candidateRule.monthOffset must be an integer between 0 and 12" }, 400);
   }
 
-  let reminderDaysBeforeStr: string = existing.reminderDaysBefore;
-  if (body.reminderDaysBefore !== undefined) {
-    const validated = validateReminderDaysBefore(body.reminderDaysBefore);
-    if (validated === null) {
-      return c.json({ error: "reminderDaysBefore must be an array of numbers or {daysBefore, message}" }, 400);
-    }
-    reminderDaysBeforeStr = JSON.stringify(validated);
-  }
-
   let remindersStr: string = existing.reminders;
   if (body.reminders !== undefined) {
     const validated = validateReminders(body.reminders);
@@ -1109,7 +1071,6 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
       pollStartTime: body.pollStartTime ?? existing.pollStartTime,
       pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
       pollCloseTime: body.pollCloseTime ?? existing.pollCloseTime,
-      reminderDaysBefore: reminderDaysBeforeStr,
       reminderTime: body.reminderTime ?? existing.reminderTime,
       messageTemplate:
         body.messageTemplate === undefined ? existing.messageTemplate : body.messageTemplate,

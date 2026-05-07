@@ -1,8 +1,10 @@
 /**
  * 新しいトリガー型リマインド設定のヘルパー。
  * - パース・バリデーション
- * - 旧 reminderDaysBefore 形式からの自動移行
  * - scheduled_jobs の dedupKey 生成
+ *
+ * #005-15 で legacy `reminder_days_before` カラムを drop。
+ * 旧形式からの migrateFromLegacy 経路は本ファイルから撤去済み。
  */
 
 export type Trigger =
@@ -72,58 +74,9 @@ export function parseReminders(raw: string): Reminder[] {
   }
 }
 
-/** 旧形式 reminderDaysBefore を新形式 Reminder[] に変換 */
-export function migrateFromLegacy(
-  reminderDaysBeforeRaw: string,
-  reminderTime: string,
-  reminderMessageTemplate: string | null,
-): Reminder[] {
-  try {
-    const parsed = JSON.parse(reminderDaysBeforeRaw);
-    if (!Array.isArray(parsed)) return [];
-    const out: Reminder[] = [];
-    for (const item of parsed) {
-      if (typeof item === "number") {
-        out.push({
-          trigger: { type: "before_event", daysBefore: item },
-          time: reminderTime,
-          message: reminderMessageTemplate,
-        });
-        continue;
-      }
-      if (item && typeof item === "object") {
-        const daysBefore = Number((item as { daysBefore?: unknown }).daysBefore);
-        if (!Number.isFinite(daysBefore)) continue;
-        const msgRaw = (item as { message?: unknown }).message;
-        const message =
-          typeof msgRaw === "string" ? msgRaw : reminderMessageTemplate;
-        out.push({
-          trigger: { type: "before_event", daysBefore },
-          time: reminderTime,
-          message,
-        });
-      }
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-
-/** reminders 優先、空なら legacy から移行 */
-export function loadReminders(schedule: {
-  reminders: string;
-  reminderDaysBefore: string;
-  reminderTime: string;
-  reminderMessageTemplate: string | null;
-}): Reminder[] {
-  const fromNew = parseReminders(schedule.reminders);
-  if (fromNew.length > 0) return fromNew;
-  return migrateFromLegacy(
-    schedule.reminderDaysBefore,
-    schedule.reminderTime,
-    schedule.reminderMessageTemplate,
-  );
+/** reminders (新形式) をパースして返す */
+export function loadReminders(schedule: { reminders: string }): Reminder[] {
+  return parseReminders(schedule.reminders);
 }
 
 export function dedupKey(
