@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, isNull, type SQL } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import { events, tasks, taskAssignees } from "../../db/schema";
 
@@ -8,6 +8,8 @@ export const tasksRouter = new Hono<{ Bindings: Env }>();
 
 // --- Tasks (ADR-0002) ---
 
+// 005-16: N+1 解消のため、フィルタを SQL に寄せる + assignees を batch SELECT で埋め込む。
+// 旧実装は event 内全件取得 → メモリで filter + task ごとに assignees を個別 fetch していた。
 tasksRouter.get("/tasks", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.query("eventId");
@@ -18,29 +20,59 @@ tasksRouter.get("/tasks", async (c) => {
   const parentTaskId = c.req.query("parentTaskId"); // "null" 文字列で「親なし」を指定可
   const assigneeSlackId = c.req.query("assigneeSlackId");
 
-  // ベース: event_id で絞り込み
-  let rows = await db.select().from(tasks).where(eq(tasks.eventId, eventId)).all();
+  const conditions: SQL[] = [eq(tasks.eventId, eventId)];
+  if (status) conditions.push(eq(tasks.status, status));
+  if (priority) conditions.push(eq(tasks.priority, priority));
+  if (parentTaskId === "null") conditions.push(isNull(tasks.parentTaskId));
+  else if (parentTaskId) conditions.push(eq(tasks.parentTaskId, parentTaskId));
 
-  // フィルタ適用（メモリ上で）
-  if (status) rows = rows.filter((t) => t.status === status);
-  if (priority) rows = rows.filter((t) => t.priority === priority);
-  if (parentTaskId === "null") rows = rows.filter((t) => t.parentTaskId === null);
-  else if (parentTaskId) rows = rows.filter((t) => t.parentTaskId === parentTaskId);
-
+  // assigneeSlackId は task_assignees サブクエリで絞り込み（IN (SELECT ...)）
   if (assigneeSlackId) {
-    // task_assignees から該当タスク ID を取得して絞り込み
-    const assignees = await db
-      .select()
+    const assigneeTaskIds = await db
+      .select({ taskId: taskAssignees.taskId })
       .from(taskAssignees)
       .where(eq(taskAssignees.slackUserId, assigneeSlackId))
       .all();
-    const taskIdSet = new Set(assignees.map((a) => a.taskId));
-    rows = rows.filter((t) => taskIdSet.has(t.id));
+    if (assigneeTaskIds.length === 0) {
+      // 該当者がアサインされた task が無ければ即空配列
+      return c.json([]);
+    }
+    conditions.push(
+      inArray(
+        tasks.id,
+        assigneeTaskIds.map((r) => r.taskId),
+      ),
+    );
   }
 
-  // updatedAt 降順
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(and(...conditions))
+    .all();
+
+  // updatedAt 降順（既存挙動維持）
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return c.json(rows);
+
+  // assignees を 1 クエリで batch 取得 → task ごとにグルーピング
+  if (rows.length === 0) return c.json([]);
+  const taskIds = rows.map((t) => t.id);
+  const allAssignees = await db
+    .select()
+    .from(taskAssignees)
+    .where(inArray(taskAssignees.taskId, taskIds))
+    .all();
+  const assigneesByTaskId = new Map<string, typeof allAssignees>();
+  for (const a of allAssignees) {
+    const list = assigneesByTaskId.get(a.taskId);
+    if (list) list.push(a);
+    else assigneesByTaskId.set(a.taskId, [a]);
+  }
+  const result = rows.map((t) => ({
+    ...t,
+    assignees: assigneesByTaskId.get(t.id) ?? [],
+  }));
+  return c.json(result);
 });
 
 tasksRouter.get("/tasks/:id", async (c) => {
