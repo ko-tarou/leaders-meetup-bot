@@ -1,12 +1,11 @@
 import { Hono } from "hono";
 import type { Env } from "../../types/env";
-import { SlackClient } from "../../services/slack-api";
 import {
   handleMessageEvent,
   maybeTriggerStickyRepost,
 } from "../../services/auto-respond";
 import { handleMemberJoinedChannel } from "../../services/member-welcome";
-import type { SlackVariables } from "./utils";
+import { getSlackClient, type SlackVariables } from "./utils";
 
 export const eventsRouter = new Hono<{
   Bindings: Env;
@@ -20,10 +19,7 @@ eventsRouter.post("/events", async (c) => {
   }
 
   if (body.type === "event_callback" && body.event?.type === "message") {
-    const client = new SlackClient(
-      c.env.SLACK_BOT_TOKEN,
-      c.env.SLACK_SIGNING_SECRET,
-    );
+    const client = getSlackClient(c);
     // Slack Events APIは3秒以内にレスポンスが必要なので waitUntil でバックグラウンド処理
     c.executionCtx.waitUntil(
       handleMessageEvent(c.env.DB, client, body.event).catch((e) => {
