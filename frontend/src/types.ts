@@ -106,6 +106,9 @@ export type Trigger =
   | { type: "after_poll_close"; daysAfter: number };
 
 export type ReminderItem = {
+  // フロント側の React key 用ローカル ID（任意）。
+  // backend には送らないため save 時に除去する。
+  id?: string;
   trigger: Trigger;
   time: string;
   message: string | null;
