@@ -1,6 +1,8 @@
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
 import { EventSwitcher } from "./components/EventSwitcher";
+import { ConfirmProvider } from "./components/ui/ConfirmDialog";
+import { ToastProvider } from "./components/ui/Toast";
 import { EventProvider, useEvents } from "./contexts/EventContext";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventIndexRedirect } from "./pages/EventIndexRedirect";
@@ -15,24 +17,36 @@ import {
 import { WorkspacesPage } from "./pages/WorkspacesPage";
 
 export function App() {
-  // /apply 配下は公開ページ（ヘッダー・EventProvider なし独立レイアウト）
+  // /apply 配下は公開ページ（ヘッダー・EventProvider なし独立レイアウト）。
+  // 公開ページでも将来トースト/確認ダイアログを使えるよう Provider は外側に置く。
   const { pathname } = useLocation();
   if (pathname.startsWith("/apply")) {
     return (
-      <Routes>
-        <Route path="/apply/:eventId" element={<PublicApplyPage />} />
-        <Route
-          path="/apply/:eventId/thanks"
-          element={<PublicThanksPage />}
-        />
-      </Routes>
+      <ToastProvider>
+        <ConfirmProvider>
+          <Routes>
+            <Route path="/apply/:eventId" element={<PublicApplyPage />} />
+            <Route
+              path="/apply/:eventId/thanks"
+              element={<PublicThanksPage />}
+            />
+          </Routes>
+        </ConfirmProvider>
+      </ToastProvider>
     );
   }
 
+  // 005-7: ToastProvider / ConfirmProvider は EventProvider の外側に置く。
+  // EventProvider 内の AdminTokenPrompt 経路でも (将来) トースト/確認が
+  // 使えるようにするため。
   return (
-    <EventProvider>
-      <AppShell />
-    </EventProvider>
+    <ToastProvider>
+      <ConfirmProvider>
+        <EventProvider>
+          <AppShell />
+        </EventProvider>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 
