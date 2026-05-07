@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import type { Env } from "../types/env";
 import { SlackClient } from "../services/slack-api";
 import { createPoll, handleVote, closePoll } from "../services/poll";
@@ -30,7 +30,10 @@ import {
 import { buildTaskListBlocks } from "../services/devhub-task-list";
 import { scheduleTaskReminders } from "../services/devhub-task-reminder";
 import { stickyRepostByChannel } from "../services/sticky-task-board";
-import { prReviewRepostByChannel } from "../services/sticky-pr-review-board";
+import {
+  prReviewRepostByChannel,
+  LGTM_THRESHOLD,
+} from "../services/sticky-pr-review-board";
 import {
   getWorkspaceBySlackTeamId,
   getDecryptedWorkspace,
@@ -788,30 +791,40 @@ slack.post("/interactions", async (c) => {
                 createdAt: new Date().toISOString(),
               });
 
-              // LGTM 数を確認（しきい値 = 2）
+              // LGTM 数を確認（しきい値は sticky-pr-review-board.ts と共通定数を参照）
               const lgtms = await d1
                 .select()
                 .from(prReviewLgtms)
                 .where(eq(prReviewLgtms.reviewId, reviewId))
                 .all();
 
-              const LGTM_THRESHOLD = 2;
               if (lgtms.length >= LGTM_THRESHOLD) {
-                // status を merged に更新（既に merged ならスキップ）
-                const review = await d1
-                  .select()
-                  .from(prReviews)
-                  .where(eq(prReviews.id, reviewId))
-                  .get();
-                if (review && review.status !== "merged") {
-                  await d1
-                    .update(prReviews)
-                    .set({
-                      status: "merged",
-                      updatedAt: new Date().toISOString(),
-                    })
-                    .where(eq(prReviews.id, reviewId));
+                // status='merged' への遷移を atomic 化して二重通知を防ぐ
+                // (multi-review #27 R5 [must])。
+                // WHERE status != 'merged' + RETURNING で「自分が初めて
+                // merged にした worker」だけが notification を post する。
+                // 同時に LGTM が閾値を超えた他の worker は returning が空配列
+                // となり、通知 post をスキップする。
+                const transitioned = await d1
+                  .update(prReviews)
+                  .set({
+                    status: "merged",
+                    updatedAt: new Date().toISOString(),
+                  })
+                  .where(
+                    and(
+                      eq(prReviews.id, reviewId),
+                      ne(prReviews.status, "merged"),
+                    ),
+                  )
+                  .returning({
+                    id: prReviews.id,
+                    title: prReviews.title,
+                    requesterSlackId: prReviews.requesterSlackId,
+                  });
 
+                if (transitioned.length > 0) {
+                  const review = transitioned[0];
                   // チャンネルに通知 post（依頼者にメンション）
                   const meeting = await d1
                     .select()
