@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import type { EventActionType, Meeting, Workspace } from "../types";
 import { api } from "../api";
+import { ChannelPicker, type SlackChannelLike } from "./ui/ChannelPicker";
 
 // Sprint 13 PR3: タスク管理アクションの「チャンネル管理」サブタブ。
 // 旧 TaskManagementSettings + AddChannelModal を統合し、
 // ページ内インラインで「検索 + リスト + ページネーション」UI に置換する。
 // Sprint 15 PR2: actionType prop で task_management / pr_review_list を切替。
 //   sticky 状態判定と enable/disable API を分岐する。
-
-const PAGE_SIZE = 20;
+// Sprint 005-11: 「workspace selector + 検索 + 候補リスト + ページング」を
+//   ui/ChannelPicker.tsx に切り出した。本体は「登録済みチャンネル一覧
+//   (sticky toggle / refresh / delete)」+ Meeting 状態管理に責務を絞る。
 
 type Props = {
   eventId: string;
   actionType: EventActionType;
 };
-
-type SlackChannel = { id: string; name: string };
 
 // actionType ごとの sticky bot ラベル。MVP では「sticky bot」表記を踏襲しつつ
 // 説明文だけ機能名を分岐する。
@@ -35,15 +35,8 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pendingMeetingId, setPendingMeetingId] = useState<string | null>(null);
 
-  // 追加 UI 用
+  // ChannelPicker 用の選択中 workspace
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("");
-  const [availableChannels, setAvailableChannels] = useState<SlackChannel[]>(
-    [],
-  );
-  const [channelsLoading, setChannelsLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [adding, setAdding] = useState<string | null>(null);
 
   // 初期 fetch（meetings + workspaces）
   useEffect(() => {
@@ -72,38 +65,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
     };
   }, [eventId, refreshKey]);
 
-  // workspace 切替時に slack channels 再取得
-  useEffect(() => {
-    if (!selectedWorkspaceId) {
-      setAvailableChannels([]);
-      return;
-    }
-    let cancelled = false;
-    setChannelsLoading(true);
-    api
-      .getSlackChannels(selectedWorkspaceId)
-      .then((list) => {
-        if (cancelled) return;
-        setAvailableChannels(Array.isArray(list) ? list : []);
-        setChannelsLoading(false);
-        setPage(1);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAvailableChannels([]);
-        setChannelsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedWorkspaceId]);
-
-  // 検索文字変更時は1ページ目へ
-  useEffect(() => {
-    setPage(1);
-  }, [search]);
-
-  // 既登録 channel_id（選択中 workspace）
+  // 既登録 channel_id（選択中 workspace）。ChannelPicker の候補除外用。
   const registeredChannelIds = useMemo(
     () =>
       new Set(
@@ -112,20 +74,6 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
           .map((m) => m.channelId),
       ),
     [meetings, selectedWorkspaceId],
-  );
-
-  const filteredChannels = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return availableChannels
-      .filter((c) => !registeredChannelIds.has(c.id))
-      .filter((c) => !q || c.name.toLowerCase().includes(q));
-  }, [availableChannels, registeredChannelIds, search]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredChannels.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pagedChannels = filteredChannels.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
   );
 
   const wsName = (id?: string | null) =>
@@ -244,9 +192,11 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
     }
   };
 
-  const handleAdd = async (channel: SlackChannel) => {
+  // ChannelPicker から呼ばれる add ハンドラ。
+  // createMeeting + sticky 有効化を一括で行う。
+  // sticky 有効化に失敗しても追加自体は成立させる（既存挙動を維持）。
+  const handleAdd = async (channel: SlackChannelLike) => {
     if (!selectedWorkspaceId) return;
-    setAdding(channel.id);
     try {
       const created = await api.createMeeting({
         name: channel.name,
@@ -254,7 +204,6 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
         eventId,
         workspaceId: selectedWorkspaceId,
       });
-      // sticky をデフォルトで即有効化（失敗しても追加自体は成立させる）
       try {
         await enableSticky(created.id);
       } catch (e) {
@@ -263,8 +212,6 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
       setRefreshKey((k) => k + 1);
     } catch (e) {
       alert(e instanceof Error ? e.message : "追加に失敗しました");
-    } finally {
-      setAdding(null);
     }
   };
 
@@ -342,126 +289,18 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
         )}
       </div>
 
-      {/* 追加 UI */}
+      {/* 追加 UI: ChannelPicker に委譲 */}
       <div>
         <h3 style={sectionHeadingStyle}>チャンネルを追加</h3>
-        {workspaces.length === 0 ? (
-          <div style={emptyStyle}>
-            ワークスペースが未登録です。先にワークスペースを追加してください。
-          </div>
-        ) : (
-          <>
-            <div style={controlsRowStyle}>
-              <select
-                value={selectedWorkspaceId}
-                onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-                style={{ ...fieldStyle, minWidth: "180px", flex: "0 0 auto" }}
-              >
-                {workspaces.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="チャンネル名で検索..."
-                style={{ ...fieldStyle, flex: 1, minWidth: "200px" }}
-              />
-            </div>
-
-            {channelsLoading ? (
-              <div style={hintStyle}>チャンネル読み込み中...</div>
-            ) : pagedChannels.length === 0 ? (
-              <div style={hintStyle}>
-                {search
-                  ? "該当するチャンネルがありません"
-                  : "追加可能なチャンネルがありません（既に全て登録済みか、bot が招待されていない可能性があります）"}
-              </div>
-            ) : (
-              <div style={{ display: "grid", gap: "0.25rem" }}>
-                {pagedChannels.map((c) => (
-                  <div key={c.id} style={channelRowStyle}>
-                    <span style={{ flex: 1, minWidth: 0 }}>#{c.name}</span>
-                    <span style={channelIdStyle}>{c.id}</span>
-                    <button
-                      onClick={() => handleAdd(c)}
-                      disabled={adding === c.id}
-                      style={addBtnStyle}
-                    >
-                      {adding === c.id ? "追加中..." : "+ 追加"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {totalPages > 1 && (
-              <Pagination
-                page={safePage}
-                totalPages={totalPages}
-                onChange={setPage}
-              />
-            )}
-          </>
-        )}
+        <ChannelPicker
+          workspaces={workspaces}
+          selectedWorkspaceId={selectedWorkspaceId}
+          onWorkspaceChange={setSelectedWorkspaceId}
+          fetchChannels={api.getSlackChannels}
+          registeredChannelIds={registeredChannelIds}
+          onAdd={handleAdd}
+        />
       </div>
-    </div>
-  );
-}
-
-function Pagination({
-  page,
-  totalPages,
-  onChange,
-}: {
-  page: number;
-  totalPages: number;
-  onChange: (n: number) => void;
-}) {
-  // 1...10 を直接出し、それ以上は省略表示。最初/最後ボタンは省略してシンプルに。
-  const visibleCount = Math.min(totalPages, 10);
-  return (
-    <div style={paginationStyle}>
-      <button
-        onClick={() => onChange(Math.max(1, page - 1))}
-        disabled={page === 1}
-        style={pageBtnStyle}
-      >
-        ← 前へ
-      </button>
-      {Array.from({ length: visibleCount }).map((_, i) => {
-        const n = i + 1;
-        const active = n === page;
-        return (
-          <button
-            key={n}
-            onClick={() => onChange(n)}
-            style={{
-              ...pageBtnStyle,
-              background: active ? "#2563eb" : "white",
-              color: active ? "white" : "#374151",
-              borderColor: active ? "#2563eb" : "#d1d5db",
-            }}
-          >
-            {n}
-          </button>
-        );
-      })}
-      {totalPages > 10 && (
-        <span style={{ color: "#6b7280", fontSize: "0.875rem" }}>
-          ... 全 {totalPages} ページ
-        </span>
-      )}
-      <button
-        onClick={() => onChange(Math.min(totalPages, page + 1))}
-        disabled={page === totalPages}
-        style={pageBtnStyle}
-      >
-        次へ →
-      </button>
     </div>
   );
 }
@@ -501,59 +340,12 @@ const toggleLabelStyle: React.CSSProperties = {
   fontSize: "0.875rem",
 };
 
-const channelRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  padding: "0.5rem 0.75rem",
-  border: "1px solid #e5e7eb",
-  borderRadius: "0.25rem",
-  background: "white",
-};
-
-const channelIdStyle: React.CSSProperties = {
-  fontSize: "0.75rem",
-  color: "#6b7280",
-};
-
-const controlsRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: "0.5rem",
-  marginBottom: "0.75rem",
-  flexWrap: "wrap",
-};
-
-const fieldStyle: React.CSSProperties = {
-  padding: "0.4rem 0.6rem",
-  border: "1px solid #d1d5db",
-  borderRadius: "0.25rem",
-  fontSize: "0.875rem",
-  boxSizing: "border-box",
-};
-
 const emptyStyle: React.CSSProperties = {
   padding: "1.5rem",
   textAlign: "center",
   color: "#6b7280",
   border: "1px dashed #d1d5db",
   borderRadius: "0.5rem",
-  fontSize: "0.875rem",
-};
-
-const hintStyle: React.CSSProperties = {
-  padding: "1rem",
-  color: "#6b7280",
-  textAlign: "center",
-  fontSize: "0.875rem",
-};
-
-const addBtnStyle: React.CSSProperties = {
-  background: "#2563eb",
-  color: "white",
-  border: "none",
-  padding: "0.25rem 0.75rem",
-  borderRadius: "0.25rem",
-  cursor: "pointer",
   fontSize: "0.875rem",
 };
 
@@ -575,23 +367,4 @@ const refreshBtnStyle: React.CSSProperties = {
   borderRadius: "0.25rem",
   cursor: "pointer",
   fontSize: "0.8125rem",
-};
-
-const paginationStyle: React.CSSProperties = {
-  marginTop: "1rem",
-  display: "flex",
-  gap: "0.25rem",
-  alignItems: "center",
-  justifyContent: "center",
-  flexWrap: "wrap",
-};
-
-const pageBtnStyle: React.CSSProperties = {
-  padding: "0.25rem 0.6rem",
-  border: "1px solid #d1d5db",
-  background: "white",
-  borderRadius: "0.25rem",
-  cursor: "pointer",
-  minWidth: "2rem",
-  fontSize: "0.875rem",
 };
