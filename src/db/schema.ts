@@ -422,6 +422,13 @@ export const scheduledJobs = sqliteTable(
     // 冪等性のための一意キー（同じキーのINSERTはUNIQUE違反で弾かれる）
     dedupKey: text("dedup_key").unique(),
     createdAt: text("created_at").notNull(),
+    // PR #005-3: リトライ管理列。
+    // attempts: 失敗カウンタ。MAX_ATTEMPTS 超過で永久失敗扱い。
+    // lastError: 失敗時のエラーメッセージ（先頭 500 文字）。
+    // failedAt: 直近の失敗時刻（ISO 8601）。
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    failedAt: text("failed_at"),
   },
   // 005-4: cron が 5 分ごとに WHERE status='pending' AND next_run_at <= ? で全件 scan していたのを index で解消
   (t) => [

@@ -1,8 +1,12 @@
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { eventActions, scheduledJobs } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
+
+// PR #005-3: post 失敗時のリトライ上限。
+// 超過した dedupKey は手動介入が必要。
+const MAX_ATTEMPTS = 3;
 
 // Sprint 23 PR3 / weekly_reminder アクション (reminders 配列形式)。
 //
@@ -198,8 +202,12 @@ function jstDayOfWeek(): number {
   return jst.getUTCDay();
 }
 
-// dedupKey で multi-fire を防ぐ。INSERT 成功時のみ Slack へ post。
-// post 失敗時は console.error のみ（dedupKey は残るので次回 cron で再送はしない方針）。
+// dedupKey で multi-fire を防ぐ 2 段階フロー（PR #005-3）。
+//   1. INSERT(pending) で予約 → UNIQUE 違反なら他 worker が in-flight or 完了 or 永久失敗。
+//      ただし status='failed' AND attempts < MAX_ATTEMPTS なら pending に戻して retry する。
+//   2. Slack post 成功 → UPDATE(completed) で確定。
+//   3. Slack post 失敗 → UPDATE(failed, attempts++) で次回 cron に持ち越し。
+// post 失敗で dedupKey が completed のまま残る旧バグ (#23) を解消する。
 async function fireOnce(
   db: D1Database,
   slackClient: SlackClient,
@@ -212,35 +220,104 @@ async function fireOnce(
 ): Promise<boolean> {
   const dedupKey = `weekly_reminder:${actionId}:${reminderId}:${ymdCompact}:${time}:${channelId}`;
   const d1 = drizzle(db);
+
+  // Step 1: pending で予約（UNIQUE 違反パスはリトライ判定）
+  const reserved = await reservePending(
+    d1,
+    dedupKey,
+    actionId,
+    reminderId,
+    channelId,
+    time,
+    message,
+  );
+  if (!reserved) return false;
+
+  // Step 2: post → 成功なら completed、失敗なら failed + attempts++
+  try {
+    await slackClient.postMessage(channelId, message);
+    await d1
+      .update(scheduledJobs)
+      .set({ status: "completed" })
+      .where(eq(scheduledJobs.dedupKey, dedupKey));
+    return true;
+  } catch (e) {
+    const errMsg = String(e).slice(0, 500);
+    await d1
+      .update(scheduledJobs)
+      .set({
+        status: "failed",
+        attempts: sql`${scheduledJobs.attempts} + 1`,
+        lastError: errMsg,
+        failedAt: new Date().toISOString(),
+      })
+      .where(eq(scheduledJobs.dedupKey, dedupKey));
+    console.error(
+      `Failed to post weekly_reminder to ${channelId} for action ${actionId} reminder ${reminderId}:`,
+      e,
+    );
+    return false;
+  }
+}
+
+// dedupKey で pending row を確保する。
+// 戻り値 true = この呼び出しが処理担当（post に進んでよい）
+// 戻り値 false = 既に他で処理中 / 完了 / 永久失敗 のため何もしない
+async function reservePending(
+  d1: ReturnType<typeof drizzle>,
+  dedupKey: string,
+  actionId: string,
+  reminderId: string,
+  channelId: string,
+  time: string,
+  message: string,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString();
   try {
     await d1.insert(scheduledJobs).values({
       id: crypto.randomUUID(),
       type: "weekly_reminder_sent",
       referenceId: actionId,
-      nextRunAt: new Date().toISOString(),
-      status: "completed",
+      nextRunAt: nowIso,
+      status: "pending",
       payload: JSON.stringify({ reminderId, channelId, time, message }),
       dedupKey,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
     });
-  } catch (e) {
-    // UNIQUE 違反 = 既送信なら silent skip。それ以外はログ。
-    const msg = String(e);
-    if (!msg.includes("UNIQUE") && !msg.includes("constraint")) {
-      console.error("Failed to insert weekly_reminder dedup row:", e);
-    }
-    return false;
-  }
-
-  try {
-    await slackClient.postMessage(channelId, message);
     return true;
   } catch (e) {
-    // 1 チャンネルの post 失敗で他を止めない。dedupKey は残ったまま。
-    console.error(
-      `Failed to post weekly_reminder to ${channelId} for action ${actionId} reminder ${reminderId}:`,
-      e,
-    );
+    const msg = String(e);
+    const isUniqueViolation =
+      msg.includes("UNIQUE") || msg.includes("constraint");
+    if (!isUniqueViolation) {
+      console.error("Failed to insert weekly_reminder dedup row:", e);
+      return false;
+    }
+
+    // UNIQUE 違反: 既存 row を見て retry 可能か判定する。
+    const existing = await d1
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.dedupKey, dedupKey))
+      .get();
+    if (!existing) {
+      // UNIQUE 違反だったのに row が無い = 想定外。安全側で skip。
+      return false;
+    }
+    if (existing.status === "completed") return false;
+    if (existing.status === "pending") return false; // in-flight (他 worker)
+    if (existing.status === "failed") {
+      if (existing.attempts >= MAX_ATTEMPTS) {
+        // 諦め。手動介入が必要。
+        return false;
+      }
+      // pending に戻して再挑戦。attempts は post 失敗時にさらに +1 される。
+      await d1
+        .update(scheduledJobs)
+        .set({ status: "pending" })
+        .where(eq(scheduledJobs.dedupKey, dedupKey));
+      return true;
+    }
     return false;
   }
 }
