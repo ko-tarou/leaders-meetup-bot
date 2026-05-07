@@ -3,6 +3,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type Ref,
 } from "react";
 import { colors, fontSize, radius, space } from "../../styles/tokens";
 
@@ -27,6 +28,8 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   isLoading?: boolean;
   /** width: 100% にする */
   fullWidth?: boolean;
+  /** React 19: function component が直接 ref prop を受けられる */
+  ref?: Ref<HTMLButtonElement>;
 };
 
 const baseStyle: CSSProperties = {
@@ -135,6 +138,7 @@ export function Button({
   style,
   onMouseEnter,
   onMouseLeave,
+  ref,
   ...rest
 }: ButtonProps) {
   // SSR でも安全にするため副作用で注入
@@ -158,6 +162,7 @@ export function Button({
   return (
     <button
       {...rest}
+      ref={ref}
       data-ds-button=""
       data-variant={variant}
       disabled={isDisabled}
