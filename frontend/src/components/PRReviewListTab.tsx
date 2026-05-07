@@ -51,19 +51,16 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
     setError(null);
     api.prReviews
       .list(eventId)
-      .then(async (list) => {
+      .then((list) => {
         if (cancelled) return;
         const taskList = Array.isArray(list) ? list : [];
-        // 各 review の LGTM 数を並列取得（個別失敗は 0 件にフォールバック）
-        const withLgtm = await Promise.all(
-          taskList.map(async (r) => ({
-            ...r,
-            lgtmCount: (await api.prReviews.lgtms
-              .list(r.id)
-              .catch(() => [])).length,
-          })),
-        );
-        if (cancelled) return;
+        // 005-16: GET /api/orgs/:eventId/pr-reviews のレスポンスに lgtms/reviewers が
+        // 埋め込まれている。旧実装は review ごとに個別 fetch していた（N+1）。
+        const withLgtm: PRReviewWithLgtm[] = taskList.map((r) => ({
+          ...r,
+          lgtmCount: r.lgtms?.length ?? 0,
+          reviewers: r.reviewers ?? [],
+        }));
         setReviews(withLgtm);
         setLoading(false);
       })

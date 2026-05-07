@@ -59,7 +59,13 @@ const styles = {
   } as CSSProperties,
 };
 
-export type PRReviewWithLgtm = PRReview & { lgtmCount: number };
+export type PRReviewWithLgtm = PRReview & {
+  lgtmCount: number;
+  // 005-16: PRReviewListTab から埋め込みで渡される reviewers。
+  // PRReview.reviewers にも入っているが、このフィールドは TasksTab と対称な
+  // 「親側で集約した状態」を明示するため残す。
+  reviewers?: PRReviewReviewer[];
+};
 
 type PRReviewCardProps = {
   review: PRReviewWithLgtm;
@@ -67,10 +73,20 @@ type PRReviewCardProps = {
 };
 
 export function PRReviewCard({ review: r, onSelect }: PRReviewCardProps) {
-  // Sprint 22: 多対多 reviewers を表示。マウント時に取得。
-  // 個別失敗は空配列にフォールバック（カード自体の表示は壊さない）。
-  const [reviewers, setReviewers] = useState<PRReviewReviewer[]>([]);
+  // 005-16: 親（PRReviewListTab）が GET /api/orgs/:eventId/pr-reviews のレスポンス
+  // から reviewers を埋め込んで渡す。旧実装はマウントごとに個別 fetch していた（N+1）。
+  // 親が渡してこなかった場合のみ fallback fetch（後方互換）。
+  const initialReviewers =
+    r.reviewers ?? (r as PRReview).reviewers ?? null;
+  const [reviewers, setReviewers] = useState<PRReviewReviewer[]>(
+    initialReviewers ?? [],
+  );
   useEffect(() => {
+    if (initialReviewers !== null && initialReviewers !== undefined) {
+      // 親から渡された値で常に同期（review が切り替わったら追従）
+      setReviewers(initialReviewers);
+      return;
+    }
     let cancelled = false;
     api.prReviews.reviewers
       .list(r.id)
@@ -85,7 +101,7 @@ export function PRReviewCard({ review: r, onSelect }: PRReviewCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [r.id]);
+  }, [r.id, initialReviewers]);
 
   const reviewerText =
     reviewers.length > 0

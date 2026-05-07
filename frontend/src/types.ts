@@ -169,6 +169,9 @@ export type Task = {
   createdBySlackId: string;
   createdAt: string;
   updatedAt: string;
+  // 005-16: N+1 解消のため、GET /tasks のレスポンスに埋め込まれる。
+  // 個別 endpoint (GET /tasks/:taskId/assignees) も互換維持。
+  assignees?: TaskAssignee[];
 };
 
 export type TaskFilters = {
@@ -200,6 +203,10 @@ export type PRReview = {
   reviewerSlackId: string | null;
   createdAt: string;
   updatedAt: string;
+  // 005-16: N+1 解消のため、GET /orgs/:eventId/pr-reviews のレスポンスに埋め込まれる。
+  // 個別 endpoint (GET /pr-reviews/:id/lgtms, /reviewers) も互換維持。
+  lgtms?: PRReviewLgtm[];
+  reviewers?: PRReviewReviewer[];
 };
 
 // PR レビュー LGTM (Sprint 17 PR1)
