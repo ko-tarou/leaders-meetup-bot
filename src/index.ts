@@ -32,13 +32,28 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     const client = new SlackClient(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
+    // PR #005-3: Promise.all は 1 ハンドラの reject で他の結果を捨ててしまうため、
+    // Promise.allSettled に変更して全ハンドラを必ず最後まで走らせる (multi-review #31)。
+    // 個別の rejection は labels つきでログに残し、調査可能にする。
+    const labels = [
+      "scheduledJobs",
+      "autoCycles",
+      "weeklyReminders",
+      "attendanceCheck",
+    ];
     ctx.waitUntil(
-      Promise.all([
+      Promise.allSettled([
         processScheduledJobs(env.DB, client),
         processAutoCycles(env.DB, client),
         processWeeklyReminders(env.DB, client),
         processAttendanceCheck(env.DB, client),
-      ]),
+      ]).then((results) => {
+        results.forEach((r, i) => {
+          if (r.status === "rejected") {
+            console.error(`[scheduled] ${labels[i]} failed:`, r.reason);
+          }
+        });
+      }),
     );
   },
 };
