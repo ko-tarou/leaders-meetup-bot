@@ -11,37 +11,37 @@
 // 通知抑制方針（task と同様）:
 // - <@USER> メンションは使わずプレーンテキスト名前を使う
 // - update ではなく delete + post で「edited バッジ」と通知の二重化を避ける
+//
+// PR 005-6: 共通ロジックは services/sticky-board-base.ts に集約。
+// このファイルは block builder と既存 export 関数（薄いラッパー）だけを残す。
+// LGTM_THRESHOLD は routes/slack.ts から import されているので、ここで定義し続ける。
 
 import { drizzle } from "drizzle-orm/d1";
 import { eq, inArray } from "drizzle-orm";
 import {
-  meetings,
   prReviews,
   prReviewLgtms,
   prReviewReviewers,
 } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
-import { createSlackClientForWorkspace } from "./workspace";
+import { PR_REVIEW_STATUS_EMOJI, PR_REVIEW_STATUS_LABEL } from "./labels";
+import {
+  postInitialStickyBoard,
+  repostStickyBoard,
+  deleteStickyBoard,
+  repostStickyBoardByChannel,
+  type StickyBoardConfig,
+} from "./sticky-board-base";
 import type { Env } from "../types/env";
 
 // Sprint 17 PR1: 自動完了に必要な LGTM 数。
 // このしきい値に達した時点で sticky bot が status='merged' に自動更新する。
+//
+// 注意: PR 005-6 で labels.ts に集約しなかった。
+// 理由: routes/slack.ts が `from "../services/sticky-pr-review-board"` で
+// この定数を import しているため、ここに置いておけば呼び出し側を一切触らずに済む。
 export const LGTM_THRESHOLD = 2;
-
-const STATUS_LABEL: Record<string, string> = {
-  open: "未着手",
-  in_review: "レビュー中",
-  merged: "マージ済",
-  closed: "クローズ",
-};
-
-const STATUS_EMOJI: Record<string, string> = {
-  open: "🔴",
-  in_review: "🟡",
-  merged: "✅",
-  closed: "⚫",
-};
 
 /**
  * PR レビュー sticky board の Block Kit を構築する。
@@ -150,8 +150,8 @@ export async function buildPRReviewBoardBlocks(
         ? `レビュアー: ${reviewerNames.join(", ")}`
         : "レビュアー: 未割当";
     const urlText = r.url ? `\n<${r.url}|🔗 リンク>` : "";
-    const statusEmoji = STATUS_EMOJI[r.status] ?? "🔴";
-    const statusLabel = STATUS_LABEL[r.status] ?? r.status;
+    const statusEmoji = PR_REVIEW_STATUS_EMOJI[r.status] ?? "🔴";
+    const statusLabel = PR_REVIEW_STATUS_LABEL[r.status] ?? r.status;
     // Sprint 17 PR1: LGTM 数を取得して表示
     const lgtmCount = lgtmMap.get(r.id) ?? 0;
     const lgtmText = `LGTM ${lgtmCount}/${LGTM_THRESHOLD}`;
@@ -203,6 +203,30 @@ export async function buildPRReviewBoardBlocks(
 }
 
 /**
+ * pr review board の meeting シェイプ。
+ * 共通基盤の StickyMeeting + pr review board 固有フィールド。
+ */
+type PRReviewBoardMeeting = {
+  id: string;
+  channelId: string;
+  eventId: string | null;
+  prReviewBoardTs?: string | null;
+};
+
+const PR_REVIEW_BOARD_CONFIG: StickyBoardConfig<PRReviewBoardMeeting> = {
+  tsColumn: "prReviewBoardTs",
+  headerText: "🔍 PR レビュー依頼",
+  label: "pr review sticky",
+  buildBlocks: async (db, client, meeting) => {
+    if (!meeting.eventId) {
+      // base 側で event_id チェック済みなのでここには来ないはずだが、型ナローイング
+      return [];
+    }
+    return buildPRReviewBoardBlocks(db, client, meeting.id, meeting.eventId);
+  },
+};
+
+/**
  * 初回投稿: 新規 sticky メッセージを post して meeting.pr_review_board_ts を保存。
  * 既存 ts がある場合は repostPRReviewBoard を呼ぶことを推奨（呼び出し側で判定）。
  */
@@ -211,37 +235,14 @@ export async function postInitialPRReviewBoard(
   client: SlackClient,
   meeting: { id: string; channelId: string; eventId: string | null },
 ): Promise<{ ts: string } | { error: string }> {
-  if (!meeting.eventId) return { error: "meeting has no event_id" };
-
-  const blocks = await buildPRReviewBoardBlocks(
-    db,
-    client,
-    meeting.id,
-    meeting.eventId,
-  );
-  const result = await client.postMessage(
-    meeting.channelId,
-    "🔍 PR レビュー依頼",
-    blocks,
-  );
-  if (!result.ok || typeof result.ts !== "string") {
-    return { error: `post failed: ${JSON.stringify(result)}` };
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ prReviewBoardTs: result.ts })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ts: result.ts };
+  return postInitialStickyBoard(db, client, meeting, PR_REVIEW_BOARD_CONFIG);
 }
 
 /**
  * 再投稿: 既存メッセージ削除 → 新メッセージ post → ts 更新。
  *
  * delete 失敗（既に削除済み・権限失効・ネットワーク等）でも続行する fail-soft。
- * 「常に最下部」を維持できないリスクより「投稿が完全に止まる」リスクの方が大きい。
+ * post 失敗時は ts を NULL に倒して残骸 ts を残さない（PR 005-6 で挙動追加）。
  */
 export async function repostPRReviewBoard(
   db: D1Database,
@@ -253,49 +254,7 @@ export async function repostPRReviewBoard(
     prReviewBoardTs: string | null;
   },
 ): Promise<{ ts: string } | { error: string }> {
-  if (!meeting.eventId) return { error: "meeting has no event_id" };
-
-  if (meeting.prReviewBoardTs) {
-    try {
-      const del = await client.deleteMessage(
-        meeting.channelId,
-        meeting.prReviewBoardTs,
-      );
-      if (!del.ok) {
-        console.warn(
-          `pr review sticky delete soft-fail (${meeting.prReviewBoardTs}): ${del.error ?? "unknown"}`,
-        );
-      }
-    } catch (e) {
-      console.warn(
-        `pr review sticky delete threw (${meeting.prReviewBoardTs}):`,
-        e,
-      );
-    }
-  }
-
-  const blocks = await buildPRReviewBoardBlocks(
-    db,
-    client,
-    meeting.id,
-    meeting.eventId,
-  );
-  const result = await client.postMessage(
-    meeting.channelId,
-    "🔍 PR レビュー依頼",
-    blocks,
-  );
-  if (!result.ok || typeof result.ts !== "string") {
-    return { error: `post failed: ${JSON.stringify(result)}` };
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ prReviewBoardTs: result.ts })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ts: result.ts };
+  return repostStickyBoard(db, client, meeting, PR_REVIEW_BOARD_CONFIG);
 }
 
 /**
@@ -311,32 +270,12 @@ export async function deletePRReviewBoard(
     prReviewBoardTs: string | null;
   },
 ): Promise<{ ok: true } | { error: string }> {
-  if (meeting.prReviewBoardTs) {
-    try {
-      const del = await client.deleteMessage(
-        meeting.channelId,
-        meeting.prReviewBoardTs,
-      );
-      if (!del.ok) {
-        console.warn(
-          `pr review sticky delete soft-fail (${meeting.prReviewBoardTs}): ${del.error ?? "unknown"}`,
-        );
-      }
-    } catch (e) {
-      console.warn(
-        `pr review sticky delete threw (${meeting.prReviewBoardTs}):`,
-        e,
-      );
-    }
-  }
-
-  const d1 = drizzle(db);
-  await d1
-    .update(meetings)
-    .set({ prReviewBoardTs: null })
-    .where(eq(meetings.id, meeting.id));
-
-  return { ok: true };
+  return deleteStickyBoard(
+    db,
+    client,
+    { ...meeting, eventId: null },
+    PR_REVIEW_BOARD_CONFIG,
+  );
 }
 
 /**
@@ -349,26 +288,5 @@ export async function prReviewRepostByChannel(
   env: Env,
   channelId: string,
 ): Promise<void> {
-  const d1 = drizzle(env.DB);
-  const meeting = await d1
-    .select()
-    .from(meetings)
-    .where(eq(meetings.channelId, channelId))
-    .get();
-  if (!meeting || !meeting.workspaceId || !meeting.prReviewBoardTs) return;
-
-  const client = await createSlackClientForWorkspace(env, meeting.workspaceId);
-  if (!client) {
-    console.warn(
-      `prReviewRepostByChannel: no SlackClient for workspace ${meeting.workspaceId}`,
-    );
-    return;
-  }
-
-  await repostPRReviewBoard(env.DB, client, {
-    id: meeting.id,
-    channelId: meeting.channelId,
-    eventId: meeting.eventId,
-    prReviewBoardTs: meeting.prReviewBoardTs,
-  });
+  await repostStickyBoardByChannel(env, channelId, PR_REVIEW_BOARD_CONFIG);
 }
