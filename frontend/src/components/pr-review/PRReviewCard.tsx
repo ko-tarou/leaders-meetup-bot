@@ -1,0 +1,143 @@
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import type {
+  PRReview,
+  PRReviewReviewer,
+  PRReviewStatus,
+} from "../../types";
+import { api } from "../../api";
+
+// Sprint 17 PR1: 自動完了に必要な LGTM 数（backend と一致させる）
+const LGTM_THRESHOLD = 2;
+
+const STATUS_LABEL: Record<PRReviewStatus, string> = {
+  open: "未着手",
+  in_review: "レビュー中",
+  merged: "マージ済",
+  closed: "クローズ",
+};
+
+const STATUS_COLOR: Record<PRReviewStatus, string> = {
+  open: "#6b7280",
+  in_review: "#2563eb",
+  merged: "#16a34a",
+  closed: "#dc2626",
+};
+
+const styles = {
+  card: {
+    border: "1px solid #e5e7eb",
+    borderRadius: "0.375rem",
+    padding: "0.75rem",
+    margin: "0.5rem 0",
+    background: "white",
+    cursor: "pointer",
+  } as CSSProperties,
+  cardHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+  } as CSSProperties,
+  badge: {
+    fontSize: "0.75rem",
+    padding: "0.125rem 0.5rem",
+    borderRadius: "0.25rem",
+    color: "white",
+  } as CSSProperties,
+  cardMeta: {
+    marginTop: "0.5rem",
+    fontSize: "0.75rem",
+    color: "#6b7280",
+    display: "flex",
+    gap: "1rem",
+    flexWrap: "wrap",
+  } as CSSProperties,
+  desc: {
+    marginTop: "0.5rem",
+    color: "#4b5563",
+    fontSize: "0.875rem",
+  } as CSSProperties,
+};
+
+export type PRReviewWithLgtm = PRReview & { lgtmCount: number };
+
+type PRReviewCardProps = {
+  review: PRReviewWithLgtm;
+  onSelect: () => void;
+};
+
+export function PRReviewCard({ review: r, onSelect }: PRReviewCardProps) {
+  // Sprint 22: 多対多 reviewers を表示。マウント時に取得。
+  // 個別失敗は空配列にフォールバック（カード自体の表示は壊さない）。
+  const [reviewers, setReviewers] = useState<PRReviewReviewer[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.prReviews.reviewers
+      .list(r.id)
+      .then((list) => {
+        if (cancelled) return;
+        setReviewers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setReviewers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [r.id]);
+
+  const reviewerText =
+    reviewers.length > 0
+      ? `レビュアー: ${reviewers.map((rv) => rv.slackUserId).join(", ")}`
+      : "レビュアー: 未割当";
+
+  return (
+    <div
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      style={styles.card}
+    >
+      <div style={styles.cardHeader}>
+        <strong style={{ flex: 1 }}>{r.title}</strong>
+        <span
+          style={{
+            ...styles.badge,
+            background: "#f3f4f6",
+            color: "#374151",
+          }}
+        >
+          👍 LGTM {r.lgtmCount}/{LGTM_THRESHOLD}
+        </span>
+        <span style={{ ...styles.badge, background: STATUS_COLOR[r.status] }}>
+          {STATUS_LABEL[r.status]}
+        </span>
+      </div>
+      {r.url && (
+        <div style={{ marginTop: "0.25rem", fontSize: "0.875rem" }}>
+          <a
+            href={r.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{ color: "#2563eb" }}
+          >
+            {r.url}
+          </a>
+        </div>
+      )}
+      {r.description && <div style={styles.desc}>{r.description}</div>}
+      <div style={styles.cardMeta}>
+        <span>依頼者: {r.requesterSlackId}</span>
+        <span>{reviewerText}</span>
+      </div>
+    </div>
+  );
+}
