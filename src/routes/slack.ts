@@ -1037,7 +1037,16 @@ slack.post("/interactions", async (c) => {
           try {
             const taskId = crypto.randomUUID();
             const now = new Date().toISOString();
-            await d1.insert(tasks).values({
+            // tasks INSERT と task_assignees の bulk INSERT を 1 トランザクション化。
+            // 途中で失敗しても「タスクは作られたが担当者の一部だけ insert」という
+            // 中途半端な状態を残さない（multi-review #26 R5 [must]）。
+            const assigneeRows = assigneeIds.map((slackUserId) => ({
+              id: crypto.randomUUID(),
+              taskId,
+              slackUserId,
+              assignedAt: now,
+            }));
+            const taskInsert = d1.insert(tasks).values({
               id: taskId,
               eventId,
               parentTaskId: null,
@@ -1051,14 +1060,13 @@ slack.post("/interactions", async (c) => {
               createdAt: now,
               updatedAt: now,
             });
-
-            for (const slackUserId of assigneeIds) {
-              await d1.insert(taskAssignees).values({
-                id: crypto.randomUUID(),
-                taskId,
-                slackUserId,
-                assignedAt: now,
-              });
+            if (assigneeRows.length > 0) {
+              await d1.batch([
+                taskInsert,
+                d1.insert(taskAssignees).values(assigneeRows),
+              ]);
+            } else {
+              await taskInsert;
             }
 
             // dueAt があり担当者が居るならリマインドジョブを登録（前日/当日 09:00 JST）
@@ -1179,7 +1187,15 @@ slack.post("/interactions", async (c) => {
           try {
             const taskId = crypto.randomUUID();
             const now = new Date().toISOString();
-            await d1.insert(tasks).values({
+            // tasks INSERT と task_assignees の bulk INSERT を 1 トランザクション化。
+            // 途中失敗時に担当者だけ部分挿入される状態を防ぐ（multi-review #26 R5 [must]）。
+            const assigneeRows = assigneeIds.map((slackUserId) => ({
+              id: crypto.randomUUID(),
+              taskId,
+              slackUserId,
+              assignedAt: now,
+            }));
+            const taskInsert = d1.insert(tasks).values({
               id: taskId,
               eventId,
               parentTaskId: null,
@@ -1193,14 +1209,13 @@ slack.post("/interactions", async (c) => {
               createdAt: now,
               updatedAt: now,
             });
-
-            for (const slackUserId of assigneeIds) {
-              await d1.insert(taskAssignees).values({
-                id: crypto.randomUUID(),
-                taskId,
-                slackUserId,
-                assignedAt: now,
-              });
+            if (assigneeRows.length > 0) {
+              await d1.batch([
+                taskInsert,
+                d1.insert(taskAssignees).values(assigneeRows),
+              ]);
+            } else {
+              await taskInsert;
             }
 
             if (dueAt && assigneeIds.length > 0) {
