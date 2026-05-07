@@ -74,32 +74,6 @@ export function ScheduleSection({ meetingId, onChange }: Props) {
               })),
             ),
           );
-        } else if (
-          data.reminderDaysBefore &&
-          Array.isArray(data.reminderDaysBefore)
-        ) {
-          const migrated: ReminderItem[] = data.reminderDaysBefore
-            .map((item): ReminderItem | null => {
-              if (typeof item === "number") {
-                return {
-                  trigger: { type: "before_event", daysBefore: item },
-                  time: data.reminderTime ?? "09:00",
-                  message: data.reminderMessageTemplate ?? "",
-                };
-              }
-              if (item && typeof item === "object") {
-                const daysBefore = Number(item.daysBefore);
-                if (isNaN(daysBefore)) return null;
-                return {
-                  trigger: { type: "before_event", daysBefore },
-                  time: data.reminderTime ?? "09:00",
-                  message: item.message ?? data.reminderMessageTemplate ?? "",
-                };
-              }
-              return null;
-            })
-            .filter((r): r is ReminderItem => r !== null);
-          if (migrated.length > 0) setReminders(withLocalIds(migrated));
         }
       }
     } catch {
