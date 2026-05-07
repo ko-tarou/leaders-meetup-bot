@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Workspace } from "../types";
 import { api } from "../api";
+import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
 // - bot_token / signing_secret は登録時のみ送信し、サーバーは AES-256-GCM で暗号化保存
 export function WorkspacesPage() {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,18 +54,17 @@ export function WorkspacesPage() {
   }, [refreshKey]);
 
   const handleDelete = async (ws: Workspace) => {
-    if (
-      !confirm(
-        `ワークスペース「${ws.name}」を削除しますか？\n紐付いたミーティングがある場合は削除できません。`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      message: `ワークスペース「${ws.name}」を削除しますか？\n紐付いたミーティングがある場合は削除できません。`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     try {
       await api.workspaces.delete(ws.id);
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除に失敗しました");
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     }
   };
 
