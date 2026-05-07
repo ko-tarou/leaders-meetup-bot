@@ -9,6 +9,7 @@ import { SlackClient } from "./slack-api";
 import { tasks, taskAssignees } from "../db/schema";
 import { scheduleTaskReminders } from "./devhub-task-reminder";
 import { stickyRepostByChannel } from "./sticky-task-board";
+import type { DecryptedWorkspace } from "./workspace";
 
 export type TaskAddModalMetadata = {
   eventId: string;
@@ -271,10 +272,18 @@ export type HandleTaskAddSubmissionOptions = {
   missingEventErrorText: string;
 };
 
+// 005-13c: V には必ず workspace を含むよう制約する。
+// 本関数は Slack 署名検証を通過した後の view_submission ハンドラからしか呼ばれず、
+// signature middleware で必ず c.set("workspace", workspace) されている前提。
+type WithWorkspace = { workspace: DecryptedWorkspace } & Record<
+  string,
+  unknown
+>;
+
 export async function handleTaskAddSubmission<
-  V extends Record<string, unknown> = Record<string, unknown>,
+  V extends WithWorkspace = WithWorkspace,
 >(
-  // 呼び出し側の Variables 型に依存しないよう generic にする。
+  // 呼び出し側の Variables 型に依存しないよう generic にしつつ、workspace は必須。
   // Hono の Context<Env> は Set<Env> が invariant のため、固定型では
   // SlackVariables を持つ Context を渡せない（multi-review #32 R2 対応の副次的影響）。
   c: Context<{ Bindings: Env; Variables: V }>,
@@ -348,12 +357,16 @@ export async function handleTaskAddSubmission<
       ? "Failed to notify sticky task failure:"
       : "Failed to notify task failure:";
 
+  // 005-13c: signature middleware で resolve 済みの workspace を使う
+  // (Multi-WS 対応 / multi-review #34 R2 [must])。
+  const workspace = c.get("workspace");
+
   // モーダル送信は3秒以内に応答必須。実処理は waitUntil でバックグラウンド化
   c.executionCtx.waitUntil(
     (async () => {
       const client = new SlackClient(
-        c.env.SLACK_BOT_TOKEN,
-        c.env.SLACK_SIGNING_SECRET,
+        workspace.botToken,
+        workspace.signingSecret,
       );
       const d1 = drizzle(c.env.DB);
       try {
