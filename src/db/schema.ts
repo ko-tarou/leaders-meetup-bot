@@ -321,9 +321,7 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   pollCloseDay: integer("poll_close_day").notNull(),
   // 投票締切時刻 "HH:MM" JST
   pollCloseTime: text("poll_close_time").notNull().default("00:00"),
-  // 開催何日前にリマインドするか（JSON配列）例: [3, 0]
-  reminderDaysBefore: text("reminder_days_before").notNull().default("[3, 0]"),
-  // リマインド時刻 "09:00"
+  // リマインド時刻 "09:00"（reminders 内の要素が time を持たない旧 row 用の fallback）
   reminderTime: text("reminder_time").notNull().default("09:00"),
   // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
   messageTemplate: text("message_template"),
