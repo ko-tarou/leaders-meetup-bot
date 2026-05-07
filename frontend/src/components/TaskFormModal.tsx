@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Task, TaskAssignee } from "../types";
 import { api } from "../api";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 // ADR-0002: タスク作成・編集・削除モーダル（Sprint 4 PR3）。
 // 期限は JST で入力し、内部的に UTC ISO へ変換して保存する。
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSaved }: Props) {
+  const { confirm } = useConfirm();
   const isEdit = !!task;
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
@@ -121,7 +123,12 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
 
   const handleDelete = async () => {
     if (!task) return;
-    if (!confirm(`タスク「${task.title}」を削除しますか？`)) return;
+    const ok = await confirm({
+      message: `タスク「${task.title}」を削除しますか？`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     setSubmitting(true);
     setError(null);
     try {

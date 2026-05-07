@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { EventActionType, Meeting, Workspace } from "../types";
 import { api } from "../api";
 import { ChannelPicker, type SlackChannelLike } from "./ui/ChannelPicker";
+import { useToast } from "./ui/Toast";
+import { useConfirm } from "./ui/ConfirmDialog";
 
 // Sprint 13 PR3: タスク管理アクションの「チャンネル管理」サブタブ。
 // 旧 TaskManagementSettings + AddChannelModal を統合し、
@@ -27,6 +29,8 @@ const STICKY_DESC: Record<string, string> = {
 };
 
 export function ChannelManagementSection({ eventId, actionType }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   // 登録済みチャンネル
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -109,7 +113,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
       if (!r.ok) throw new Error(r.error ?? "切替に失敗しました");
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "切替に失敗しました");
+      toast.error(e instanceof Error ? e.message : "切替に失敗しました");
     } finally {
       setPendingMeetingId(null);
     }
@@ -132,14 +136,14 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
   };
   const handleRefresh = async (m: Meeting) => {
     if (!getStickyEnabled(m)) {
-      alert("sticky bot が無効です。先に有効化してください。");
+      toast.error("sticky bot が無効です。先に有効化してください。");
       return;
     }
-    if (
-      !confirm(
-        `「${m.name}」の sticky メッセージを削除して新しく投稿し直します。よろしいですか？`,
-      )
-    ) {
+    const ok = await confirm({
+      message: `「${m.name}」の sticky メッセージを削除して新しく投稿し直します。よろしいですか？`,
+      confirmLabel: "更新",
+    });
+    if (!ok) {
       return;
     }
     setPendingMeetingId(m.id);
@@ -163,22 +167,23 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
       const postLine = r.postError
         ? `投稿: NG ${r.postError}`
         : `投稿: OK (ts=${r.newTs ?? "?"})`;
-      alert(
+      toast.info(
         `ボード更新結果:\n${deleteLine}\n${postLine}\n\n旧 ts: ${r.oldTs ?? "?"}`,
       );
     } catch (e) {
-      alert(e instanceof Error ? e.message : "更新に失敗しました");
+      toast.error(e instanceof Error ? e.message : "更新に失敗しました");
     } finally {
       setPendingMeetingId(null);
     }
   };
 
   const handleRemove = async (m: Meeting) => {
-    if (
-      !confirm(
-        `「${m.name}」を影響チャンネルから外しますか？\n（sticky bot を有効化したまま削除すると Slack 上のメッセージは残ります）`,
-      )
-    ) {
+    const ok = await confirm({
+      message: `「${m.name}」を影響チャンネルから外しますか？\n（sticky bot を有効化したまま削除すると Slack 上のメッセージは残ります）`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) {
       return;
     }
     setPendingMeetingId(m.id);
@@ -186,7 +191,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
       await api.deleteMeeting(m.id);
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除に失敗しました");
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     } finally {
       setPendingMeetingId(null);
     }
@@ -211,7 +216,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
       }
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "追加に失敗しました");
+      toast.error(e instanceof Error ? e.message : "追加に失敗しました");
     }
   };
 
