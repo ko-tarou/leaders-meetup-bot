@@ -2,13 +2,12 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { SlackClient } from "../../services/slack-api";
 import { createPoll, closePoll } from "../../services/poll";
 import { createReminderJob } from "../../services/scheduler";
 import { meetings, tasks, taskAssignees } from "../../db/schema";
 import { buildTaskAddModalView } from "../../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../../services/devhub-task-list";
-import type { SlackVariables } from "./utils";
+import { getSlackClient, type SlackVariables } from "./utils";
 
 export const commandsRouter = new Hono<{
   Bindings: Env;
@@ -24,7 +23,7 @@ commandsRouter.post("/commands", async (c) => {
 
   if (command === "/meetup") {
     if (text.trim() === "close") {
-      const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+      const client = getSlackClient(c);
       try {
         await closePoll(c.env.DB, client, channelId);
         return c.json({
@@ -100,10 +99,7 @@ commandsRouter.post("/commands", async (c) => {
       });
     }
 
-    const client = new SlackClient(
-      c.env.SLACK_BOT_TOKEN,
-      c.env.SLACK_SIGNING_SECRET,
-    );
+    const client = getSlackClient(c);
 
     try {
       await createPoll(c.env.DB, client, channelId, "リーダー雑談会", dates);
@@ -208,10 +204,7 @@ commandsRouter.post("/commands", async (c) => {
         });
       }
 
-      const client = new SlackClient(
-        c.env.SLACK_BOT_TOKEN,
-        c.env.SLACK_SIGNING_SECRET,
-      );
+      const client = getSlackClient(c);
       const view = buildTaskAddModalView({
         eventId: meeting.eventId,
         channelId,

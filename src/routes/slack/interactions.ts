@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and, ne } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { SlackClient } from "../../services/slack-api";
 import { handleVote } from "../../services/poll";
 import {
   handleAttendanceVote,
@@ -27,7 +26,7 @@ import {
   LGTM_THRESHOLD,
 } from "../../services/sticky-pr-review-board";
 import { createSlackClientForWorkspace } from "../../services/workspace";
-import type { SlackVariables } from "./utils";
+import { getSlackClient, type SlackVariables } from "./utils";
 
 export const interactionsRouter = new Hono<{
   Bindings: Env;
@@ -51,7 +50,7 @@ interactionsRouter.post("/interactions", async (c) => {
       const userId = payload.user?.id;
       if (!optionId || !userId) return c.json({ ok: true });
 
-      const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+      const client = getSlackClient(c);
       try {
         await handleVote(c.env.DB, client, optionId, userId);
       } catch (error) {
@@ -86,10 +85,7 @@ interactionsRouter.post("/interactions", async (c) => {
       // 3 秒以内に ack。実処理は waitUntil。
       c.executionCtx.waitUntil(
         (async () => {
-          const client = new SlackClient(
-            c.env.SLACK_BOT_TOKEN,
-            c.env.SLACK_SIGNING_SECRET,
-          );
+          const client = getSlackClient(c);
           try {
             await handleAttendanceVote(c.env.DB, client, {
               pollId,
@@ -116,10 +112,7 @@ interactionsRouter.post("/interactions", async (c) => {
       c.executionCtx.waitUntil(
         (async () => {
           const d1 = drizzle(c.env.DB);
-          const client = new SlackClient(
-            c.env.SLACK_BOT_TOKEN,
-            c.env.SLACK_SIGNING_SECRET,
-          );
+          const client = getSlackClient(c);
           try {
             const now = new Date().toISOString();
             await d1

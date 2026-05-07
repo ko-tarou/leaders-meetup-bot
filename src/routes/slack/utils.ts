@@ -1,4 +1,7 @@
+import type { Context } from "hono";
+import type { Env } from "../../types/env";
 import type { DecryptedWorkspace } from "../../services/workspace";
+import { SlackClient } from "../../services/slack-api";
 
 /**
  * Slack 署名検証ミドルウェアが Context に set する変数の型。
@@ -9,6 +12,27 @@ export type SlackVariables = {
   // ADR-0006 (PR5): 署名検証で確定した workspace。後段ハンドラはこれを正とする。
   workspace: DecryptedWorkspace;
 };
+
+/**
+ * Multi-WS 対応 SlackClient ファクトリ (multi-review #34 R2 [must] / 005-13c)
+ *
+ * 署名検証ミドルウェア (`src/routes/slack.ts`) は team_id から workspace を解決し
+ * `c.set("workspace", workspace)` で Context に保存している。本ヘルパーはそれを
+ * 受けて SlackClient を生成するだけのワンライナー。
+ *
+ * これを使うことで、各ハンドラで `new SlackClient(c.env.SLACK_BOT_TOKEN, ...)` と
+ * default workspace の token をハードコードする箇所を排除できる
+ * (Multi-WS の実装と乖離していた箇所の解消)。
+ *
+ * Context.workspace は signature middleware で必ず set されているため undefined
+ * チェックは不要（middleware が通っていなければそもそもハンドラに到達しない）。
+ */
+export function getSlackClient(
+  c: Context<{ Bindings: Env; Variables: SlackVariables }>,
+): SlackClient {
+  const workspace = c.get("workspace");
+  return new SlackClient(workspace.botToken, workspace.signingSecret);
+}
 
 /**
  * 生 body から Slack team_id を抽出する（署名検証前のルーティング目的）。
