@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
 import { type EventType } from "../lib/eventTabs";
+import { useToast } from "./ui/Toast";
 
 // events 0件時に表示する空状態UI。
 // 「イベントを作成」CTA → 簡易フォームで作成 → 作成後その event の既定タブへ。
 export function EmptyEventState() {
+  const toast = useToast();
   const { refreshEvents, setCurrentEventId } = useEvents();
   const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
@@ -25,7 +27,7 @@ export function EmptyEventState() {
       navigate(`/events/${created.id}/actions`, { replace: true });
     } catch (e) {
       console.error("event creation failed", e);
-      alert("イベント作成に失敗しました");
+      toast.error("イベント作成に失敗しました");
       setSubmitting(false);
     }
   };
