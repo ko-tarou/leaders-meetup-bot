@@ -28,7 +28,6 @@ type ScheduleRow = {
   pollStartTime: string;
   pollCloseDay: number;
   pollCloseTime: string;
-  reminderDaysBefore: string;
   reminderTime: string;
   messageTemplate: string | null;
   reminderMessageTemplate: string | null;

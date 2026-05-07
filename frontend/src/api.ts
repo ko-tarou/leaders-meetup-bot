@@ -246,8 +246,6 @@ export const api = {
       pollCloseTime?: string;
       reminders: ReminderItem[];
       messageTemplate?: string | null;
-      // 互換性のため残す
-      reminderDaysBefore?: Array<{ daysBefore: number; message: string | null }>;
       reminderTime?: string;
       reminderMessageTemplate?: string | null;
       autoRespondEnabled?: boolean | number;
@@ -267,7 +265,6 @@ export const api = {
       pollCloseDay: number;
       pollCloseTime: string;
       reminders: ReminderItem[];
-      reminderDaysBefore: Array<{ daysBefore: number; message: string | null }>;
       reminderTime: string;
       messageTemplate: string | null;
       reminderMessageTemplate: string | null;

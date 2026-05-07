@@ -92,11 +92,6 @@ export type Reminder = {
   enabled: number;
 };
 
-export type ReminderConfig = {
-  daysBefore: number;
-  message: string | null;
-};
-
 export type Trigger =
   | { type: "before_event"; daysBefore: number }
   | { type: "after_event"; daysAfter: number }
@@ -127,12 +122,10 @@ export type AutoSchedule = {
   pollStartTime: string; // HH:MM UTC
   pollCloseDay: number;
   pollCloseTime: string; // HH:MM UTC
-  // 旧形式の数値配列と新形式のオブジェクト配列の両方を許容する
-  reminderDaysBefore: Array<ReminderConfig | number>;
   reminderTime: string;
   messageTemplate?: string | null;
   reminderMessageTemplate?: string | null;
-  // 新形式: トリガー型リマインダー配列
+  // トリガー型リマインダー配列（新形式・唯一のソース）
   reminders?: ReminderItem[];
   enabled: number;
   autoRespondEnabled?: number;
