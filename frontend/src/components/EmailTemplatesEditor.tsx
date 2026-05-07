@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { CSSProperties } from "react";
 import type { EmailTemplate, EventAction } from "../types";
 import { api } from "../api";
+import { colors } from "../styles/tokens";
 
 // Sprint 24: 管理画面 (member_application > メール サブタブ) で使う。
 // event_actions.config.emailTemplates に複数テンプレを保存する。
@@ -295,7 +296,7 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
           {submitting ? "保存中..." : "保存"}
         </button>
         {savedAt && (
-          <span style={{ fontSize: "0.875rem", color: "#16a34a" }}>
+          <span style={{ fontSize: "0.875rem", color: colors.success }}>
             ✓ 保存しました
           </span>
         )}
@@ -307,28 +308,28 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
 const styles = {
   container: { padding: "1rem" } as CSSProperties,
   description: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: "0.875rem",
     marginTop: 0,
     marginBottom: "0.5rem",
   } as CSSProperties,
   helpBox: {
-    background: "#f9fafb",
-    border: "1px solid #e5e7eb",
+    background: colors.surface,
+    border: `1px solid ${colors.border}`,
     borderRadius: "0.375rem",
     padding: "0.5rem 0.75rem",
     fontSize: "0.8125rem",
     marginBottom: "1rem",
   } as CSSProperties,
   helpHint: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: "0.75rem",
     marginTop: "0.25rem",
   } as CSSProperties,
   error: {
-    color: "#dc2626",
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
+    color: colors.danger,
+    background: colors.dangerSubtle,
+    border: `1px solid ${colors.dangerSubtle}`,
     borderRadius: "0.25rem",
     padding: "0.5rem 0.75rem",
     marginBottom: "0.75rem",
@@ -337,16 +338,16 @@ const styles = {
   empty: {
     padding: "1.5rem",
     textAlign: "center",
-    color: "#6b7280",
-    border: "1px dashed #d1d5db",
+    color: colors.textSecondary,
+    border: `1px dashed ${colors.borderStrong}`,
     borderRadius: "0.5rem",
     marginBottom: "0.75rem",
   } as CSSProperties,
   card: {
-    border: "1px solid #e5e7eb",
+    border: `1px solid ${colors.border}`,
     borderRadius: "0.375rem",
     padding: "0.75rem",
-    background: "white",
+    background: colors.background,
   } as CSSProperties,
   cardHeader: {
     display: "flex",
@@ -362,14 +363,14 @@ const styles = {
   nameInput: {
     flex: 1,
     padding: "0.375rem 0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
   } as CSSProperties,
   bodyArea: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     fontFamily: "monospace",
     fontSize: "0.8125rem",
@@ -379,15 +380,15 @@ const styles = {
   iconBtn: {
     width: "2rem",
     height: "2rem",
-    border: "1px solid #d1d5db",
-    background: "white",
+    border: `1px solid ${colors.borderStrong}`,
+    background: colors.background,
     borderRadius: "0.25rem",
     cursor: "pointer",
     fontSize: "0.875rem",
   } as CSSProperties,
   deleteIconBtn: {
-    color: "#dc2626",
-    borderColor: "#fca5a5",
+    color: colors.danger,
+    borderColor: colors.dangerSubtle,
   } as CSSProperties,
   buttonRow: {
     display: "flex",
@@ -398,16 +399,16 @@ const styles = {
   } as CSSProperties,
   secondaryBtn: {
     padding: "0.5rem 1rem",
-    border: "1px solid #d1d5db",
-    background: "white",
+    border: `1px solid ${colors.borderStrong}`,
+    background: colors.background,
     borderRadius: "0.375rem",
     cursor: "pointer",
     fontSize: "0.875rem",
   } as CSSProperties,
   primaryBtn: {
     padding: "0.5rem 1.5rem",
-    background: "#2563eb",
-    color: "white",
+    background: colors.primary,
+    color: colors.textInverse,
     border: "none",
     borderRadius: "0.375rem",
     cursor: "pointer",

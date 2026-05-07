@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { colors } from "../styles/tokens";
 
 type Props = {
   selectedSlots: string[]; // UTC ISO 配列
@@ -149,8 +150,8 @@ export function WeekCalendarPicker({
           display: "grid",
           gridTemplateColumns: "60px repeat(7, 1fr)",
           gap: "1px",
-          background: "#e5e7eb",
-          border: "1px solid #e5e7eb",
+          background: colors.border,
+          border: `1px solid ${colors.border}`,
           borderRadius: "0.25rem",
           overflow: "hidden",
         }}
@@ -159,7 +160,7 @@ export function WeekCalendarPicker({
         <div style={cellStyleHeader} />
         {days.map((d, i) => (
           <div key={i} style={cellStyleHeader}>
-            <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+            <div style={{ fontSize: "0.75rem", color: colors.textSecondary }}>
               {WEEKDAYS[d.getDay()]}
             </div>
             <div style={{ fontWeight: "bold", fontSize: "0.9rem" }}>
@@ -191,19 +192,19 @@ export function WeekCalendarPicker({
                   style={{
                     ...cellStyleSlot,
                     background: selected
-                      ? "#10b981"
+                      ? colors.success
                       : past
-                        ? "#f3f4f6"
+                        ? colors.surface
                         : restrictedOut
-                          ? "#f3f4f6"
-                          : "white",
+                          ? colors.surface
+                          : colors.background,
                     color: selected
-                      ? "white"
+                      ? colors.textInverse
                       : past
-                        ? "#d1d5db"
+                        ? colors.borderStrong
                         : restrictedOut
-                          ? "#d1d5db"
-                          : "#9ca3af",
+                          ? colors.borderStrong
+                          : colors.textMuted,
                     cursor: available ? "pointer" : "not-allowed",
                   }}
                 >
@@ -219,7 +220,7 @@ export function WeekCalendarPicker({
         style={{
           marginTop: "0.5rem",
           fontSize: "0.875rem",
-          color: "#6b7280",
+          color: colors.textSecondary,
         }}
       >
         選択中: {selectedSlots.length}枠（クリックで選択/解除、ドラッグで範囲指定）
@@ -229,21 +230,21 @@ export function WeekCalendarPicker({
 }
 
 const cellStyleHeader: React.CSSProperties = {
-  background: "#f3f4f6",
+  background: colors.surface,
   padding: "0.5rem",
   textAlign: "center",
 };
 
 const cellStyleTime: React.CSSProperties = {
-  background: "#f9fafb",
+  background: colors.surface,
   padding: "0.5rem",
   textAlign: "right",
   fontSize: "0.75rem",
-  color: "#6b7280",
+  color: colors.textSecondary,
 };
 
 const cellStyleSlot: React.CSSProperties = {
-  background: "white",
+  background: colors.background,
   padding: "0.5rem",
   textAlign: "center",
   fontSize: "0.875rem",
@@ -251,8 +252,8 @@ const cellStyleSlot: React.CSSProperties = {
 };
 
 const navBtnStyle: React.CSSProperties = {
-  background: "white",
-  border: "1px solid #d1d5db",
+  background: colors.background,
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: "0.375rem",
   padding: "0.375rem 0.75rem",
   fontSize: "0.875rem",

@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { EventAction } from "../types";
 import { api } from "../api";
 import { WeekCalendarPicker } from "./WeekCalendarPicker";
+import { colors } from "../styles/tokens";
 
 // Sprint 19 PR1: 管理画面 (member_application > 候補日時設定 サブタブ) で使う。
 // kota が空き時間を週カレンダーでマークし、event_actions.config の
@@ -66,7 +67,7 @@ export function LeaderAvailabilityEditor({ eventId, action, onChange }: Props) {
       <h3 style={{ marginTop: 0 }}>面談可能な候補日時を設定</h3>
       <p
         style={{
-          color: "#6b7280",
+          color: colors.textSecondary,
           fontSize: "0.875rem",
           marginBottom: "1rem",
         }}
@@ -79,7 +80,7 @@ export function LeaderAvailabilityEditor({ eventId, action, onChange }: Props) {
         <div
           role="alert"
           style={{
-            color: "#dc2626",
+            color: colors.danger,
             marginBottom: "0.5rem",
             fontSize: "0.875rem",
           }}
@@ -103,8 +104,8 @@ export function LeaderAvailabilityEditor({ eventId, action, onChange }: Props) {
           onClick={handleSave}
           disabled={saving}
           style={{
-            background: saving ? "#93c5fd" : "#2563eb",
-            color: "white",
+            background: saving ? colors.primarySubtle : colors.primary,
+            color: colors.textInverse,
             border: "none",
             padding: "0.5rem 1.5rem",
             borderRadius: "0.375rem",
@@ -115,7 +116,7 @@ export function LeaderAvailabilityEditor({ eventId, action, onChange }: Props) {
           {saving ? "保存中..." : "保存"}
         </button>
         {savedAt && (
-          <span style={{ fontSize: "0.875rem", color: "#16a34a" }}>
+          <span style={{ fontSize: "0.875rem", color: colors.success }}>
             ✓ 保存しました
           </span>
         )}

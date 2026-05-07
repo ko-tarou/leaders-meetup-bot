@@ -88,7 +88,7 @@ export function HistorySection({ meetingId }: Props) {
                   {opt.votes?.length ?? 0}票
                 </span>
                 {opt.votes && opt.votes.length > 0 && (
-                  <span style={{ marginLeft: 8, color: "#666", fontSize: 12 }}>
+                  <span style={{ marginLeft: 8, color: colors.textSecondary, fontSize: 12 }}>
                     ({opt.votes.map((v) => v.slackUserId).join(", ")})
                   </span>
                 )}

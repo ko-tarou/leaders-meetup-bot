@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { EventAction, Workspace } from "../types";
 import { api } from "../api";
 import { ChannelSelector } from "./ChannelSelector";
+import { colors } from "../styles/tokens";
 
 // ADR-0008 / Sprint 11 PR2:
 // member_welcome アクション専用の設定フォーム。
@@ -106,7 +107,7 @@ export function MemberWelcomeConfigForm({
 
   return (
     <div>
-      <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: 0 }}>
+      <p style={{ color: colors.textSecondary, fontSize: "0.875rem", marginTop: 0 }}>
         新メンバーがトリガーチャンネルに参加すると、bot が自動で他のチャンネルに招待し、
         案内メッセージを DM 送信します。
       </p>
@@ -114,7 +115,7 @@ export function MemberWelcomeConfigForm({
       {error && (
         <div
           style={{
-            color: "#dc2626",
+            color: colors.danger,
             marginBottom: "0.5rem",
             fontSize: "0.875rem",
           }}
@@ -134,7 +135,7 @@ export function MemberWelcomeConfigForm({
           style={{
             width: "100%",
             padding: "0.5rem",
-            border: "1px solid #d1d5db",
+            border: `1px solid ${colors.borderStrong}`,
             borderRadius: "0.25rem",
           }}
         >
@@ -164,12 +165,12 @@ export function MemberWelcomeConfigForm({
           style={{
             width: "100%",
             padding: "0.5rem",
-            border: "1px solid #d1d5db",
+            border: `1px solid ${colors.borderStrong}`,
             borderRadius: "0.25rem",
             boxSizing: "border-box",
           }}
         />
-        <small style={{ color: "#6b7280", display: "block", marginTop: 4 }}>
+        <small style={{ color: colors.textSecondary, display: "block", marginTop: 4 }}>
           ※ Channel ID は Slack のチャンネル詳細から取得できます
         </small>
       </Field>
@@ -182,7 +183,7 @@ export function MemberWelcomeConfigForm({
           style={{
             width: "100%",
             padding: "0.5rem",
-            border: "1px solid #d1d5db",
+            border: `1px solid ${colors.borderStrong}`,
             borderRadius: "0.25rem",
             boxSizing: "border-box",
             fontFamily: "inherit",
@@ -205,8 +206,8 @@ export function MemberWelcomeConfigForm({
           disabled={submitting}
           style={{
             padding: "0.5rem 1rem",
-            border: "1px solid #d1d5db",
-            background: "#fff",
+            border: `1px solid ${colors.borderStrong}`,
+            background: colors.background,
             borderRadius: "0.25rem",
             cursor: submitting ? "wait" : "pointer",
           }}
@@ -217,8 +218,8 @@ export function MemberWelcomeConfigForm({
           onClick={handleSave}
           disabled={submitting}
           style={{
-            background: "#2563eb",
-            color: "white",
+            background: colors.primary,
+            color: colors.textInverse,
             border: "none",
             padding: "0.5rem 1rem",
             borderRadius: "0.25rem",
@@ -240,7 +241,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
           display: "block",
           marginBottom: "0.25rem",
           fontSize: "0.875rem",
-          color: "#374151",
+          color: colors.text,
         }}
       >
         {label}

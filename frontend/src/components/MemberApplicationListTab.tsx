@@ -10,6 +10,7 @@ import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 // ADR-0008 / Sprint 16 PR3:
 // 応募管理タブ。一覧 → 詳細モーダルで合否判定 / 面談日時設定 / メールテンプレ生成。
@@ -25,25 +26,25 @@ const STATUS_LABEL: Record<ApplicationStatus, string> = {
 };
 
 const STATUS_COLOR: Record<ApplicationStatus, string> = {
-  pending: "#6b7280",
-  scheduled: "#2563eb",
-  passed: "#16a34a",
-  failed: "#dc2626",
-  rejected: "#9ca3af",
+  pending: colors.textSecondary,
+  scheduled: colors.primary,
+  passed: colors.success,
+  failed: colors.danger,
+  rejected: colors.textMuted,
 };
 
 const styles = {
   container: { padding: "1rem" } as CSSProperties,
   shareBox: {
     padding: "0.75rem",
-    background: "#f0f9ff",
-    border: "1px solid #bfdbfe",
+    background: colors.primarySubtle,
+    border: `1px solid ${colors.primarySubtle}`,
     borderRadius: "0.375rem",
     marginBottom: "1rem",
   } as CSSProperties,
   shareLabel: {
     fontSize: "0.875rem",
-    color: "#1e40af",
+    color: colors.primary,
     marginBottom: "0.25rem",
   } as CSSProperties,
   shareUrl: { fontSize: "0.875rem", wordBreak: "break-all" } as CSSProperties,
@@ -57,15 +58,15 @@ const styles = {
   empty: {
     padding: "2rem",
     textAlign: "center",
-    color: "#6b7280",
-    border: "1px dashed #d1d5db",
+    color: colors.textSecondary,
+    border: `1px dashed ${colors.borderStrong}`,
     borderRadius: "0.5rem",
   } as CSSProperties,
   card: {
     padding: "0.75rem",
-    border: "1px solid #e5e7eb",
+    border: `1px solid ${colors.border}`,
     borderRadius: "0.375rem",
-    background: "white",
+    background: colors.background,
     cursor: "pointer",
   } as CSSProperties,
   cardHeader: {
@@ -75,14 +76,14 @@ const styles = {
   } as CSSProperties,
   cardMeta: {
     fontSize: "0.75rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
     marginTop: "0.25rem",
   } as CSSProperties,
   badge: {
     fontSize: "0.75rem",
     padding: "0.125rem 0.5rem",
     borderRadius: "0.25rem",
-    color: "white",
+    color: colors.textInverse,
   } as CSSProperties,
   modalOverlay: {
     position: "fixed",
@@ -96,7 +97,7 @@ const styles = {
     padding: "1rem",
   } as CSSProperties,
   modal: {
-    background: "white",
+    background: colors.background,
     padding: "1.5rem",
     borderRadius: "0.5rem",
     width: "min(700px, 100%)",
@@ -113,23 +114,23 @@ const styles = {
   field: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
   } as CSSProperties,
   hint: {
     fontSize: "0.75rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
     marginTop: "0.25rem",
   } as CSSProperties,
   slot: {
     padding: "0.25rem 0.5rem",
-    background: "#f9fafb",
+    background: colors.surface,
     borderRadius: "0.25rem",
   } as CSSProperties,
   slotSelectable: {
     padding: "0.5rem 0.75rem",
-    background: "white",
-    border: "1px solid #d1d5db",
+    background: colors.background,
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.375rem",
     cursor: "pointer",
     fontSize: "0.875rem",
@@ -139,14 +140,14 @@ const styles = {
     gap: "0.5rem",
   } as CSSProperties,
   slotSelectableHover: {
-    borderColor: "#9ca3af",
-    background: "#f9fafb",
+    borderColor: colors.textMuted,
+    background: colors.surface,
   } as CSSProperties,
   slotSelected: {
     padding: "0.5rem 0.75rem",
-    background: "#2563eb",
-    color: "white",
-    border: "1px solid #2563eb",
+    background: colors.primary,
+    color: colors.textInverse,
+    border: `1px solid ${colors.primary}`,
     borderRadius: "0.375rem",
     cursor: "pointer",
     fontSize: "0.875rem",
@@ -157,8 +158,8 @@ const styles = {
   } as CSSProperties,
   slotOrphan: {
     padding: "0.5rem 0.75rem",
-    background: "#fef3c7",
-    border: "1px solid #f59e0b",
+    background: colors.warningSubtle,
+    border: `1px solid ${colors.warning}`,
     borderRadius: "0.375rem",
     fontSize: "0.875rem",
     display: "flex",
@@ -168,8 +169,8 @@ const styles = {
   clearBtn: {
     marginLeft: "auto",
     padding: "0.25rem 0.5rem",
-    background: "white",
-    border: "1px solid #d1d5db",
+    background: colors.background,
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     cursor: "pointer",
     fontSize: "0.75rem",
@@ -177,7 +178,7 @@ const styles = {
   emailArea: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     fontFamily: "monospace",
     fontSize: "0.75rem",
@@ -190,9 +191,9 @@ const styles = {
   } as CSSProperties,
   deleteBtn: {
     marginLeft: "auto",
-    color: "#dc2626",
-    border: "1px solid #dc2626",
-    background: "white",
+    color: colors.danger,
+    border: `1px solid ${colors.danger}`,
+    background: colors.background,
     padding: "0.5rem 1rem",
     borderRadius: "0.25rem",
     cursor: "pointer",
@@ -200,7 +201,7 @@ const styles = {
   sectionLabel: {
     fontSize: "0.75rem",
     fontWeight: "bold",
-    color: "#374151",
+    color: colors.text,
     marginBottom: "0.25rem",
   } as CSSProperties,
 };
@@ -250,7 +251,7 @@ export function MemberApplicationListTab({ eventId, action }: Props) {
   if (loading) return <div style={styles.container}>読み込み中...</div>;
   if (error)
     return (
-      <div style={{ ...styles.container, color: "#dc2626" }}>
+      <div style={{ ...styles.container, color: colors.danger }}>
         エラー: {error}
       </div>
     );
@@ -537,7 +538,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("scheduled")}
             disabled={submitting}
-            style={btnStyle("#2563eb")}
+            style={btnStyle(colors.primary)}
           >
             面談予定にする
           </button>
@@ -545,7 +546,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("passed")}
             disabled={submitting}
-            style={btnStyle("#16a34a")}
+            style={btnStyle(colors.success)}
           >
             合格
           </button>
@@ -553,7 +554,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("failed")}
             disabled={submitting}
-            style={btnStyle("#dc2626")}
+            style={btnStyle(colors.danger)}
           >
             不合格
           </button>
@@ -561,7 +562,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("rejected")}
             disabled={submitting}
-            style={btnStyle("#9ca3af")}
+            style={btnStyle(colors.textMuted)}
           >
             辞退
           </button>
@@ -569,7 +570,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("pending")}
             disabled={submitting}
-            style={btnStyle("#6b7280")}
+            style={btnStyle(colors.textSecondary)}
           >
             未対応に戻す
           </button>
@@ -601,7 +602,7 @@ function SlotPicker({
 
   if (slots.length === 0) {
     return (
-      <div style={{ fontSize: "0.875rem", color: "#6b7280" }}>
+      <div style={{ fontSize: "0.875rem", color: colors.textSecondary }}>
         （希望日時なし）
       </div>
     );
