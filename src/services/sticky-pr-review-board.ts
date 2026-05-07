@@ -25,6 +25,7 @@ import {
 } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
+import { PR_REVIEW_STATUS_EMOJI, PR_REVIEW_STATUS_LABEL } from "./labels";
 import {
   postInitialStickyBoard,
   repostStickyBoard,
@@ -36,21 +37,11 @@ import type { Env } from "../types/env";
 
 // Sprint 17 PR1: 自動完了に必要な LGTM 数。
 // このしきい値に達した時点で sticky bot が status='merged' に自動更新する。
+//
+// 注意: PR 005-6 で labels.ts に集約しなかった。
+// 理由: routes/slack.ts が `from "../services/sticky-pr-review-board"` で
+// この定数を import しているため、ここに置いておけば呼び出し側を一切触らずに済む。
 export const LGTM_THRESHOLD = 2;
-
-const STATUS_LABEL: Record<string, string> = {
-  open: "未着手",
-  in_review: "レビュー中",
-  merged: "マージ済",
-  closed: "クローズ",
-};
-
-const STATUS_EMOJI: Record<string, string> = {
-  open: "🔴",
-  in_review: "🟡",
-  merged: "✅",
-  closed: "⚫",
-};
 
 /**
  * PR レビュー sticky board の Block Kit を構築する。
@@ -159,8 +150,8 @@ export async function buildPRReviewBoardBlocks(
         ? `レビュアー: ${reviewerNames.join(", ")}`
         : "レビュアー: 未割当";
     const urlText = r.url ? `\n<${r.url}|🔗 リンク>` : "";
-    const statusEmoji = STATUS_EMOJI[r.status] ?? "🔴";
-    const statusLabel = STATUS_LABEL[r.status] ?? r.status;
+    const statusEmoji = PR_REVIEW_STATUS_EMOJI[r.status] ?? "🔴";
+    const statusLabel = PR_REVIEW_STATUS_LABEL[r.status] ?? r.status;
     // Sprint 17 PR1: LGTM 数を取得して表示
     const lgtmCount = lgtmMap.get(r.id) ?? 0;
     const lgtmText = `LGTM ${lgtmCount}/${LGTM_THRESHOLD}`;

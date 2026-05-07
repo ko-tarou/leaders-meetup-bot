@@ -14,7 +14,7 @@
 //
 // PR 005-6: 共通ロジックは services/sticky-board-base.ts に集約。
 // このファイルは block builder + data loader + 既存 export 関数（薄いラッパー）
-// だけを残す。
+// だけを残す。ラベル定数は services/labels.ts から import する。
 
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -22,6 +22,7 @@ import { meetings, tasks, taskAssignees } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
 import { utcToJstFormat } from "./time-utils";
+import { TASK_PRIORITY_EMOJI, TASK_STATUS_LABEL } from "./labels";
 import {
   postInitialStickyBoard,
   repostStickyBoard,
@@ -30,18 +31,6 @@ import {
   type StickyBoardConfig,
 } from "./sticky-board-base";
 import type { Env } from "../types/env";
-
-const PRIORITY_EMOJI: Record<string, string> = {
-  low: "🟢",
-  mid: "🟡",
-  high: "🔴",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  todo: "未着手",
-  doing: "進行中",
-  done: "完了",
-};
 
 /**
  * sticky board の Block Kit を構築する。
@@ -136,8 +125,8 @@ export async function buildBoardBlocks(
       task.assigneeNames.length > 0
         ? `担当: ${task.assigneeNames.join(", ")}`
         : "担当: 未割当";
-    const priorityEmoji = PRIORITY_EMOJI[task.priority] ?? "🟡";
-    const statusLabel = STATUS_LABEL[task.status] ?? task.status;
+    const priorityEmoji = TASK_PRIORITY_EMOJI[task.priority] ?? "🟡";
+    const statusLabel = TASK_STATUS_LABEL[task.status] ?? task.status;
     const sectionText = `*${priorityEmoji} ${task.title}*\n${startText}${dueText} / ${statusLabel}\n${assigneeText}`;
 
     blocks.push({
