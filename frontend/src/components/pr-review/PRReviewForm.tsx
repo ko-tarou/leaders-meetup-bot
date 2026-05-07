@@ -6,6 +6,7 @@ import type {
   PRReviewStatus,
 } from "../../types";
 import { api } from "../../api";
+import { useConfirm } from "../ui/ConfirmDialog";
 
 const styles = {
   modalOverlay: {
@@ -90,6 +91,7 @@ export function PRReviewForm({
   onClose,
   onSaved,
 }: PRReviewFormProps) {
+  const { confirm } = useConfirm();
   const isEdit = !!review;
   const [title, setTitle] = useState(review?.title ?? "");
   const [url, setUrl] = useState(review?.url ?? "");
@@ -189,7 +191,12 @@ export function PRReviewForm({
 
   const handleDelete = async () => {
     if (!review) return;
-    if (!confirm(`「${review.title}」を削除しますか？`)) return;
+    const ok = await confirm({
+      message: `「${review.title}」を削除しますか？`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     setSubmitting(true);
     try {
       await api.prReviews.delete(review.id);
