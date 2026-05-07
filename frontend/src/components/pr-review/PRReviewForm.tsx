@@ -7,6 +7,7 @@ import type {
 } from "../../types";
 import { api } from "../../api";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { colors } from "../../styles/tokens";
 
 const styles = {
   modalOverlay: {
@@ -19,7 +20,7 @@ const styles = {
     zIndex: 1000,
   } as CSSProperties,
   modal: {
-    background: "white",
+    background: colors.background,
     padding: "1.5rem",
     borderRadius: "0.5rem",
     width: "min(500px, 90vw)",
@@ -43,8 +44,8 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
     gap: "0.25rem",
-    background: "#e5e7eb",
-    color: "#374151",
+    background: colors.border,
+    color: colors.text,
     fontSize: "0.75rem",
     padding: "0.125rem 0.5rem",
     borderRadius: "9999px",
@@ -53,7 +54,7 @@ const styles = {
     background: "transparent",
     border: "none",
     cursor: "pointer",
-    color: "#6b7280",
+    color: colors.textSecondary,
     padding: 0,
     fontSize: "0.875rem",
     lineHeight: 1,
@@ -64,8 +65,8 @@ const styles = {
   } as CSSProperties,
   chipInput: { flex: 1 } as CSSProperties,
   chipAddBtn: {
-    background: "#2563eb",
-    color: "white",
+    background: colors.primary,
+    color: colors.textInverse,
     border: "none",
     padding: "0.25rem 0.75rem",
     borderRadius: "0.25rem",
@@ -74,7 +75,7 @@ const styles = {
   } as CSSProperties,
   reviewersHint: {
     fontSize: "0.75rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
   } as CSSProperties,
 };
 
@@ -214,7 +215,7 @@ export function PRReviewForm({
           {isEdit ? "レビュー依頼を編集" : "新規レビュー依頼"}
         </h3>
         {error && (
-          <div style={{ color: "#dc2626", marginBottom: "0.5rem" }}>{error}</div>
+          <div style={{ color: colors.danger, marginBottom: "0.5rem" }}>{error}</div>
         )}
 
         <Field label="タイトル *">
@@ -297,7 +298,7 @@ export function PRReviewForm({
                 </button>
               </div>
               {reviewerError && (
-                <div style={{ color: "#dc2626", fontSize: "0.75rem", marginTop: "0.25rem" }}>
+                <div style={{ color: colors.danger, fontSize: "0.75rem", marginTop: "0.25rem" }}>
                   {reviewerError}
                 </div>
               )}
@@ -329,7 +330,7 @@ export function PRReviewForm({
               type="button"
               onClick={handleDelete}
               disabled={submitting}
-              style={{ background: "#dc2626", color: "white", marginRight: "auto" }}
+              style={{ background: colors.danger, color: colors.textInverse, marginRight: "auto" }}
             >
               削除
             </button>
@@ -341,7 +342,7 @@ export function PRReviewForm({
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            style={{ background: "#2563eb", color: "white" }}
+            style={{ background: colors.primary, color: colors.textInverse }}
           >
             {submitting ? "保存中..." : isEdit ? "更新" : "作成"}
           </button>

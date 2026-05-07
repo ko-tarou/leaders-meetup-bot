@@ -4,6 +4,7 @@ import type { PRReview } from "../types";
 import { api } from "../api";
 import { PRReviewCard, type PRReviewWithLgtm } from "./pr-review/PRReviewCard";
 import { PRReviewForm } from "./pr-review/PRReviewForm";
+import { colors } from "../styles/tokens";
 
 // ADR-0008 / Sprint 12 PR2:
 // PR レビュー依頼の一覧 + 新規作成 + 編集 + 削除を行うタブコンポーネント。
@@ -22,8 +23,8 @@ const styles = {
     flexWrap: "wrap",
   } as CSSProperties,
   primaryBtn: {
-    background: "#2563eb",
-    color: "white",
+    background: colors.primary,
+    color: colors.textInverse,
     border: "none",
     padding: "0.5rem 1rem",
     borderRadius: "0.25rem",
@@ -32,7 +33,7 @@ const styles = {
   empty: {
     padding: "2rem",
     textAlign: "center",
-    color: "#6b7280",
+    color: colors.textSecondary,
   } as CSSProperties,
 };
 
@@ -79,7 +80,7 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
 
   if (loading) return <div style={styles.container}>読み込み中...</div>;
   if (error)
-    return <div style={{ ...styles.container, color: "#dc2626" }}>エラー: {error}</div>;
+    return <div style={{ ...styles.container, color: colors.danger }}>エラー: {error}</div>;
 
   const displayed = showClosed
     ? reviews
