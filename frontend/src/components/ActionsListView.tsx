@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { EventAction, EventActionType } from "../types";
 import { api } from "../api";
 import { ACTION_META } from "../lib/eventTabs";
+import { useToast } from "./ui/Toast";
 
 // Sprint 13 PR1: アクション一覧 (カード形式)。
 // クリックで /events/:eventId/actions/:actionType の専用ページへ遷移する。
@@ -175,6 +176,7 @@ function AddActionModal({
   onClose: () => void;
   onAdded: () => void;
 }) {
+  const toast = useToast();
   const [actionType, setActionType] = useState<EventActionType>(
     availableTypes[0],
   );
@@ -190,7 +192,7 @@ function AddActionModal({
       });
       onAdded();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "追加に失敗しました");
+      toast.error(e instanceof Error ? e.message : "追加に失敗しました");
       setSubmitting(false);
     }
   };

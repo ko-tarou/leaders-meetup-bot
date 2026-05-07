@@ -17,6 +17,8 @@ import {
   AttendanceCheckForm,
   AttendanceCheckMain,
 } from "../components/AttendanceCheckForm";
+import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -71,6 +73,8 @@ export function ActionDetailPage() {
     actionType: string;
   }>();
   const navigate = useNavigate();
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const { events } = useEvents();
   const [action, setAction] = useState<EventAction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -123,18 +127,23 @@ export function ActionDetailPage() {
       });
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "更新に失敗しました");
+      toast.error(e instanceof Error ? e.message : "更新に失敗しました");
     }
   };
 
   const handleDelete = async () => {
     const label = meta?.label ?? action.actionType;
-    if (!confirm(`アクション「${label}」を削除しますか？`)) return;
+    const ok = await confirm({
+      message: `アクション「${label}」を削除しますか？`,
+      variant: "danger",
+      confirmLabel: "削除",
+    });
+    if (!ok) return;
     try {
       await api.events.actions.delete(eventId, action.id);
       navigate(`/events/${eventId}/actions`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "削除に失敗しました");
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     }
   };
 
