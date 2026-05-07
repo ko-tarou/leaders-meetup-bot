@@ -2,6 +2,14 @@
 // callback_id: devhub_task_add_submit
 // private_metadata に eventId / channelId / createdBySlackId を JSON で保持
 
+import type { Context } from "hono";
+import { drizzle } from "drizzle-orm/d1";
+import type { Env } from "../types/env";
+import { SlackClient } from "./slack-api";
+import { tasks, taskAssignees } from "../db/schema";
+import { scheduleTaskReminders } from "./devhub-task-reminder";
+import { stickyRepostByChannel } from "./sticky-task-board";
+
 export type TaskAddModalMetadata = {
   eventId: string;
   channelId: string;
@@ -231,3 +239,206 @@ export function jstDateTimeToUtcIso(
   const utcMs = Date.UTC(year, month - 1, day, hour - 9, minute, 0);
   return new Date(utcMs).toISOString();
 }
+
+/**
+ * `devhub_task_add_submit` と `sticky_task_add_submit` の view_submission ハンドラ
+ * を共通化したヘルパー（multi-review #32 R2 [must]）。
+ *
+ * 両 callback はモーダルの値抽出 / tasks INSERT / taskAssignees INSERT /
+ * reminder 登録までは完全に同じで、差分は callback_id / 失効時のエラーメッセージ /
+ * post 後の挙動（devhub: post message のみ / sticky: 加えて board を repost）のみ。
+ *
+ * 既存挙動を 100% 維持するため、エラーメッセージや log prefix も option として渡せる
+ * ようにしている。
+ */
+export type TaskAddSubmissionVariant = "devhub" | "sticky";
+
+// view_submission payload の最小型。Slack から JSON.parse した結果を緩く受ける
+// （interactions.ts 側で any として既に扱っているため、ここも同等の弱さに留める）。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ViewSubmissionPayload = any;
+
+/**
+ * options:
+ * - variant: post 後の挙動と log prefix を切り替える
+ *   - "devhub": post message のみ（buildTaskListBlocks による list 再 post は別ハンドラで実施）
+ *   - "sticky": post message に加えて stickyRepostByChannel で board を repost
+ * - missingEventErrorText: eventId が metadata に無い場合のエラーメッセージ
+ *   （devhub: コマンドを再実行 / sticky: ボードのボタンを押し直し）
+ */
+export type HandleTaskAddSubmissionOptions = {
+  variant: TaskAddSubmissionVariant;
+  missingEventErrorText: string;
+};
+
+export async function handleTaskAddSubmission(
+  c: Context<{ Bindings: Env }>,
+  payload: ViewSubmissionPayload,
+  options: HandleTaskAddSubmissionOptions,
+): Promise<Response> {
+  const view = payload.view;
+  let meta: {
+    eventId?: string;
+    channelId?: string;
+    createdBySlackId?: string;
+  } = {};
+  try {
+    meta = JSON.parse(view.private_metadata || "{}");
+  } catch {
+    meta = {};
+  }
+  const eventId = meta.eventId;
+  const channelId = meta.channelId || "";
+  const createdBySlackId = meta.createdBySlackId || payload.user?.id || "";
+
+  const values = view.state?.values || {};
+  const title: string | undefined = values.title_block?.title_input?.value;
+  const description: string | null =
+    values.desc_block?.desc_input?.value || null;
+  const assigneeIds: string[] =
+    values.assignees_block?.assignees_input?.selected_users || [];
+  const dueDate: string | null =
+    values.due_date_block?.due_date_input?.selected_date || null;
+  const dueTime: string | null =
+    values.due_time_block?.due_time_input?.selected_time || null;
+  const startDate: string | null =
+    values.start_date_block?.start_date_input?.selected_date || null;
+  const startTime: string | null =
+    values.start_time_block?.start_time_input?.selected_time || null;
+  const priority: string =
+    values.priority_block?.priority_input?.selected_option?.value || "mid";
+
+  if (!title || !title.trim()) {
+    return c.json({
+      response_action: "errors",
+      errors: { title_block: "タスク名は必須です" },
+    });
+  }
+  if (!eventId) {
+    return c.json({
+      response_action: "errors",
+      errors: { title_block: options.missingEventErrorText },
+    });
+  }
+
+  const dueAt: string | null = dueDate
+    ? jstDateTimeToUtcIso(dueDate, dueTime)
+    : null;
+  const startAt: string | null = startDate
+    ? jstDateTimeToUtcIso(startDate, startTime)
+    : null;
+
+  const variant = options.variant;
+  // log prefix は既存のメッセージを維持
+  const createFailLog =
+    variant === "sticky"
+      ? "Failed to create sticky task from modal:"
+      : "Failed to create task from modal:";
+  const reminderFailLog =
+    variant === "sticky"
+      ? "Failed to schedule sticky task reminders:"
+      : "Failed to schedule devhub task reminders:";
+  const notifyFailLog =
+    variant === "sticky"
+      ? "Failed to notify sticky task failure:"
+      : "Failed to notify task failure:";
+
+  // モーダル送信は3秒以内に応答必須。実処理は waitUntil でバックグラウンド化
+  c.executionCtx.waitUntil(
+    (async () => {
+      const client = new SlackClient(
+        c.env.SLACK_BOT_TOKEN,
+        c.env.SLACK_SIGNING_SECRET,
+      );
+      const d1 = drizzle(c.env.DB);
+      try {
+        const taskId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        // tasks INSERT と task_assignees の bulk INSERT を 1 トランザクション化。
+        // 途中で失敗しても「タスクは作られたが担当者の一部だけ insert」という
+        // 中途半端な状態を残さない（multi-review #26 R5 [must]）。
+        const assigneeRows = assigneeIds.map((slackUserId) => ({
+          id: crypto.randomUUID(),
+          taskId,
+          slackUserId,
+          assignedAt: now,
+        }));
+        const taskInsert = d1.insert(tasks).values({
+          id: taskId,
+          eventId,
+          parentTaskId: null,
+          title,
+          description,
+          dueAt,
+          startAt,
+          status: "todo",
+          priority,
+          createdBySlackId,
+          createdAt: now,
+          updatedAt: now,
+        });
+        if (assigneeRows.length > 0) {
+          await d1.batch([
+            taskInsert,
+            d1.insert(taskAssignees).values(assigneeRows),
+          ]);
+        } else {
+          await taskInsert;
+        }
+
+        // dueAt があり担当者が居るならリマインドジョブを登録（前日/当日 09:00 JST）
+        if (dueAt && assigneeIds.length > 0) {
+          try {
+            await scheduleTaskReminders(
+              c.env.DB,
+              taskId,
+              dueAt,
+              title,
+              assigneeIds,
+            );
+          } catch (remErr) {
+            // リマインド登録の失敗はタスク作成自体の成否を左右しない
+            console.error(reminderFailLog, remErr);
+          }
+        }
+
+        // sticky variant のみ: board を即時 repost してボード上に新タスクを反映
+        if (variant === "sticky" && channelId) {
+          try {
+            await stickyRepostByChannel(c.env, channelId);
+          } catch (repErr) {
+            console.error(
+              "Failed to repost sticky board after create:",
+              repErr,
+            );
+          }
+        }
+
+        const successText = `✅ タスクを作成しました: ${title}`;
+        if (channelId) {
+          await client.postEphemeral(
+            channelId,
+            createdBySlackId,
+            successText,
+          );
+        } else {
+          await client.postMessage(createdBySlackId, successText);
+        }
+      } catch (e) {
+        console.error(createFailLog, e);
+        const failText = `⚠️ タスク作成に失敗しました: ${
+          e instanceof Error ? e.message : "unknown"
+        }`;
+        try {
+          await client.postMessage(createdBySlackId, failText);
+        } catch (notifyErr) {
+          console.error(notifyFailLog, notifyErr);
+        }
+      }
+    })(),
+  );
+
+  // モーダルを閉じる
+  return c.json({});
+}
+
