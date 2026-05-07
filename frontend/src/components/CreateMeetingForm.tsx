@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import type { Workspace } from "../types";
 import { ChannelSelector } from "./ChannelSelector";
@@ -8,14 +8,11 @@ import { colors, fontSize, radius, space } from "../styles/tokens";
 
 // schedule_polling のメイン画面から呼び出されるミーティング作成フォーム。
 // 既存はSlackの /meetup コマンド経由でしか作れなかったが、
-// web UIから新規 event の日程調整を初回設定できるようにするためのフォーム。
+// web UIから新規 event の日程調整を初回設定できるようにする。
 //
-// 実装方針:
-// - モーダルではなくページ内インライン form として描画する（呼び出し側で
-//   showCreate state を持って出し分ける）。SchedulePollingMain の他状態と
-//   同じレイアウトサーフェスに乗るので導線が単純。
-// - workspace は api.workspaces.list() から取得。1件しかない場合は自動選択。
-// - channel は既存の ChannelSelector を再利用（workspaceId 連動）。
+// モーダルではなくページ内インライン form として描画する（呼び出し側で
+// showCreate state で出し分け）。workspace は api.workspaces.list() から取得し、
+// 1件のみなら自動選択。channel は ChannelSelector を再利用。
 
 type Props = {
   eventId: string;
@@ -39,20 +36,17 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
         if (cancelled) return;
         const wsList = Array.isArray(list) ? list : [];
         setWorkspaces(wsList);
-        // 1件しかない場合は自動選択（後方互換: default WS のみのケース）
         if (wsList.length === 1) setWorkspaceId(wsList[0].id);
       })
       .catch(() => {
-        if (cancelled) return;
-        setWorkspaces([]);
+        if (!cancelled) setWorkspaces([]);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // workspace を切り替えたら channel 選択をリセット
-  // （workspace ごとに channel id が異なるため）
+  // workspace 切替時は channel 選択をリセット（WS 跨ぎで id が無効になるため）
   const handleWorkspaceChange = (id: string) => {
     setWorkspaceId(id);
     setChannelId("");
@@ -60,16 +54,8 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
-    if (!trimmed) {
-      toast.error("ミーティング名を入力してください");
-      return;
-    }
-    if (!workspaceId) {
-      toast.error("ワークスペースを選択してください");
-      return;
-    }
-    if (!channelId) {
-      toast.error("チャンネルを選択してください");
+    if (!trimmed || !workspaceId || !channelId) {
+      toast.error("ミーティング名、ワークスペース、チャンネルを入力してください");
       return;
     }
     setSubmitting(true);
@@ -82,29 +68,19 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
       });
       toast.success("ミーティングを作成しました");
       onCreated(meeting.id);
+      // 成功時は親で unmount されるので setSubmitting(false) は不要
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "作成に失敗しました");
       setSubmitting(false);
     }
-    // 成功時は onCreated → 親で unmount されるので setSubmitting(false) は不要
   };
 
   return (
-    <div
-      style={{
-        border: `1px solid ${colors.border}`,
-        borderRadius: radius.md,
-        padding: space.lg,
-        background: colors.background,
-        display: "flex",
-        flexDirection: "column",
-        gap: space.md,
-      }}
-    >
+    <div style={containerStyle}>
       <h3 style={{ margin: 0, fontSize: fontSize.lg }}>新規ミーティング作成</h3>
 
-      <label style={labelStyle}>
-        <span style={labelTextStyle}>ミーティング名</span>
+      <label style={fieldStyle}>
+        <span style={labelStyle}>ミーティング名</span>
         <input
           type="text"
           value={name}
@@ -115,22 +91,18 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
         />
       </label>
 
-      <label style={labelStyle}>
-        <span style={labelTextStyle}>ワークスペース</span>
+      <label style={fieldStyle}>
+        <span style={labelStyle}>ワークスペース</span>
         {workspaces === null ? (
-          <span style={{ color: colors.textMuted, fontSize: fontSize.sm }}>
-            読み込み中...
-          </span>
+          <span style={hintStyle}>読み込み中...</span>
         ) : workspaces.length === 0 ? (
-          <span style={{ color: colors.textMuted, fontSize: fontSize.sm }}>
-            ワークスペースが登録されていません
-          </span>
+          <span style={hintStyle}>ワークスペースが登録されていません</span>
         ) : (
           <select
             value={workspaceId}
             onChange={(e) => handleWorkspaceChange(e.target.value)}
             disabled={submitting}
-            style={selectStyle}
+            style={inputStyle}
           >
             <option value="">-- ワークスペースを選択 --</option>
             {workspaces.map((w) => (
@@ -142,8 +114,8 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
         )}
       </label>
 
-      <label style={labelStyle}>
-        <span style={labelTextStyle}>チャンネル</span>
+      <label style={fieldStyle}>
+        <span style={labelStyle}>チャンネル</span>
         <ChannelSelector
           value={channelId}
           workspaceId={workspaceId || undefined}
@@ -152,12 +124,7 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
       </label>
 
       <div style={{ display: "flex", gap: space.sm, marginTop: space.sm }}>
-        <Button
-          variant="primary"
-          onClick={handleSubmit}
-          isLoading={submitting}
-          disabled={submitting}
-        >
+        <Button variant="primary" onClick={handleSubmit} isLoading={submitting}>
           作成
         </Button>
         <Button variant="secondary" onClick={onCancel} disabled={submitting}>
@@ -168,31 +135,38 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
   );
 }
 
-const labelStyle: React.CSSProperties = {
+const containerStyle: CSSProperties = {
+  border: `1px solid ${colors.border}`,
+  borderRadius: radius.md,
+  padding: space.lg,
+  background: colors.background,
+  display: "flex",
+  flexDirection: "column",
+  gap: space.md,
+};
+
+const fieldStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: space.xs,
 };
 
-const labelTextStyle: React.CSSProperties = {
+const labelStyle: CSSProperties = {
   fontSize: fontSize.sm,
   color: colors.textSecondary,
   fontWeight: 500,
 };
 
-const inputStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  border: `1px solid ${colors.borderStrong}`,
-  borderRadius: radius.sm,
-  fontSize: fontSize.sm,
-  fontFamily: "inherit",
-};
-
-const selectStyle: React.CSSProperties = {
+const inputStyle: CSSProperties = {
   padding: "8px 12px",
   border: `1px solid ${colors.borderStrong}`,
   borderRadius: radius.sm,
   fontSize: fontSize.sm,
   fontFamily: "inherit",
   background: colors.background,
+};
+
+const hintStyle: CSSProperties = {
+  color: colors.textMuted,
+  fontSize: fontSize.sm,
 };
