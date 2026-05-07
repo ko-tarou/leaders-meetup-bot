@@ -2,6 +2,7 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import type { EventAction } from "../types";
 import { api } from "../api";
 import { ChannelSelector } from "./ChannelSelector";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR2: attendance_check アクション専用の設定フォーム + メイン表示。
 //
@@ -66,7 +67,7 @@ export function AttendanceCheckMain({ action }: { action: EventAction }) {
 
   if (dow == null || polls.length === 0 || !channelId) {
     return (
-      <div style={{ padding: "1.5rem", color: "#6b7280" }}>
+      <div style={{ padding: "1.5rem", color: colors.textSecondary }}>
         曜日・チャンネル・投票が未設定です。「設定」タブから登録してください。
       </div>
     );
@@ -75,7 +76,7 @@ export function AttendanceCheckMain({ action }: { action: EventAction }) {
   return (
     <div style={{ padding: "0.5rem 0" }}>
       <div style={mainCard}>
-        <div style={{ fontSize: "0.875rem", color: "#6b7280" }}>
+        <div style={{ fontSize: "0.875rem", color: colors.textSecondary }}>
           毎週の投稿予定（チャンネル {channelId}）
         </div>
         <div
@@ -87,7 +88,7 @@ export function AttendanceCheckMain({ action }: { action: EventAction }) {
           {polls.map((p) => (
             <li
               key={p.key}
-              style={{ fontSize: "0.875rem", color: "#374151" }}
+              style={{ fontSize: "0.875rem", color: colors.text }}
             >
               <strong>{p.name || p.key}</strong>: {p.postTime} 投稿 →{" "}
               {p.closeTime} 締切
@@ -95,7 +96,7 @@ export function AttendanceCheckMain({ action }: { action: EventAction }) {
           ))}
         </ul>
       </div>
-      <p style={{ fontSize: "0.875rem", color: "#6b7280" }}>
+      <p style={{ fontSize: "0.875rem", color: colors.textSecondary }}>
         個別の回答は ephemeral 応答で本人にのみ表示されます。チャンネルには集計
         (出席 N / 欠席 N / 未定 N) のみ post されます。
       </p>
@@ -211,7 +212,7 @@ export function AttendanceCheckForm({
 
   return (
     <div>
-      <p style={{ color: "#6b7280", fontSize: "0.875rem", marginTop: 0 }}>
+      <p style={{ color: colors.textSecondary, fontSize: "0.875rem", marginTop: 0 }}>
         指定曜日の各時刻にチャンネルへ匿名投票を post します。
         個別の回答は ephemeral 応答で本人だけが見られ、チャンネルには集計のみ
         post されます。実際の post は 5 分 cron で動くため、指定時刻から数分以内のずれが発生します。
@@ -220,7 +221,7 @@ export function AttendanceCheckForm({
       {error && (
         <div
           style={{
-            color: "#dc2626",
+            color: colors.danger,
             marginBottom: "0.5rem",
             fontSize: "0.875rem",
           }}
@@ -362,17 +363,17 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 const mainCard: CSSProperties = {
   padding: "1rem",
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${colors.border}`,
   borderRadius: "0.5rem",
-  background: "#f9fafb",
+  background: colors.surface,
   marginBottom: "1rem",
 };
 
 const pollCard: CSSProperties = {
   padding: "0.75rem",
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${colors.border}`,
   borderRadius: "0.5rem",
-  background: "#fff",
+  background: colors.background,
 };
 
 const pollRow: CSSProperties = {
@@ -385,35 +386,35 @@ const styles: Record<string, CSSProperties> = {
     display: "block",
     marginBottom: "0.25rem",
     fontSize: "0.875rem",
-    color: "#374151",
+    color: colors.text,
   },
   select: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     boxSizing: "border-box",
   },
   input: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     boxSizing: "border-box",
   },
   removeBtn: {
-    background: "#fff",
-    color: "#dc2626",
-    border: "1px solid #dc2626",
+    background: colors.background,
+    color: colors.danger,
+    border: `1px solid ${colors.danger}`,
     padding: "0.25rem 0.5rem",
     borderRadius: "0.25rem",
     cursor: "pointer",
     fontSize: "0.75rem",
   },
   addPollBtn: {
-    background: "#fff",
-    color: "#2563eb",
-    border: "1px dashed #2563eb",
+    background: colors.background,
+    color: colors.primary,
+    border: `1px dashed ${colors.primary}`,
     padding: "0.5rem",
     borderRadius: "0.25rem",
     cursor: "pointer",
@@ -426,8 +427,8 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: "flex-end",
   },
   primaryBtn: {
-    background: "#2563eb",
-    color: "white",
+    background: colors.primary,
+    color: colors.textInverse,
     border: "none",
     padding: "0.5rem 1rem",
     borderRadius: "0.25rem",

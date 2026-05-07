@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { Poll } from "../types";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 type Props = { meetingId: string };
 
@@ -58,15 +59,15 @@ export function HistorySection({ meetingId }: Props) {
               <div
                 style={{ display: "flex", gap: 8, alignItems: "center" }}
               >
-                <span style={{ color: "#666", fontSize: 12 }}>
+                <span style={{ color: colors.textSecondary, fontSize: 12 }}>
                   {new Date(poll.createdAt).toLocaleDateString("ja-JP")}
                 </span>
                 <button
                   onClick={() => handleDelete(poll.id)}
                   style={{
                     padding: "4px 10px",
-                    background: "#E74C3C",
-                    color: "#fff",
+                    background: colors.danger,
+                    color: colors.textInverse,
                     border: "none",
                     borderRadius: 4,
                     cursor: "pointer",
@@ -83,11 +84,11 @@ export function HistorySection({ meetingId }: Props) {
                   {opt.date}
                   {opt.time ? ` ${opt.time}` : ""}
                 </span>
-                <span style={{ marginLeft: 8, color: "#4A90D9" }}>
+                <span style={{ marginLeft: 8, color: colors.primary }}>
                   {opt.votes?.length ?? 0}票
                 </span>
                 {opt.votes && opt.votes.length > 0 && (
-                  <span style={{ marginLeft: 8, color: "#666", fontSize: 12 }}>
+                  <span style={{ marginLeft: 8, color: colors.textSecondary, fontSize: 12 }}>
                     ({opt.votes.map((v) => v.slackUserId).join(", ")})
                   </span>
                 )}
@@ -101,8 +102,8 @@ export function HistorySection({ meetingId }: Props) {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 12,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { MeetingStatus } from "../types";
+import { colors } from "../styles/tokens";
 
 type Props = { meetingId: string; refreshKey?: number };
 
@@ -8,10 +9,10 @@ const COLOR_STYLES: Record<
   MeetingStatus["color"],
   { bg: string; text: string; emoji: string }
 > = {
-  green: { bg: "#DFF5E1", text: "#1D7A2F", emoji: "🟢" },
-  blue: { bg: "#E0EDFF", text: "#1A4F9F", emoji: "🔵" },
-  red: { bg: "#FFE0E0", text: "#9E1B1B", emoji: "🔴" },
-  gray: { bg: "#EEE", text: "#555", emoji: "⚪" },
+  green: { bg: colors.successSubtle, text: colors.success, emoji: "🟢" },
+  blue: { bg: colors.primarySubtle, text: colors.primary, emoji: "🔵" },
+  red: { bg: colors.dangerSubtle, text: colors.danger, emoji: "🔴" },
+  gray: { bg: colors.border, text: colors.text, emoji: "⚪" },
 };
 
 export function StatusIndicator({ meetingId, refreshKey }: Props) {

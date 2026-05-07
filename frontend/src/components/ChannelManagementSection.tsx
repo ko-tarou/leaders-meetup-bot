@@ -4,6 +4,7 @@ import { api } from "../api";
 import { ChannelPicker, type SlackChannelLike } from "./ui/ChannelPicker";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 // Sprint 13 PR3: タスク管理アクションの「チャンネル管理」サブタブ。
 // 旧 TaskManagementSettings + AddChannelModal を統合し、
@@ -223,7 +224,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
   if (loading) return <div style={{ padding: "1rem" }}>読み込み中...</div>;
   if (error) {
     return (
-      <div style={{ padding: "1rem", color: "#dc2626" }}>エラー: {error}</div>
+      <div style={{ padding: "1rem", color: colors.danger }}>エラー: {error}</div>
     );
   }
 
@@ -257,7 +258,7 @@ export function ChannelManagementSection({ eventId, actionType }: Props) {
                   <label
                     style={{
                       ...toggleLabelStyle,
-                      color: isEnabled ? "#16a34a" : "#6b7280",
+                      color: isEnabled ? colors.success : colors.textSecondary,
                     }}
                   >
                     <input
@@ -317,7 +318,7 @@ const sectionHeadingStyle: React.CSSProperties = {
 
 const descStyle: React.CSSProperties = {
   fontSize: "0.875rem",
-  color: "#6b7280",
+  color: colors.textSecondary,
   margin: "0 0 0.75rem",
 };
 
@@ -326,15 +327,15 @@ const meetingRowStyle: React.CSSProperties = {
   alignItems: "center",
   gap: "0.75rem",
   padding: "0.75rem",
-  border: "1px solid #e5e7eb",
+  border: `1px solid ${colors.border}`,
   borderRadius: "0.375rem",
-  background: "white",
+  background: colors.background,
   flexWrap: "wrap",
 };
 
 const metaStyle: React.CSSProperties = {
   fontSize: "0.75rem",
-  color: "#6b7280",
+  color: colors.textSecondary,
   marginTop: "0.125rem",
 };
 
@@ -348,17 +349,17 @@ const toggleLabelStyle: React.CSSProperties = {
 const emptyStyle: React.CSSProperties = {
   padding: "1.5rem",
   textAlign: "center",
-  color: "#6b7280",
-  border: "1px dashed #d1d5db",
+  color: colors.textSecondary,
+  border: `1px dashed ${colors.borderStrong}`,
   borderRadius: "0.5rem",
   fontSize: "0.875rem",
 };
 
 const removeBtnStyle: React.CSSProperties = {
   padding: "0.25rem 0.6rem",
-  border: "1px solid #fecaca",
-  background: "white",
-  color: "#dc2626",
+  border: `1px solid ${colors.dangerSubtle}`,
+  background: colors.background,
+  color: colors.danger,
   borderRadius: "0.25rem",
   cursor: "pointer",
   fontSize: "0.8125rem",
@@ -366,9 +367,9 @@ const removeBtnStyle: React.CSSProperties = {
 
 const refreshBtnStyle: React.CSSProperties = {
   padding: "0.25rem 0.6rem",
-  border: "1px solid #d1d5db",
-  background: "white",
-  color: "#374151",
+  border: `1px solid ${colors.borderStrong}`,
+  background: colors.background,
+  color: colors.text,
   borderRadius: "0.25rem",
   cursor: "pointer",
   fontSize: "0.8125rem",

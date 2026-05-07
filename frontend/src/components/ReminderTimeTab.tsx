@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { ChipInput } from "./ChipInput";
 import type { ReminderDraft } from "./ReminderCard";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR-B/C: weekly_reminder 詳細画面の「時刻設定」タブ。
 // 曜日 (select) と送信時刻 (ChipInput で複数) を編集する。
@@ -110,7 +111,7 @@ export function ReminderTimeTab({ reminder, disabled, onSave }: Props) {
 const s: Record<string, CSSProperties> = {
   desc: {
     margin: "0 0 1rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: "0.875rem",
   },
   field: { marginBottom: "1rem" },
@@ -118,26 +119,26 @@ const s: Record<string, CSSProperties> = {
     display: "block",
     marginBottom: "0.25rem",
     fontSize: "0.875rem",
-    color: "#374151",
+    color: colors.text,
     fontWeight: 500,
   },
   input: {
     width: "100%",
     padding: "0.5rem",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     boxSizing: "border-box",
     fontSize: "0.875rem",
   },
   helper: {
-    color: "#6b7280",
+    color: colors.textSecondary,
     fontSize: "0.75rem",
     marginTop: "0.25rem",
   },
   errorBanner: {
-    color: "#dc2626",
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
+    color: colors.danger,
+    background: colors.dangerSubtle,
+    border: `1px solid ${colors.dangerSubtle}`,
     padding: "0.5rem 0.75rem",
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
@@ -149,8 +150,8 @@ const s: Record<string, CSSProperties> = {
     marginTop: "1rem",
   },
   primaryBtn: {
-    background: "#2563eb",
-    color: "white",
+    background: colors.primary,
+    color: colors.textInverse,
     border: "none",
     padding: "0.5rem 1.25rem",
     borderRadius: "0.25rem",

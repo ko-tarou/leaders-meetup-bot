@@ -9,6 +9,7 @@ import { ReminderMainTab } from "../components/ReminderMainTab";
 import { ReminderTimeTab } from "../components/ReminderTimeTab";
 import { ReminderChannelTab } from "../components/ReminderChannelTab";
 import { parseReminders } from "./WeeklyReminderListPage";
+import { colors } from "../styles/tokens";
 
 // Sprint 23 PR-A: weekly_reminder の 1 リマインド分の詳細編集画面。
 // Sprint 23 PR-B/C: 3 サブタブ (メイン / チャンネル管理 / 時刻設定) に再構成。
@@ -181,8 +182,8 @@ export function WeeklyReminderDetailPage() {
 function subTabBtnStyle(active: boolean): CSSProperties {
   return {
     padding: "0.5rem 1rem",
-    background: active ? "#2563eb" : "transparent",
-    color: active ? "white" : "#374151",
+    background: active ? colors.primary : "transparent",
+    color: active ? colors.textInverse : colors.text,
     border: "none",
     cursor: "pointer",
     borderRadius: "0.25rem 0.25rem 0 0",
@@ -191,15 +192,15 @@ function subTabBtnStyle(active: boolean): CSSProperties {
 }
 
 const s: Record<string, CSSProperties> = {
-  loading: { padding: "2rem", textAlign: "center", color: "#999" },
-  notFound: { padding: "2rem", textAlign: "center", color: "#6b7280" },
-  link: { color: "#2563eb", textDecoration: "none" },
+  loading: { padding: "2rem", textAlign: "center", color: colors.textMuted },
+  notFound: { padding: "2rem", textAlign: "center", color: colors.textSecondary },
+  link: { color: colors.primary, textDecoration: "none" },
   breadcrumbs: {
     fontSize: "0.875rem",
     marginBottom: "0.5rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
   },
-  breadcrumbLink: { color: "#6b7280", textDecoration: "none" },
+  breadcrumbLink: { color: colors.textSecondary, textDecoration: "none" },
   titleRow: {
     display: "flex",
     alignItems: "center",
@@ -210,7 +211,7 @@ const s: Record<string, CSSProperties> = {
   title: { margin: 0, fontSize: "1.3rem" },
   backBtn: {
     marginLeft: "auto",
-    color: "#2563eb",
+    color: colors.primary,
     background: "transparent",
     border: "none",
     cursor: "pointer",
@@ -220,22 +221,22 @@ const s: Record<string, CSSProperties> = {
   subTabs: {
     display: "flex",
     gap: "0.25rem",
-    borderBottom: "1px solid #e5e7eb",
+    borderBottom: `1px solid ${colors.border}`,
     marginBottom: "1rem",
   },
   errorBanner: {
-    color: "#dc2626",
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
+    color: colors.danger,
+    background: colors.dangerSubtle,
+    border: `1px solid ${colors.dangerSubtle}`,
     padding: "0.5rem 0.75rem",
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
     marginBottom: "0.75rem",
   },
   noticeBanner: {
-    color: "#065f46",
-    background: "#ecfdf5",
-    border: "1px solid #a7f3d0",
+    color: colors.success,
+    background: colors.successSubtle,
+    border: `1px solid ${colors.successSubtle}`,
     padding: "0.5rem 0.75rem",
     borderRadius: "0.25rem",
     fontSize: "0.875rem",

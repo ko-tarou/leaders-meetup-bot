@@ -6,6 +6,7 @@ import type {
   PRReviewStatus,
 } from "../../types";
 import { api } from "../../api";
+import { colors } from "../../styles/tokens";
 
 // Sprint 17 PR1: 自動完了に必要な LGTM 数（backend と一致させる）
 const LGTM_THRESHOLD = 2;
@@ -18,19 +19,19 @@ const STATUS_LABEL: Record<PRReviewStatus, string> = {
 };
 
 const STATUS_COLOR: Record<PRReviewStatus, string> = {
-  open: "#6b7280",
-  in_review: "#2563eb",
-  merged: "#16a34a",
-  closed: "#dc2626",
+  open: colors.textSecondary,
+  in_review: colors.primary,
+  merged: colors.success,
+  closed: colors.danger,
 };
 
 const styles = {
   card: {
-    border: "1px solid #e5e7eb",
+    border: `1px solid ${colors.border}`,
     borderRadius: "0.375rem",
     padding: "0.75rem",
     margin: "0.5rem 0",
-    background: "white",
+    background: colors.background,
     cursor: "pointer",
   } as CSSProperties,
   cardHeader: {
@@ -42,19 +43,19 @@ const styles = {
     fontSize: "0.75rem",
     padding: "0.125rem 0.5rem",
     borderRadius: "0.25rem",
-    color: "white",
+    color: colors.textInverse,
   } as CSSProperties,
   cardMeta: {
     marginTop: "0.5rem",
     fontSize: "0.75rem",
-    color: "#6b7280",
+    color: colors.textSecondary,
     display: "flex",
     gap: "1rem",
     flexWrap: "wrap",
   } as CSSProperties,
   desc: {
     marginTop: "0.5rem",
-    color: "#4b5563",
+    color: colors.text,
     fontSize: "0.875rem",
   } as CSSProperties,
 };
@@ -126,8 +127,8 @@ export function PRReviewCard({ review: r, onSelect }: PRReviewCardProps) {
         <span
           style={{
             ...styles.badge,
-            background: "#f3f4f6",
-            color: "#374151",
+            background: colors.surface,
+            color: colors.text,
           }}
         >
           👍 LGTM {r.lgtmCount}/{LGTM_THRESHOLD}
@@ -143,7 +144,7 @@ export function PRReviewCard({ review: r, onSelect }: PRReviewCardProps) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            style={{ color: "#2563eb" }}
+            style={{ color: colors.primary }}
           >
             {r.url}
           </a>

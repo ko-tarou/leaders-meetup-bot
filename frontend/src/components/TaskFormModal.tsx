@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Task, TaskAssignee } from "../types";
 import { api } from "../api";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 // ADR-0002: タスク作成・編集・削除モーダル（Sprint 4 PR3）。
 // 期限は JST で入力し、内部的に UTC ISO へ変換して保存する。
@@ -168,7 +169,7 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
         }}
       >
         <h3 style={{ marginTop: 0 }}>{isEdit ? "タスクを編集" : "新規タスク"}</h3>
-        {error && <div style={{ color: "#dc2626", marginBottom: "0.5rem" }}>{error}</div>}
+        {error && <div style={{ color: colors.danger, marginBottom: "0.5rem" }}>{error}</div>}
 
         <Field label="タスク名 *">
           <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={submitting} style={fullW} />
@@ -209,12 +210,12 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
 
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", justifyContent: "flex-end" }}>
           {isEdit && (
-            <button onClick={handleDelete} disabled={submitting} style={{ background: "#dc2626", color: "white", marginRight: "auto" }}>
+            <button onClick={handleDelete} disabled={submitting} style={{ background: colors.danger, color: colors.textInverse, marginRight: "auto" }}>
               削除
             </button>
           )}
           <button onClick={onClose} disabled={submitting}>キャンセル</button>
-          <button onClick={handleSubmit} disabled={submitting || !title.trim()} style={{ background: "#2563eb", color: "white" }}>
+          <button onClick={handleSubmit} disabled={submitting || !title.trim()} style={{ background: colors.primary, color: colors.textInverse }}>
             {submitting ? "保存中..." : isEdit ? "更新" : "作成"}
           </button>
         </div>

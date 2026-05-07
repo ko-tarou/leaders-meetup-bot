@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { MeetingMember } from "../types";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 type Props = { meetingId: string };
 
@@ -82,8 +83,8 @@ export function MemberSection({ meetingId }: Props) {
         style={{
           marginBottom: 12,
           padding: 12,
-          background: "#f0f7ff",
-          border: "1px solid #c7dcff",
+          background: colors.primarySubtle,
+          border: `1px solid ${colors.primarySubtle}`,
           borderRadius: 4,
         }}
       >
@@ -98,7 +99,7 @@ export function MemberSection({ meetingId }: Props) {
           <div style={{ fontSize: 13 }}>
             <strong>チャンネルから一括追加</strong>
             <br />
-            <span style={{ color: "#666", fontSize: 12 }}>
+            <span style={{ color: colors.textSecondary, fontSize: 12 }}>
               Botがチャンネルに参加している必要があります
             </span>
           </div>
@@ -131,14 +132,14 @@ export function MemberSection({ meetingId }: Props) {
             justifyContent: "space-between",
             alignItems: "center",
             padding: "8px 0",
-            borderBottom: "1px solid #eee",
+            borderBottom: `1px solid ${colors.border}`,
           }}
         >
           <div>
             <span style={{ fontWeight: 500 }}>
               {nameMap[m.slackUserId] || m.slackUserId}
             </span>
-            <span style={{ color: "#999", fontSize: 11, marginLeft: 8 }}>
+            <span style={{ color: colors.textMuted, fontSize: 11, marginLeft: 8 }}>
               {m.slackUserId}
             </span>
           </div>
@@ -156,19 +157,19 @@ export function MemberSection({ meetingId }: Props) {
 
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
   flex: 1,
 };
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",
-  background: "#4A90D9",
-  color: "#fff",
+  background: colors.primary,
+  color: colors.textInverse,
   border: "none",
   borderRadius: 4,
   cursor: "pointer",
 };
 const dangerButtonStyle: React.CSSProperties = {
   ...buttonStyle,
-  background: "#E74C3C",
+  background: colors.danger,
 };

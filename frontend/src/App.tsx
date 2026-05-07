@@ -15,6 +15,7 @@ import {
   PublicThanksPage,
 } from "./pages/PublicApplyPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
+import { colors } from "./styles/tokens";
 
 export function App() {
   // /apply 配下は公開ページ（ヘッダー・EventProvider なし独立レイアウト）。
@@ -69,7 +70,7 @@ function AppShell() {
       <header
         style={{
           marginBottom: 24,
-          borderBottom: "1px solid #eee",
+          borderBottom: `1px solid ${colors.border}`,
           paddingBottom: 12,
         }}
       >
@@ -140,7 +141,7 @@ const titleLinkStyle: React.CSSProperties = {
 };
 
 const linkStyle: React.CSSProperties = {
-  color: "#4A90D9",
+  color: colors.primary,
   cursor: "pointer",
   padding: "4px 0",
   fontSize: 14,
@@ -150,12 +151,12 @@ const linkStyle: React.CSSProperties = {
 };
 
 const workspacesLinkStyle: React.CSSProperties = {
-  color: "#4A90D9",
+  color: colors.primary,
   fontSize: 13,
   textDecoration: "none",
   padding: "6px 10px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
-  background: "#fff",
+  background: colors.background,
   whiteSpace: "nowrap",
 };

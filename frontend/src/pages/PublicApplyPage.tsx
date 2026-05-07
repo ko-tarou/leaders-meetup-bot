@@ -8,6 +8,7 @@ import {
   type HowFound,
   type InterviewLocation,
 } from "../types";
+import { colors } from "../styles/tokens";
 
 // 005-hotfix: 公開エンドポイント /api/apply/:eventId/event が返す
 // 最小フィールドのみを表現する型。フォーム上部の表示に必要な情報のみ。
@@ -128,7 +129,7 @@ export function PublicApplyPage() {
   if (loading || availability === null) {
     return (
       <Layout>
-        <div style={{ color: "#6b7280" }}>読み込み中...</div>
+        <div style={{ color: colors.textSecondary }}>読み込み中...</div>
       </Layout>
     );
   }
@@ -139,7 +140,7 @@ export function PublicApplyPage() {
           style={{
             padding: "2rem",
             textAlign: "center",
-            color: "#dc2626",
+            color: colors.danger,
           }}
         >
           イベントが見つかりません
@@ -177,7 +178,7 @@ export function PublicApplyPage() {
       <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
         {event.name} 応募フォーム
       </h1>
-      <p style={{ color: "#6b7280", marginBottom: "1.5rem" }}>
+      <p style={{ color: colors.textSecondary, marginBottom: "1.5rem" }}>
         参加希望の方は以下のフォームにご記入ください。後ほどメールでご連絡いたします。
       </p>
 
@@ -186,8 +187,8 @@ export function PublicApplyPage() {
           role="alert"
           style={{
             padding: "0.75rem",
-            background: "#fee2e2",
-            color: "#dc2626",
+            background: colors.dangerSubtle,
+            color: colors.danger,
             borderRadius: "0.375rem",
             marginBottom: "1rem",
             fontSize: "0.9rem",
@@ -281,7 +282,7 @@ export function PublicApplyPage() {
           <p
             style={{
               fontSize: "0.875rem",
-              color: "#6b7280",
+              color: colors.textSecondary,
               margin: "0 0 0.5rem",
             }}
           >
@@ -349,8 +350,8 @@ export function PublicApplyPage() {
           type="submit"
           disabled={submitting}
           style={{
-            background: submitting ? "#93c5fd" : "#2563eb",
-            color: "white",
+            background: submitting ? colors.primarySubtle : colors.primary,
+            color: colors.textInverse,
             padding: "0.75rem 2rem",
             border: "none",
             borderRadius: "0.375rem",
@@ -373,7 +374,7 @@ export function PublicThanksPage() {
         <h1 style={{ marginTop: 0, fontSize: "1.5rem" }}>
           応募ありがとうございました
         </h1>
-        <p style={{ color: "#6b7280" }}>
+        <p style={{ color: colors.textSecondary }}>
           内容を確認のうえ、後ほどメールでご連絡いたします。
         </p>
       </div>
@@ -389,7 +390,7 @@ function Layout({ children }: { children: React.ReactNode }) {
         margin: "0 auto",
         padding: "2rem 1rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#111827",
+        color: colors.text,
       }}
     >
       {children}
@@ -404,10 +405,10 @@ function NoticeBox({ children }: { children: React.ReactNode }) {
       role="status"
       style={{
         padding: "1.5rem 1rem",
-        background: "#f9fafb",
-        border: "1px solid #e5e7eb",
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
         borderRadius: "0.5rem",
-        color: "#374151",
+        color: colors.text,
         fontSize: "0.95rem",
         textAlign: "center",
         lineHeight: 1.6,
@@ -443,7 +444,7 @@ function Field({
         <p
           style={{
             fontSize: "0.8rem",
-            color: "#6b7280",
+            color: colors.textSecondary,
             margin: "0 0 0.375rem",
           }}
         >
@@ -458,7 +459,7 @@ function Field({
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "0.5rem",
-  border: "1px solid #d1d5db",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: "0.375rem",
   fontSize: "1rem",
   fontFamily: "inherit",

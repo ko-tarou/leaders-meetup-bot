@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { MeetingMember, MeetingResponder } from "../types";
 import { AutoTextarea } from "./AutoTextarea";
+import { colors } from "../styles/tokens";
 
 type Props = {
   meetingId: string;
@@ -92,7 +93,7 @@ export function AutoRespondSection({
         />
         自動応答を有効にする
       </label>
-      <p style={{ margin: "4px 0 0 24px", color: "#666", fontSize: 13 }}>
+      <p style={{ margin: "4px 0 0 24px", color: colors.textSecondary, fontSize: 13 }}>
         チャンネルで非botユーザーが発言したら、レスポンダーにメンションして対応を促します
       </p>
 
@@ -101,7 +102,7 @@ export function AutoRespondSection({
           <label style={labelStyle}>レスポンダー</label>
           <div style={{ marginBottom: 8 }}>
             {responders.length === 0 ? (
-              <p style={{ color: "#999", fontSize: 13, margin: "4px 0" }}>
+              <p style={{ color: colors.textMuted, fontSize: 13, margin: "4px 0" }}>
                 レスポンダーが設定されていません
               </p>
             ) : (
@@ -113,7 +114,7 @@ export function AutoRespondSection({
                     justifyContent: "space-between",
                     alignItems: "center",
                     padding: "6px 0",
-                    borderBottom: "1px solid #eee",
+                    borderBottom: `1px solid ${colors.border}`,
                   }}
                 >
                   <div>
@@ -121,7 +122,7 @@ export function AutoRespondSection({
                       {nameMap[r.slackUserId] || r.slackUserId}
                     </span>
                     <span
-                      style={{ color: "#999", fontSize: 11, marginLeft: 8 }}
+                      style={{ color: colors.textMuted, fontSize: 11, marginLeft: 8 }}
                     >
                       {r.slackUserId}
                     </span>
@@ -130,8 +131,8 @@ export function AutoRespondSection({
                     onClick={() => handleRemove(r.id)}
                     style={{
                       padding: "2px 8px",
-                      background: "#E74C3C",
-                      color: "#fff",
+                      background: colors.danger,
+                      color: colors.textInverse,
                       border: "none",
                       borderRadius: 4,
                       cursor: "pointer",
@@ -150,7 +151,7 @@ export function AutoRespondSection({
               onChange={(e) => setSelectedUserId(e.target.value)}
               style={{
                 padding: "8px 12px",
-                border: "1px solid #ddd",
+                border: `1px solid ${colors.borderStrong}`,
                 borderRadius: 4,
                 flex: 1,
               }}
@@ -167,8 +168,8 @@ export function AutoRespondSection({
               disabled={!selectedUserId}
               style={{
                 padding: "8px 16px",
-                background: selectedUserId ? "#4A90D9" : "#ccc",
-                color: "#fff",
+                background: selectedUserId ? colors.primary : colors.borderStrong,
+                color: colors.textInverse,
                 border: "none",
                 borderRadius: 4,
                 cursor: selectedUserId ? "pointer" : "not-allowed",
@@ -177,7 +178,7 @@ export function AutoRespondSection({
               追加
             </button>
           </div>
-          <p style={{ color: "#666", fontSize: 12, margin: "0 0 12px" }}>
+          <p style={{ color: colors.textSecondary, fontSize: 12, margin: "0 0 12px" }}>
             メンバーは「メンバー」タブで追加できます
           </p>
 
@@ -188,7 +189,7 @@ export function AutoRespondSection({
             placeholder="例: {responders} 対応をお願いします :pray:"
             style={{
               padding: "8px 12px",
-              border: "1px solid #ddd",
+              border: `1px solid ${colors.borderStrong}`,
               borderRadius: 4,
               width: "100%",
               resize: "vertical",
@@ -196,7 +197,7 @@ export function AutoRespondSection({
               boxSizing: "border-box",
             }}
           />
-          <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+          <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
             プレースホルダ: <code>{"{responders}"}</code>{" "}
             がレスポンダーのメンションリストに置換されます
           </p>
@@ -207,8 +208,8 @@ export function AutoRespondSection({
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 16,

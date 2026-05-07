@@ -1,5 +1,6 @@
 import { MentionPicker } from "../MentionPicker";
 import { AutoTextarea } from "../AutoTextarea";
+import { colors } from "../../styles/tokens";
 
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -60,7 +61,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
           />
           自動スケジュールを有効にする
         </label>
-        <p style={{ margin: "4px 0 0 24px", color: "#666", fontSize: 13 }}>
+        <p style={{ margin: "4px 0 0 24px", color: colors.textSecondary, fontSize: 13 }}>
           ONにすると毎月自動で投票開始・締切が行われます
         </p>
       </div>
@@ -97,7 +98,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
               <option value={2}>再来月</option>
               <option value={3}>3ヶ月先</option>
             </select>
-            <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+            <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
               投票開始日を起点に、何ヶ月先のイベント日程を候補にするか
             </p>
           </div>
@@ -112,11 +113,11 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
                   type="button"
                   style={{
                     padding: "8px 12px",
-                    border: "1px solid #ddd",
+                    border: `1px solid ${colors.borderStrong}`,
                     borderRadius: 4,
                     cursor: "pointer",
-                    background: value.weeks.includes(w) ? "#4A90D9" : "#fff",
-                    color: value.weeks.includes(w) ? "#fff" : "#333",
+                    background: value.weeks.includes(w) ? colors.primary : colors.background,
+                    color: value.weeks.includes(w) ? colors.textInverse : colors.text,
                   }}
                 >
                   第{w}週
@@ -141,7 +142,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
                   }
                   style={{ ...inputStyle, width: 70 }}
                 />
-                <span style={{ color: "#666" }}>日</span>
+                <span style={{ color: colors.textSecondary }}>日</span>
                 <input
                   type="time"
                   value={value.pollStartTime}
@@ -149,7 +150,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
                   style={{ ...inputStyle, width: 110 }}
                 />
               </div>
-              <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
+              <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 11 }}>
                 日本時間 (JST)
               </p>
             </div>
@@ -166,7 +167,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
                   }
                   style={{ ...inputStyle, width: 70 }}
                 />
-                <span style={{ color: "#666" }}>日</span>
+                <span style={{ color: colors.textSecondary }}>日</span>
                 <input
                   type="time"
                   value={value.pollCloseTime}
@@ -174,7 +175,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
                   style={{ ...inputStyle, width: 110 }}
                 />
               </div>
-              <p style={{ margin: "4px 0 0", color: "#666", fontSize: 11 }}>
+              <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 11 }}>
                 日本時間 (JST)
               </p>
             </div>
@@ -199,7 +200,7 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
             boxSizing: "border-box",
           }}
         />
-        <p style={{ margin: "4px 0 0", color: "#666", fontSize: 12 }}>
+        <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
           自動投票・手動投票の両方で使われます。空欄ならデフォルト文言。
         </p>
       </div>
@@ -208,8 +209,8 @@ export function AutoScheduleConfigPanel({ meetingId, value, onChange }: Props) {
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#f9f9f9",
-  border: "1px solid #eee",
+  background: colors.surface,
+  border: `1px solid ${colors.border}`,
   borderRadius: 8,
   padding: 16,
   marginBottom: 16,
@@ -222,6 +223,6 @@ const labelStyle: React.CSSProperties = {
 };
 const inputStyle: React.CSSProperties = {
   padding: "8px 12px",
-  border: "1px solid #ddd",
+  border: `1px solid ${colors.borderStrong}`,
   borderRadius: 4,
 };

@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { EventAction } from "../types";
 import { TOP_TABS } from "../lib/eventTabs";
 import { ActionsListView } from "../components/ActionsListView";
+import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: 上部タブを 3 つ (アクション/メンバー/履歴) に固定。
 // schedule / tasks / member_welcome / pr_review といった旧タブは廃止し、
@@ -55,7 +56,7 @@ export function EventTabPage() {
 
   if (eventsLoading || actionsLoading) {
     return (
-      <div style={{ textAlign: "center", padding: "2rem", color: "#999" }}>
+      <div style={{ textAlign: "center", padding: "2rem", color: colors.textMuted }}>
         読み込み中...
       </div>
     );
@@ -76,7 +77,7 @@ export function EventTabPage() {
         style={{
           display: "flex",
           gap: "0.25rem",
-          borderBottom: "1px solid #e5e7eb",
+          borderBottom: `1px solid ${colors.border}`,
           marginBottom: "1rem",
           flexWrap: "wrap",
         }}
@@ -89,8 +90,8 @@ export function EventTabPage() {
               padding: "0.5rem 1rem",
               border: "none",
               borderRadius: "0.25rem 0.25rem 0 0",
-              background: t.id === tab ? "#4A90D9" : "transparent",
-              color: t.id === tab ? "white" : "#374151",
+              background: t.id === tab ? colors.primary : "transparent",
+              color: t.id === tab ? colors.textInverse : colors.text,
               cursor: "pointer",
               fontSize: "0.95rem",
             }}
@@ -118,5 +119,5 @@ export function EventTabPage() {
 }
 
 function PlaceholderTab({ label }: { label: string }) {
-  return <p style={{ color: "#999", padding: "1rem" }}>{label}</p>;
+  return <p style={{ color: colors.textMuted, padding: "1rem" }}>{label}</p>;
 }

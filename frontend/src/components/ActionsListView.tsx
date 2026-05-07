@@ -4,6 +4,7 @@ import type { EventAction, EventActionType } from "../types";
 import { api } from "../api";
 import { ACTION_META } from "../lib/eventTabs";
 import { useToast } from "./ui/Toast";
+import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: アクション一覧 (カード形式)。
 // クリックで /events/:eventId/actions/:actionType の専用ページへ遷移する。
@@ -58,8 +59,8 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
           style={{
             padding: "3rem 1rem",
             textAlign: "center",
-            color: "#6b7280",
-            border: "1px dashed #d1d5db",
+            color: colors.textSecondary,
+            border: `1px dashed ${colors.borderStrong}`,
             borderRadius: "0.5rem",
           }}
         >
@@ -91,20 +92,20 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
                 }}
                 style={{
                   padding: "1rem",
-                  border: "1px solid #e5e7eb",
+                  border: `1px solid ${colors.border}`,
                   borderRadius: "0.5rem",
                   cursor: "pointer",
-                  background: "white",
+                  background: colors.background,
                   opacity: a.enabled === 1 ? 1 : 0.6,
                   transition: "background 0.15s, border-color 0.15s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#f9fafb";
-                  e.currentTarget.style.borderColor = "#9ca3af";
+                  e.currentTarget.style.background = colors.surface;
+                  e.currentTarget.style.borderColor = colors.textMuted;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "white";
-                  e.currentTarget.style.borderColor = "#e5e7eb";
+                  e.currentTarget.style.background = colors.background;
+                  e.currentTarget.style.borderColor = colors.border;
                 }}
               >
                 <div
@@ -127,8 +128,8 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
                         fontSize: "0.75rem",
                         padding: "0.125rem 0.5rem",
                         borderRadius: "0.25rem",
-                        background: "#9ca3af",
-                        color: "white",
+                        background: colors.textMuted,
+                        color: colors.textInverse,
                       }}
                     >
                       無効
@@ -139,7 +140,7 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
                   style={{
                     marginTop: "0.5rem",
                     fontSize: "0.875rem",
-                    color: "#6b7280",
+                    color: colors.textSecondary,
                   }}
                 >
                   {meta?.description ?? ""}
@@ -225,7 +226,7 @@ function AddActionModal({
             display: "block",
             fontSize: "0.875rem",
             marginBottom: "0.25rem",
-            color: "#374151",
+            color: colors.text,
           }}
         >
           アクション種別
@@ -237,7 +238,7 @@ function AddActionModal({
             width: "100%",
             padding: "0.5rem",
             marginBottom: "1rem",
-            border: "1px solid #d1d5db",
+            border: `1px solid ${colors.borderStrong}`,
             borderRadius: "0.25rem",
           }}
         >
@@ -259,8 +260,8 @@ function AddActionModal({
             disabled={submitting}
             style={{
               padding: "0.5rem 1rem",
-              border: "1px solid #d1d5db",
-              background: "#fff",
+              border: `1px solid ${colors.borderStrong}`,
+              background: colors.background,
               borderRadius: "0.25rem",
               cursor: submitting ? "wait" : "pointer",
             }}
@@ -284,8 +285,8 @@ function AddActionModal({
 }
 
 const primaryBtnStyle: React.CSSProperties = {
-  background: "#2563eb",
-  color: "white",
+  background: colors.primary,
+  color: colors.textInverse,
   border: "none",
   padding: "0.5rem 1rem",
   borderRadius: "0.25rem",

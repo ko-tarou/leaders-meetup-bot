@@ -19,6 +19,7 @@ import {
 } from "../components/AttendanceCheckForm";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: アクション専用ページ。
 // /events/:eventId/actions/:actionType でマウントされ、サブタブを持つ。
@@ -108,7 +109,7 @@ export function ActionDetailPage() {
   if (!eventId || !actionType) return <Navigate to="/" replace />;
   if (loading) {
     return (
-      <div style={{ padding: "2rem", textAlign: "center", color: "#999" }}>
+      <div style={{ padding: "2rem", textAlign: "center", color: colors.textMuted }}>
         読み込み中...
       </div>
     );
@@ -154,7 +155,7 @@ export function ActionDetailPage() {
         style={{
           fontSize: "0.875rem",
           marginBottom: "0.5rem",
-          color: "#6b7280",
+          color: colors.textSecondary,
         }}
       >
         <Link to="/" style={breadcrumbLinkStyle}>
@@ -189,8 +190,8 @@ export function ActionDetailPage() {
               fontSize: "0.75rem",
               padding: "0.125rem 0.5rem",
               borderRadius: "0.25rem",
-              background: "#9ca3af",
-              color: "white",
+              background: colors.textMuted,
+              color: colors.textInverse,
             }}
           >
             無効
@@ -200,7 +201,7 @@ export function ActionDetailPage() {
           to={`/events/${eventId}/actions`}
           style={{
             marginLeft: "auto",
-            color: "#2563eb",
+            color: colors.primary,
             textDecoration: "none",
             fontSize: "0.875rem",
           }}
@@ -213,7 +214,7 @@ export function ActionDetailPage() {
         <p
           style={{
             fontSize: "0.875rem",
-            color: "#6b7280",
+            color: colors.textSecondary,
             marginTop: 0,
             marginBottom: "1rem",
           }}
@@ -228,7 +229,7 @@ export function ActionDetailPage() {
           style={{
             display: "flex",
             gap: "0.25rem",
-            borderBottom: "1px solid #e5e7eb",
+            borderBottom: `1px solid ${colors.border}`,
             marginBottom: "1rem",
           }}
         >
@@ -256,7 +257,7 @@ export function ActionDetailPage() {
             style={{
               margin: "2rem 0 1rem",
               border: "none",
-              borderTop: "1px solid #e5e7eb",
+              borderTop: `1px solid ${colors.border}`,
             }}
           />
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -267,9 +268,9 @@ export function ActionDetailPage() {
               onClick={handleDelete}
               style={{
                 ...secondaryBtnStyle,
-                background: "#dc2626",
-                color: "white",
-                borderColor: "#dc2626",
+                background: colors.danger,
+                color: colors.textInverse,
+                borderColor: colors.danger,
               }}
             >
               削除
@@ -316,7 +317,7 @@ export function ActionDetailPage() {
             style={{
               margin: "2rem 0 1rem",
               border: "none",
-              borderTop: "1px solid #e5e7eb",
+              borderTop: `1px solid ${colors.border}`,
             }}
           />
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -327,9 +328,9 @@ export function ActionDetailPage() {
               onClick={handleDelete}
               style={{
                 ...secondaryBtnStyle,
-                background: "#dc2626",
-                color: "white",
-                borderColor: "#dc2626",
+                background: colors.danger,
+                color: colors.textInverse,
+                borderColor: colors.danger,
               }}
             >
               削除
@@ -468,7 +469,7 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
           style={{
             background: "none",
             border: "none",
-            color: "#2563eb",
+            color: colors.primary,
             cursor: "pointer",
             padding: 0,
             marginBottom: "0.75rem",
@@ -490,7 +491,7 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
           style={meetingCardStyle}
         >
           <div style={{ fontWeight: 600 }}>{m.name}</div>
-          <div style={{ fontSize: "0.75rem", color: "#6b7280" }}>
+          <div style={{ fontSize: "0.75rem", color: colors.textSecondary }}>
             #{m.channelId}
           </div>
         </button>
@@ -502,7 +503,7 @@ function SchedulePollingMain({ eventId }: { eventId: string }) {
 function PlaceholderContent({ label }: { label: string }) {
   return (
     <div
-      style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}
+      style={{ padding: "2rem", textAlign: "center", color: colors.textSecondary }}
     >
       {label}
     </div>
@@ -512,8 +513,8 @@ function PlaceholderContent({ label }: { label: string }) {
 function subTabBtn(active: boolean): React.CSSProperties {
   return {
     padding: "0.5rem 1rem",
-    background: active ? "#2563eb" : "transparent",
-    color: active ? "white" : "#374151",
+    background: active ? colors.primary : "transparent",
+    color: active ? colors.textInverse : colors.text,
     border: "none",
     cursor: "pointer",
     borderRadius: "0.25rem 0.25rem 0 0",
@@ -522,14 +523,14 @@ function subTabBtn(active: boolean): React.CSSProperties {
 }
 
 const breadcrumbLinkStyle: React.CSSProperties = {
-  color: "#6b7280",
+  color: colors.textSecondary,
   textDecoration: "none",
 };
 
 const secondaryBtnStyle: React.CSSProperties = {
   padding: "0.5rem 1rem",
-  border: "1px solid #d1d5db",
-  background: "white",
+  border: `1px solid ${colors.borderStrong}`,
+  background: colors.background,
   borderRadius: "0.25rem",
   cursor: "pointer",
 };
@@ -537,8 +538,8 @@ const secondaryBtnStyle: React.CSSProperties = {
 const meetingCardStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "0.75rem 1rem",
-  border: "1px solid #e5e7eb",
-  background: "white",
+  border: `1px solid ${colors.border}`,
+  background: colors.background,
   borderRadius: "0.375rem",
   cursor: "pointer",
 };
