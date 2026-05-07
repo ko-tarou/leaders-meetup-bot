@@ -105,15 +105,29 @@ export async function handleVote(
 
   let action: "voted" | "unvoted";
   if (existingVote) {
+    // 取消トグルは単発 DELETE で十分（atomic）
     await d1.delete(pollVotes).where(eq(pollVotes.id, existingVote.id));
     action = "unvoted";
   } else {
-    await d1.insert(pollVotes).values({
-      id: crypto.randomUUID(),
-      pollOptionId: optionId,
-      slackUserId: userId,
-      votedAt: new Date().toISOString(),
-    });
+    // 同一ユーザーの二連打競合に備え、DELETE → INSERT を D1 batch で 1 トランザクション化。
+    // (poll_option_id, slack_user_id) の UNIQUE 制約により、
+    // 競合相手が一足先に INSERT 済みでも DELETE が前段で巻き取り、自分の INSERT が成功する。
+    await d1.batch([
+      d1
+        .delete(pollVotes)
+        .where(
+          and(
+            eq(pollVotes.pollOptionId, optionId),
+            eq(pollVotes.slackUserId, userId),
+          ),
+        ),
+      d1.insert(pollVotes).values({
+        id: crypto.randomUUID(),
+        pollOptionId: optionId,
+        slackUserId: userId,
+        votedAt: new Date().toISOString(),
+      }),
+    ]);
     action = "voted";
   }
 
