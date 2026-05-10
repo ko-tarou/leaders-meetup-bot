@@ -20,15 +20,23 @@ const oauth = new Hono<{ Bindings: Env }>();
 const STATE_TTL_MS = 10 * 60 * 1000; // 10分
 
 // 必要なスコープ（既存 Slack App 設定に合わせる）
+//
+// hotfix: role_management の sync で bot token から conversations.invite /
+// conversations.kick を呼ぶため、channels:manage (public) / groups:write (private)
+// を追加。プロフィール取得用に users.profile:read も追加。
+// 反映には Slack App 管理画面で Reinstall が必要。
 const REQUIRED_SCOPES = [
   "chat:write",
   "chat:write.public",
   "users:read",
+  "users.profile:read",
   "commands",
   "channels:history",
   "channels:read",
+  "channels:manage",
   "groups:read",
   "groups:history",
+  "groups:write",
 ];
 
 // 005-user-oauth: admin user の権限で bot を private channel に invite するため、
