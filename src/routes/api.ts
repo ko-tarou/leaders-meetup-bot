@@ -10,6 +10,7 @@ import { tasksRouter } from "./api/tasks";
 import { prReviewsRouter } from "./api/pr-reviews";
 import { meetingsRouter } from "./api/meetings";
 import { applicationsRouter } from "./api/applications";
+import { interviewersRouter } from "./api/interviewers";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -42,6 +43,7 @@ api.use(
 // 除外パス:
 //   - /health: ヘルスチェック
 //   - /apply/:eventId (POST), /apply/:eventId/availability (GET): 応募者向け公開フォーム
+//   - /interviewer/:token, /interviewer/:token/slots: 面接官向け token-based 公開エンドポイント
 //
 // 注意: /slack/oauth, /slack/events 等の Slack 連携は app.route("/slack", ...) の
 //       別ルートにマウントされており、本ミドルウェアの管轄外。
@@ -49,7 +51,11 @@ api.use("/*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
   // /api prefix を除いた部分でマッチング
   const sub = path.replace(/^\/api/, "");
-  if (sub === "/health" || sub.startsWith("/apply/")) {
+  if (
+    sub === "/health" ||
+    sub.startsWith("/apply/") ||
+    sub.startsWith("/interviewer/")
+  ) {
     return next();
   }
   return adminAuth(c, next);
@@ -67,5 +73,6 @@ api.route("/", tasksRouter);
 api.route("/", prReviewsRouter);
 api.route("/", meetingsRouter);
 api.route("/", applicationsRouter);
+api.route("/", interviewersRouter);
 
 export { api };
