@@ -11,6 +11,7 @@ import { prReviewsRouter } from "./api/pr-reviews";
 import { meetingsRouter } from "./api/meetings";
 import { applicationsRouter } from "./api/applications";
 import { interviewersRouter } from "./api/interviewers";
+import { rolesRouter } from "./api/roles";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -74,5 +75,6 @@ api.route("/", prReviewsRouter);
 api.route("/", meetingsRouter);
 api.route("/", applicationsRouter);
 api.route("/", interviewersRouter);
+api.route("/", rolesRouter);
 
 export { api };
