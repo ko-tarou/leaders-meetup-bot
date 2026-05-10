@@ -64,6 +64,29 @@ export function LeaderAvailabilityEditor({ eventId, action, onChange }: Props) {
 
   return (
     <div style={{ padding: "1rem" }}>
+      {/* 005-interviewer / Sprint 25:
+          応募ページが参照する候補日時は interviewer_slots ベースに移行した。
+          このタブの値 (event_actions.config.leaderAvailableSlots) は読まれない。
+          削除は次 PR の予定だが、ユーザーが既存運用で開いて困らないよう警告を出す。 */}
+      <div
+        role="status"
+        style={{
+          padding: "0.75rem 1rem",
+          background: colors.dangerSubtle,
+          border: `1px solid ${colors.danger}`,
+          borderRadius: "0.375rem",
+          color: colors.danger,
+          fontSize: "0.875rem",
+          marginBottom: "1rem",
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>このタブは廃止予定です。</strong>
+        <br />
+        応募ページの候補日時は「面接官」タブで管理されるようになりました。
+        ここで保存しても応募ページには反映されません。引き続き「面接官」タブから
+        各面接官の利用可能日時を設定してください。
+      </div>
       <h3 style={{ marginTop: 0 }}>面談可能な候補日時を設定</h3>
       <p
         style={{

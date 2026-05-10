@@ -296,3 +296,25 @@ export type Application = {
   appliedAt: string;
   decidedAt: string | null;
 };
+
+// 面接官 (005-interviewer / Sprint 25)
+// member_application action に紐づく面接官。1 action : N 人。
+// 各面接官は accessToken で /interviewer/:token 公開ページにアクセスでき、
+// 自分の利用可能 slot を編集する。応募ページは全面接官の slot を
+// OR 結合した値を取得する。
+export type Interviewer = {
+  id: string;
+  eventActionId: string;
+  name: string;
+  email: string;
+  accessToken: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// list / create endpoint は便宜上 inviteUrl と slots を同梱して返す
+// （N+1 を避けるため）。
+export type InterviewerWithMeta = Interviewer & {
+  inviteUrl: string;
+  slots?: string[];
+};
