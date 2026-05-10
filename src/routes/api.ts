@@ -43,7 +43,7 @@ api.use(
 // 除外パス:
 //   - /health: ヘルスチェック
 //   - /apply/:eventId (POST), /apply/:eventId/availability (GET): 応募者向け公開フォーム
-//   - /interviewer/:token, /interviewer/:token/slots: 面接官向け token-based 公開エンドポイント
+//   - /interviewer-form/:token (GET / POST): 面接官向け共有フォーム (PR #139 単一フォーム URL 方式)
 //
 // 注意: /slack/oauth, /slack/events 等の Slack 連携は app.route("/slack", ...) の
 //       別ルートにマウントされており、本ミドルウェアの管轄外。
@@ -54,7 +54,7 @@ api.use("/*", async (c, next) => {
   if (
     sub === "/health" ||
     sub.startsWith("/apply/") ||
-    sub.startsWith("/interviewer/")
+    sub.startsWith("/interviewer-form/")
   ) {
     return next();
   }
