@@ -115,16 +115,22 @@ workspacesRouter.post("/workspaces", async (c) => {
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const ws = {
+  // 手動登録経路では user OAuth は使えない (user token を入力させない方針)。
+  // user_access_token / user_scope / authed_user_id は NULL で保存し、
+  // user_scope が必要な機能 (bot-bulk-invite 等) は OAuth flow を通すよう案内する。
+  const ws: typeof workspaces.$inferInsert = {
     id,
     name: body.name || auth.team || "Unnamed Workspace",
     slackTeamId: auth.team_id,
     botToken: encryptedBotToken,
     signingSecret: encryptedSigningSecret,
+    userAccessToken: null,
+    userScope: null,
+    authedUserId: null,
     createdAt: now,
   };
   await db.insert(workspaces).values(ws);
-  return c.json(toWorkspaceMeta(ws), 201);
+  return c.json(toWorkspaceMeta(ws as typeof workspaces.$inferSelect), 201);
 });
 
 workspacesRouter.put("/workspaces/:id", async (c) => {

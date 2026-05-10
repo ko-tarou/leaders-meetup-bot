@@ -3,13 +3,24 @@ import { unique, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // Slack ワークスペース登録（ADR-0006）
 // 複数 Slack workspace（Developers Hub / HackIt 等）を一元管理するためのトップレベル登録
-// bot_token / signing_secret は AES-256-GCM 暗号化保存（暗号化ヘルパは Sprint 6 PR2）
+// bot_token / signing_secret / user_access_token は AES-256-GCM 暗号化保存
+// （暗号化ヘルパは Sprint 6 PR2 / WORKSPACE_TOKEN_KEY を使用）
+//
+// migration 0034 (005-user-oauth): private channel への bot 一括招待のため
+//   user OAuth token を保存する列 (user_access_token / user_scope / authed_user_id)
+//   を追加。既存行は再認証されるまで NULL で残るため optional 扱い。
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   slackTeamId: text("slack_team_id").notNull().unique(),
   botToken: text("bot_token").notNull(),
   signingSecret: text("signing_secret").notNull(),
+  // OAuth で取得した user token (encrypted)。null = 未認証 or 旧 install。
+  userAccessToken: text("user_access_token"),
+  // Slack OAuth レスポンスの authed_user.scope (CSV)。plain text。
+  userScope: text("user_scope"),
+  // OAuth した user の Slack user_id (例 "U12345")。
+  authedUserId: text("authed_user_id"),
   createdAt: text("created_at").notNull(),
 });
 
