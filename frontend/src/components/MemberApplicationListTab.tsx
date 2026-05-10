@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
+import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
 import { colors } from "../styles/tokens";
@@ -36,18 +37,42 @@ const STATUS_COLOR: Record<ApplicationStatus, string> = {
 const styles = {
   container: { padding: "1rem" } as CSSProperties,
   shareBox: {
-    padding: "0.75rem",
+    padding: "0.75rem 1rem",
     background: colors.primarySubtle,
-    border: `1px solid ${colors.primarySubtle}`,
-    borderRadius: "0.375rem",
+    border: `1px solid ${colors.primary}`,
+    borderRadius: "0.5rem",
     marginBottom: "1rem",
   } as CSSProperties,
   shareLabel: {
-    fontSize: "0.875rem",
-    color: colors.primary,
+    fontSize: "0.75rem",
+    color: colors.textSecondary,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
     marginBottom: "0.25rem",
   } as CSSProperties,
-  shareUrl: { fontSize: "0.875rem", wordBreak: "break-all" } as CSSProperties,
+  shareDesc: {
+    margin: "0 0 0.5rem",
+    fontSize: "0.8rem",
+    color: colors.text,
+    lineHeight: 1.5,
+  } as CSSProperties,
+  shareRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+  } as CSSProperties,
+  shareInput: {
+    flex: "1 1 280px",
+    minWidth: 0,
+    padding: "0.4rem 0.5rem",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.375rem",
+    fontFamily: "monospace",
+    fontSize: "0.8rem",
+    background: colors.background,
+    color: colors.text,
+  } as CSSProperties,
   header: {
     display: "flex",
     alignItems: "center",
@@ -209,6 +234,7 @@ const styles = {
 type Props = { eventId: string; action: EventAction };
 
 export function MemberApplicationListTab({ eventId, action }: Props) {
+  const toast = useToast();
   const templates = useMemo(
     () => parseEmailTemplates(action.config),
     [action.config],
@@ -248,6 +274,15 @@ export function MemberApplicationListTab({ eventId, action }: Props) {
   // 公開応募ページの URL（kota が共有用にコピーする）
   const applyUrl = `${window.location.origin}/apply/${eventId}`;
 
+  const handleCopyApplyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(applyUrl);
+      toast.success("URL をコピーしました");
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
   if (loading) return <div style={styles.container}>読み込み中...</div>;
   if (error)
     return (
@@ -258,10 +293,22 @@ export function MemberApplicationListTab({ eventId, action }: Props) {
 
   return (
     <div style={styles.container}>
-      <div style={styles.shareBox}>
-        <div style={styles.shareLabel}>応募フォーム URL（共有用）</div>
-        <code style={styles.shareUrl}>{applyUrl}</code>
-      </div>
+      <section style={styles.shareBox} aria-label="応募フォーム URL">
+        <div style={styles.shareLabel}>応募フォーム URL</div>
+        <p style={styles.shareDesc}>このリンクを応募者に共有してください。</p>
+        <div style={styles.shareRow}>
+          <input
+            readOnly
+            value={applyUrl}
+            style={styles.shareInput}
+            aria-label="応募フォーム URL"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <Button size="sm" onClick={handleCopyApplyUrl}>
+            コピー
+          </Button>
+        </div>
+      </section>
 
       <div style={styles.header}>
         <h2 style={{ margin: 0 }}>応募一覧 ({filtered.length}件)</h2>
