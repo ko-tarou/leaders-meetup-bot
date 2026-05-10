@@ -13,21 +13,34 @@ import {
 import { sendReminder } from "./reminder";
 import { getJstNow, jstToUtcIso } from "./time-utils";
 
-type CandidateRule = {
+type Frequency = "daily" | "weekly" | "monthly" | "yearly";
+
+// candidate_rule は frequency 別に shape が変わる。
+// 既存 monthly row は { type:"weekday", weekday, weeks, monthOffset } で保存されている。
+type MonthlyRule = {
   type: "weekday";
   weekday: number; // 0=日, 1=月, ..., 6=土
-  weeks: number[]; // [2, 3, 4] = 第2〜4週
-  monthOffset?: number; // 0=今月, 1=来月, 2=再来月 (default 0)
+  weeks: number[];
+  monthOffset?: number;
 };
+type WeeklyRule = { type?: "weekly"; weekday: number; weeksAhead?: number };
+type YearlyRule = { type?: "yearly"; month: number; day: number };
+type DailyRule = { type?: "daily" };
+type CandidateRule = MonthlyRule | WeeklyRule | YearlyRule | DailyRule;
 
 type ScheduleRow = {
   id: string;
   meetingId: string;
+  frequency: string;
   candidateRule: string;
   pollStartDay: number;
   pollStartTime: string;
   pollCloseDay: number;
   pollCloseTime: string;
+  pollStartWeekday: number | null;
+  pollCloseWeekday: number | null;
+  pollStartMonth: number | null;
+  pollCloseMonth: number | null;
   reminderTime: string;
   messageTemplate: string | null;
   reminderMessageTemplate: string | null;
@@ -35,6 +48,108 @@ type ScheduleRow = {
   enabled: number;
   createdAt: string;
 };
+
+function asFrequency(v: string): Frequency {
+  switch (v) {
+    case "daily":
+    case "weekly":
+    case "yearly":
+      return v;
+    case "monthly":
+    default:
+      return "monthly";
+  }
+}
+
+/**
+ * cron は 5 分粒度。time 判定は「fire 時刻以降の 9 分窓」とすることで、
+ * 5 分毎の cron が確実に 1 回ヒットするようにする。
+ */
+function isWithinFireWindow(currentHM: string, targetHM: string): boolean {
+  const [ch, cm] = currentHM.split(":").map(Number);
+  const [th, tm] = targetHM.split(":").map(Number);
+  if ([ch, cm, th, tm].some((n) => Number.isNaN(n))) return false;
+  const cMins = ch * 60 + cm;
+  const tMins = th * 60 + tm;
+  return cMins >= tMins && cMins < tMins + 9;
+}
+
+type JstNow = ReturnType<typeof getJstNow>;
+
+/**
+ * frequency 別に「今 cron で poll を start すべきか」を判定する純粋関数。
+ */
+export function shouldStartPoll(now: JstNow, schedule: ScheduleRow): boolean {
+  if (!isWithinFireWindow(now.hm, schedule.pollStartTime)) return false;
+  const freq = asFrequency(schedule.frequency);
+  switch (freq) {
+    case "daily":
+      return true;
+    case "weekly": {
+      if (schedule.pollStartWeekday == null) return false;
+      // JST の曜日: ymd を元に Date を作って getDay
+      const wd = new Date(`${now.ymd}T00:00:00Z`).getUTCDay();
+      return wd === schedule.pollStartWeekday;
+    }
+    case "monthly":
+      return now.day === schedule.pollStartDay;
+    case "yearly":
+      return (
+        now.day === schedule.pollStartDay &&
+        schedule.pollStartMonth != null &&
+        now.month === schedule.pollStartMonth
+      );
+  }
+}
+
+/** frequency 別に「今 cron で poll を close すべきか」を判定する純粋関数。 */
+export function shouldClosePoll(now: JstNow, schedule: ScheduleRow): boolean {
+  if (!isWithinFireWindow(now.hm, schedule.pollCloseTime)) return false;
+  const freq = asFrequency(schedule.frequency);
+  switch (freq) {
+    case "daily":
+      return true;
+    case "weekly": {
+      if (schedule.pollCloseWeekday == null) return false;
+      const wd = new Date(`${now.ymd}T00:00:00Z`).getUTCDay();
+      return wd === schedule.pollCloseWeekday;
+    }
+    case "monthly":
+      return now.day === schedule.pollCloseDay;
+    case "yearly":
+      return (
+        now.day === schedule.pollCloseDay &&
+        schedule.pollCloseMonth != null &&
+        now.month === schedule.pollCloseMonth
+      );
+  }
+}
+
+/**
+ * 冪等用の dedup スコープキー。
+ * frequency 別に「同じ周期内では 1 回」となる粒度を返す。
+ */
+function periodKey(now: JstNow, frequency: Frequency): string {
+  switch (frequency) {
+    case "daily":
+      return now.ymd; // YYYY-MM-DD
+    case "weekly": {
+      // ISO 週番号 (簡易): UTC 月曜起点で計算
+      const d = new Date(`${now.ymd}T00:00:00Z`);
+      const day = d.getUTCDay() || 7;
+      d.setUTCDate(d.getUTCDate() + 4 - day);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil(
+        ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+      );
+      return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+    }
+    case "monthly":
+      return now.ym; // YYYY-MM
+    case "yearly":
+      return String(now.year);
+  }
+}
 
 /**
  * 自動サイクルのメイン処理。Cronから呼ばれる。
@@ -48,8 +163,6 @@ export async function processAutoCycles(
   const jst = getJstNow();
   const today = jst.day;
   const todayStr = jst.ymd;
-  const currentHM = jst.hm;
-  const currentMonth = jst.ym;
 
   const schedules = await d1
     .select()
@@ -65,43 +178,75 @@ export async function processAutoCycles(
       .get();
     if (!meeting) continue;
 
-    const startTime = schedule.pollStartTime ?? "00:00";
-    const closeTime = schedule.pollCloseTime ?? "00:00";
-
-    if (today === schedule.pollStartDay && currentHM >= startTime) {
-      await autoStartPoll(d1, db, slackClient, meeting, schedule, currentMonth);
+    if (shouldStartPoll(jst, schedule)) {
+      await autoStartPoll(d1, db, slackClient, meeting, schedule, jst);
     }
-    if (today === schedule.pollCloseDay && currentHM >= closeTime) {
+    if (shouldClosePoll(jst, schedule)) {
       await autoClosePoll(d1, db, slackClient, meeting, schedule, todayStr);
     }
 
-    // day_of_month トリガーの処理
+    // day_of_month トリガーの処理 (monthly schedule 向け; 他 frequency でも今日 day と一致すれば発火)
     await handleDayOfMonthTriggers(db, meeting, schedule, today, todayStr);
   }
 }
 
-/** 投票を自動開始。冪等: 今月分のpollが既存ならスキップ */
+/** 投票を自動開始。冪等: 同じ周期内に poll が既存ならスキップ */
 async function autoStartPoll(
   d1: ReturnType<typeof drizzle>,
   db: D1Database,
   slackClient: SlackClient,
   meeting: { id: string; name: string; channelId: string },
   schedule: ScheduleRow,
-  currentMonth: string,
+  jst: JstNow,
 ): Promise<void> {
-  const existingPolls = await d1
-    .select()
-    .from(polls)
-    .where(and(eq(polls.meetingId, meeting.id), like(polls.createdAt, `${currentMonth}%`)))
-    .all();
-
-  if (existingPolls.length > 0) {
-    console.log(`Poll already exists for ${meeting.name} in ${currentMonth}, skipping`);
-    return;
+  const freq = asFrequency(schedule.frequency);
+  // 冪等: 同じ周期内に既に poll があればスキップ。
+  //   monthly: createdAt LIKE 'YYYY-MM-%'
+  //   daily:   createdAt LIKE 'YYYY-MM-DD%'
+  //   weekly:  直近 7 日以内に poll があるか (近似)
+  //   yearly:  createdAt LIKE 'YYYY-%'
+  const periodLike = (() => {
+    switch (freq) {
+      case "daily":
+        return `${jst.ymd}%`;
+      case "weekly":
+        return null; // 後段で日付計算
+      case "monthly":
+        return `${jst.ym}%`;
+      case "yearly":
+        return `${jst.year}-%`;
+    }
+  })();
+  if (periodLike) {
+    const existingPolls = await d1
+      .select()
+      .from(polls)
+      .where(and(eq(polls.meetingId, meeting.id), like(polls.createdAt, periodLike)))
+      .all();
+    if (existingPolls.length > 0) {
+      console.log(
+        `Poll already exists for ${meeting.name} in ${periodKey(jst, freq)}, skipping`,
+      );
+      return;
+    }
+  } else if (freq === "weekly") {
+    // 直近 7 日以内に作成された poll があればスキップ
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
+    const all = await d1
+      .select()
+      .from(polls)
+      .where(eq(polls.meetingId, meeting.id))
+      .all();
+    if (all.some((p) => p.createdAt >= sevenDaysAgo)) {
+      console.log(
+        `Poll already exists for ${meeting.name} in week ${periodKey(jst, freq)}, skipping`,
+      );
+      return;
+    }
   }
 
   const rule: CandidateRule = JSON.parse(schedule.candidateRule);
-  const dates = generateCandidateDatesWithOffset(rule, currentMonth);
+  const dates = generateCandidateDatesForFrequency(freq, rule, jst);
 
   if (dates.length === 0) {
     console.error(`No candidate dates generated for ${meeting.name}`);
@@ -302,8 +447,8 @@ function formatDateJa(isoDate: string): string {
   return `${year}年${month}月${day}日(${wd})`;
 }
 
-/** candidateRuleに基づいて候補日を生成する（純粋関数） */
-export function generateCandidateDates(rule: CandidateRule, yearMonth: string): string[] {
+/** monthly: candidateRule (type:"weekday") に基づいて候補日を生成する（純粋関数） */
+export function generateCandidateDates(rule: MonthlyRule, yearMonth: string): string[] {
   const [year, month] = yearMonth.split("-").map(Number);
   const dates: string[] = [];
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -329,12 +474,64 @@ function applyMonthOffset(baseYearMonth: string, offset: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** rule.monthOffset を考慮して候補日を生成する */
+/** monthly: rule.monthOffset を考慮して候補日を生成する */
 export function generateCandidateDatesWithOffset(
-  rule: CandidateRule,
+  rule: MonthlyRule,
   baseYearMonth: string,
 ): string[] {
   const offset = rule.monthOffset ?? 0;
   const targetYearMonth = applyMonthOffset(baseYearMonth, offset);
   return generateCandidateDates(rule, targetYearMonth);
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** JST の (now) を起点に、指定した曜日の次に来る日付 (YYYY-MM-DD) を返す。weeksAhead 週後ろにシフト可。 */
+function computeNextWeekday(jst: JstNow, weekday: number, weeksAhead = 0): string {
+  const base = new Date(`${jst.ymd}T00:00:00Z`);
+  const cur = base.getUTCDay();
+  let diff = (weekday - cur + 7) % 7;
+  if (diff === 0) diff = 7; // 同曜日なら次週
+  diff += weeksAhead * 7;
+  base.setUTCDate(base.getUTCDate() + diff);
+  return `${base.getUTCFullYear()}-${pad2(base.getUTCMonth() + 1)}-${pad2(base.getUTCDate())}`;
+}
+
+/**
+ * frequency 別に候補日を生成する。
+ *  - daily:   翌日 (今日が投票日と被らないように)
+ *  - weekly:  次に来る指定曜日 (weeksAhead 適用)
+ *  - monthly: 既存ロジック (monthOffset 適用)
+ *  - yearly:  翌年の (month, day)
+ */
+export function generateCandidateDatesForFrequency(
+  frequency: Frequency,
+  rule: CandidateRule,
+  jst: JstNow,
+): string[] {
+  switch (frequency) {
+    case "daily": {
+      const d = new Date(`${jst.ymd}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      return [
+        `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
+      ];
+    }
+    case "weekly": {
+      const r = rule as WeeklyRule;
+      if (typeof r.weekday !== "number") return [];
+      return [computeNextWeekday(jst, r.weekday, r.weeksAhead ?? 0)];
+    }
+    case "monthly":
+      return generateCandidateDatesWithOffset(rule as MonthlyRule, jst.ym);
+    case "yearly": {
+      const r = rule as YearlyRule;
+      if (typeof r.month !== "number" || typeof r.day !== "number") return [];
+      // 来年の (month, day) を候補日として返す
+      const targetYear = jst.year + 1;
+      return [`${targetYear}-${pad2(r.month)}-${pad2(r.day)}`];
+    }
+  }
 }
