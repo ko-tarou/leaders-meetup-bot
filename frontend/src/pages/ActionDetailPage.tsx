@@ -9,9 +9,9 @@ import { PRReviewListTab } from "../components/PRReviewListTab";
 import { MemberApplicationListTab } from "../components/MemberApplicationListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
-import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
 import { InterviewersTab } from "../components/member-application/InterviewersTab";
+import { CalendarTab } from "../components/member-application/CalendarTab";
 import { ScheduleSection } from "../components/ScheduleSection";
 import { SchedulePollingMainTab } from "../components/schedule/SchedulePollingMainTab";
 import { ScheduleChannelTab } from "../components/schedule/ScheduleChannelTab";
@@ -54,13 +54,14 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
   // Sprint 19 PR1: member_application は「候補日時設定」サブタブを持つ
   // Sprint 24: 「メール」サブタブを追加 (複数テンプレ管理)
   // 005-interviewer / Sprint 25: 「面接官」サブタブを追加。
-  // 並びは「メイン → 面接官 → 候補日時設定（廃止予定） → メール → その他設定」。
-  // 面接官管理が日時設定の上位概念なので候補日時設定の前に置く。
+  // 005-calendar-tab: 「候補日時設定」を「カレンダー」にリネーム。
+  //   集約ビュー (slots × contributors) + admin 編集 + 確定済 booking 表示に
+  //   再設計し、CalendarTab コンポーネントに置き換えた。
   if (actionType === "member_application") {
     return [
       { id: "main", label: "メイン" },
       { id: "interviewers", label: "面接官" },
-      { id: "availability", label: "候補日時設定" },
+      { id: "availability", label: "カレンダー" },
       { id: "email", label: "メール" },
       { id: "settings", label: "その他設定" },
     ];
@@ -330,11 +331,7 @@ export function ActionDetailPage() {
         <InterviewersTab eventId={eventId} action={action} />
       )}
       {subTab === "availability" && actionType === "member_application" && (
-        <LeaderAvailabilityEditor
-          eventId={eventId}
-          action={action}
-          onChange={() => setRefreshKey((k) => k + 1)}
-        />
+        <CalendarTab eventId={eventId} action={action} />
       )}
       {subTab === "email" && actionType === "member_application" && (
         <EmailTemplatesEditor
