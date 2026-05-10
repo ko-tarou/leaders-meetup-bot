@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { ReminderItem, AutoSchedule } from "../types";
+import type {
+  ReminderItem,
+  AutoSchedule,
+  AutoScheduleCandidateRule,
+} from "../types";
 import { AutoRespondSection } from "./AutoRespondSection";
 import {
   AutoScheduleConfigPanel,
@@ -33,15 +37,36 @@ const DEFAULT_REMINDERS: ReminderItem[] = [
 
 const INITIAL_CONFIG: AutoScheduleConfig = {
   enabled: true,
-  weekday: 6,
-  weeks: [2, 3, 4],
-  monthOffset: 0,
+  frequency: "monthly",
+  candidateRule: { type: "weekday", weekday: 6, weeks: [2, 3, 4], monthOffset: 0 },
   pollStartDay: 1,
   pollStartTime: "00:00",
   pollCloseDay: 10,
   pollCloseTime: "00:00",
+  // weekly default (月曜)
+  pollStartWeekday: 1,
+  pollCloseWeekday: 1,
+  // yearly default (1月1日)
+  pollStartMonth: 1,
+  pollCloseMonth: 1,
   messageTemplate: "",
 };
+
+/** monthly 既存挙動用: candidateRule.type === "weekday" を取り出す。InstantSendPanel が利用。 */
+function extractMonthlyRule(rule: AutoScheduleCandidateRule): {
+  weekday: number;
+  weeks: number[];
+  monthOffset: number;
+} {
+  if (rule.type === "weekday") {
+    return {
+      weekday: rule.weekday,
+      weeks: rule.weeks,
+      monthOffset: rule.monthOffset ?? 0,
+    };
+  }
+  return { weekday: 6, weeks: [2, 3, 4], monthOffset: 0 };
+}
 
 const ALL_PANELS: SchedulePanel[] = ["config", "reminders", "instant"];
 
@@ -71,20 +96,24 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
       const data = await api.getAutoSchedule(meetingId);
       if (data && data.id) {
         setSchedule(data);
-        // 既存 UI は monthly (type:"weekday") のみ対応。frequency 切替 UI は別 PR で。
-        const candidate = data.candidateRule;
-        const isMonthlyRule = candidate?.type === "weekday";
+        // frequency 未指定の既存行は monthly として扱う。
+        const freq = data.frequency ?? "monthly";
+        const candidate: AutoScheduleCandidateRule =
+          data.candidateRule ?? INITIAL_CONFIG.candidateRule;
         setConfig({
           enabled: data.enabled === 1,
-          weekday: isMonthlyRule ? candidate.weekday : INITIAL_CONFIG.weekday,
-          weeks: isMonthlyRule ? candidate.weeks : INITIAL_CONFIG.weeks,
-          monthOffset: isMonthlyRule
-            ? (candidate.monthOffset ?? INITIAL_CONFIG.monthOffset)
-            : INITIAL_CONFIG.monthOffset,
+          frequency: freq,
+          candidateRule: candidate,
           pollStartDay: data.pollStartDay,
           pollStartTime: data.pollStartTime || "00:00",
           pollCloseDay: data.pollCloseDay,
           pollCloseTime: data.pollCloseTime || "00:00",
+          pollStartWeekday:
+            data.pollStartWeekday ?? INITIAL_CONFIG.pollStartWeekday,
+          pollCloseWeekday:
+            data.pollCloseWeekday ?? INITIAL_CONFIG.pollCloseWeekday,
+          pollStartMonth: data.pollStartMonth ?? INITIAL_CONFIG.pollStartMonth,
+          pollCloseMonth: data.pollCloseMonth ?? INITIAL_CONFIG.pollCloseMonth,
           messageTemplate: data.messageTemplate ?? "",
         });
         setAutoRespondEnabled(data.autoRespondEnabled === 1);
@@ -126,17 +155,25 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
       message: r.message && r.message.trim() !== "" ? r.message : null,
     }));
 
+    // frequency 別に「使うフィールド」のみ payload に含める。
+    // BE 側は使わないフィールドを無視 or null 維持してくれる (POST は default 値で埋める)。
+    const freq = config.frequency;
     const data = {
-      candidateRule: {
-        type: "weekday" as const,
-        weekday: config.weekday,
-        weeks: config.weeks,
-        monthOffset: config.monthOffset,
-      },
-      pollStartDay: config.pollStartDay,
+      frequency: freq,
+      candidateRule: config.candidateRule,
       pollStartTime: config.pollStartTime,
-      pollCloseDay: config.pollCloseDay,
       pollCloseTime: config.pollCloseTime,
+      // monthly / yearly は day を使う
+      pollStartDay:
+        freq === "monthly" || freq === "yearly" ? config.pollStartDay : 1,
+      pollCloseDay:
+        freq === "monthly" || freq === "yearly" ? config.pollCloseDay : 1,
+      // weekly は weekday を使う
+      pollStartWeekday: freq === "weekly" ? config.pollStartWeekday : null,
+      pollCloseWeekday: freq === "weekly" ? config.pollCloseWeekday : null,
+      // yearly は month を使う
+      pollStartMonth: freq === "yearly" ? config.pollStartMonth : null,
+      pollCloseMonth: freq === "yearly" ? config.pollCloseMonth : null,
       reminders: normalized,
       messageTemplate: config.messageTemplate.trim()
         ? config.messageTemplate
@@ -232,28 +269,33 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
         />
       )}
 
-      {showInstant && (
-        <>
-          {/* 手動アクション */}
-          <h3>手動アクション</h3>
-          <InstantSendPanel
-            meetingId={meetingId}
-            weekday={config.weekday}
-            weeks={config.weeks}
-            monthOffset={config.monthOffset}
-            messageTemplate={config.messageTemplate}
-            hasOpenPoll={hasOpenPoll}
-            onAfterSend={async () => {
-              await load();
-              onChange?.();
-            }}
-            onAfterClose={async () => {
-              await load();
-              onChange?.();
-            }}
-          />
-        </>
-      )}
+      {showInstant && (() => {
+        // InstantSendPanel は monthly 前提 (週 + 月オフセット) のため、
+        // candidateRule から monthly 値を抽出して渡す。非 monthly の場合は default 値。
+        const monthly = extractMonthlyRule(config.candidateRule);
+        return (
+          <>
+            {/* 手動アクション */}
+            <h3>手動アクション</h3>
+            <InstantSendPanel
+              meetingId={meetingId}
+              weekday={monthly.weekday}
+              weeks={monthly.weeks}
+              monthOffset={monthly.monthOffset}
+              messageTemplate={config.messageTemplate}
+              hasOpenPoll={hasOpenPoll}
+              onAfterSend={async () => {
+                await load();
+                onChange?.();
+              }}
+              onAfterClose={async () => {
+                await load();
+                onChange?.();
+              }}
+            />
+          </>
+        );
+      })()}
     </div>
   );
 }
