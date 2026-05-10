@@ -14,20 +14,21 @@ import {
   PublicApplyPage,
   PublicThanksPage,
 } from "./pages/PublicApplyPage";
-import { InterviewerPage } from "./pages/InterviewerPage";
+import { InterviewerFormPage } from "./pages/InterviewerFormPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
 import { colors } from "./styles/tokens";
 
 export function App() {
-  // /apply 配下と /interviewer 配下は公開ページ
+  // /apply 配下と /interviewer-form 配下は公開ページ
   // (ヘッダー・EventProvider なし独立レイアウト)。
   // - /apply 系: 応募者向け
-  // - /interviewer 系 (005-interviewer): 面接官の slot 編集 (token 認可)
+  // - /interviewer-form 系 (005-interviewer-simplify / PR #139):
+  //     面接官向け共有フォーム (token 認可、誰でもアクセス可・name で upsert)
   // 公開ページでも将来トースト/確認ダイアログを使えるよう Provider は外側に置く。
   const { pathname } = useLocation();
   if (
     pathname.startsWith("/apply") ||
-    pathname.startsWith("/interviewer")
+    pathname.startsWith("/interviewer-form")
   ) {
     return (
       <ToastProvider>
@@ -39,8 +40,8 @@ export function App() {
               element={<PublicThanksPage />}
             />
             <Route
-              path="/interviewer/:token"
-              element={<InterviewerPage />}
+              path="/interviewer-form/:token"
+              element={<InterviewerFormPage />}
             />
           </Routes>
         </ConfirmProvider>
