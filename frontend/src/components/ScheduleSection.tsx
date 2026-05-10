@@ -71,13 +71,16 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
       const data = await api.getAutoSchedule(meetingId);
       if (data && data.id) {
         setSchedule(data);
+        // 既存 UI は monthly (type:"weekday") のみ対応。frequency 切替 UI は別 PR で。
         const candidate = data.candidateRule;
+        const isMonthlyRule = candidate?.type === "weekday";
         setConfig({
           enabled: data.enabled === 1,
-          weekday: candidate?.weekday ?? INITIAL_CONFIG.weekday,
-          weeks: candidate?.weeks ?? INITIAL_CONFIG.weeks,
-          monthOffset:
-            candidate?.monthOffset ?? INITIAL_CONFIG.monthOffset,
+          weekday: isMonthlyRule ? candidate.weekday : INITIAL_CONFIG.weekday,
+          weeks: isMonthlyRule ? candidate.weeks : INITIAL_CONFIG.weeks,
+          monthOffset: isMonthlyRule
+            ? (candidate.monthOffset ?? INITIAL_CONFIG.monthOffset)
+            : INITIAL_CONFIG.monthOffset,
           pollStartDay: data.pollStartDay,
           pollStartTime: data.pollStartTime || "00:00",
           pollCloseDay: data.pollCloseDay,

@@ -362,19 +362,29 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   meetingId: text("meeting_id")
     .notNull()
     .references(() => meetings.id),
+  // 周期: "daily" | "weekly" | "monthly" | "yearly"
+  // 既存 row は migration で 'monthly' に backfill 済。
+  frequency: text("frequency").notNull().default("monthly"),
   // 候補日生成ルール（JSON文字列）
-  // 例: {"type":"weekday","weekday":6,"weeks":[2,3,4]}
-  // weekday: 0=日, 1=月, ..., 6=土
-  // weeks: 第何週（1-5）
+  // frequency 別に shape が変わる:
+  //   daily:   { type:"daily" }
+  //   weekly:  { type:"weekday", weekday, weeksAhead? }
+  //   monthly: { type:"weekday", weekday, weeks, monthOffset? }
+  //   yearly:  { type:"yearly", month, day }
   candidateRule: text("candidate_rule").notNull(),
-  // 毎月何日に投票を開始するか (1-28)
+  // monthly 用: 毎月何日に投票を開始/締切するか (1-28)
+  // 他の frequency では参照されない
   pollStartDay: integer("poll_start_day").notNull(),
-  // 投票開始時刻 "HH:MM" JST
+  // 投票開始時刻 "HH:MM" JST (全 frequency 共通)
   pollStartTime: text("poll_start_time").notNull().default("00:00"),
-  // 毎月何日に投票を締め切るか (1-28)
   pollCloseDay: integer("poll_close_day").notNull(),
-  // 投票締切時刻 "HH:MM" JST
   pollCloseTime: text("poll_close_time").notNull().default("00:00"),
+  // weekly 用: 投票開始/締切の曜日 (0=Sun .. 6=Sat)
+  pollStartWeekday: integer("poll_start_weekday"),
+  pollCloseWeekday: integer("poll_close_weekday"),
+  // yearly 用: 投票開始/締切の月 (1-12)。日 (pollStartDay/pollCloseDay) と組合せて判定
+  pollStartMonth: integer("poll_start_month"),
+  pollCloseMonth: integer("poll_close_month"),
   // リマインド時刻 "09:00"（reminders 内の要素が time を持たない旧 row 用の fallback）
   reminderTime: text("reminder_time").notNull().default("09:00"),
   // 投票メッセージの本文テンプレート（NULLならデフォルト文言）
