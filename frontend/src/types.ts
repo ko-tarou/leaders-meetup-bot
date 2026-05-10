@@ -323,3 +323,32 @@ export type InterviewerEntry = {
   slots: string[];
   updatedAt: string;
 };
+
+// カレンダー集約 API (`GET /orgs/.../calendar`) のレスポンス要素。
+//
+// CalendarSlot:
+//   特定 datetime (UTC ISO) を「面接可能」と登録した面接官 (= contributors) の集合。
+//   同じ datetime に複数の interviewer が登録すると 1 個の slot に集約される。
+//
+// CalendarBooking:
+//   その datetime で確定済の応募者 (applications.status='scheduled' AND interview_at IS NOT NULL)。
+//   同 datetime に slot と booking 両方ある場合は UI で重ねて表示する。
+export type CalendarSlot = {
+  /** UTC ISO 8601。Z 終端。 */
+  datetime: string;
+  /** この slot を登録した interviewer 一覧。少なくとも 1 件含まれる。 */
+  contributors: { id: string; name: string }[];
+};
+
+export type CalendarBooking = {
+  applicantId: string;
+  applicantName: string;
+  /** UTC ISO 8601。Z 終端。 */
+  interviewAt: string;
+  status: "scheduled";
+};
+
+export type CalendarData = {
+  slots: CalendarSlot[];
+  bookings: CalendarBooking[];
+};

@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNotNull } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   events,
   eventActions,
   interviewers,
   interviewerSlots,
+  applications,
 } from "../../db/schema";
 
 export const interviewersRouter = new Hono<{ Bindings: Env }>();
@@ -302,6 +303,172 @@ interviewersRouter.get(
         .sort((a, b) => a.localeCompare(b)),
       updatedAt: existing.updatedAt,
     });
+  },
+);
+
+/**
+ * PUT /orgs/:eventId/actions/:actionId/interviewers/:interviewerId/slots
+ *   admin が任意 entry の slots を上書き編集する。
+ *   body: { slots: string[] } (UTC ISO + Z 終端、最大 100 件)
+ *   レスポンス: { ok: true }
+ *
+ *   PR #139 で削除した admin slot 編集 endpoint を復活。
+ *   カレンダータブから「初期 admin」エントリーを直接編集する用途。
+ *   slots は idempotent に全置換 (既存 slots を delete → 新 slots を insert)。
+ */
+interviewersRouter.put(
+  "/orgs/:eventId/actions/:actionId/interviewers/:interviewerId/slots",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionId = c.req.param("actionId");
+    const interviewerId = c.req.param("interviewerId");
+
+    const found = await findMemberApplicationAction(db, eventId, actionId);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    const existing = await db
+      .select()
+      .from(interviewers)
+      .where(eq(interviewers.id, interviewerId))
+      .get();
+    if (!existing) return c.json({ error: "interviewer not found" }, 404);
+    if (existing.eventActionId !== actionId) {
+      return c.json({ error: "actionId mismatch" }, 400);
+    }
+
+    const body = await c.req.json<{ slots?: unknown }>();
+    if (!Array.isArray(body.slots)) {
+      return c.json({ error: "slots must be an array" }, 400);
+    }
+    if (body.slots.length > 100) {
+      return c.json({ error: "slots must be <= 100 entries" }, 400);
+    }
+    for (const s of body.slots) {
+      if (!isValidUtcIso(s)) {
+        return c.json({ error: `invalid slot: ${String(s)}` }, 400);
+      }
+    }
+    const unique = Array.from(new Set(body.slots as string[]));
+
+    const now = new Date().toISOString();
+    await db
+      .delete(interviewerSlots)
+      .where(eq(interviewerSlots.interviewerId, interviewerId));
+    if (unique.length > 0) {
+      const rows = unique.map((s) => ({
+        id: crypto.randomUUID(),
+        interviewerId,
+        slotDatetime: s,
+        createdAt: now,
+      }));
+      await insertSlotsInChunks(db, rows);
+    }
+    await db
+      .update(interviewers)
+      .set({ updatedAt: now })
+      .where(eq(interviewers.id, interviewerId));
+
+    return c.json({ ok: true });
+  },
+);
+
+/**
+ * GET /orgs/:eventId/actions/:actionId/calendar
+ *   action のカレンダー集約ビュー。
+ *   - slots: interviewer_slots を全件 SELECT し、datetime ごとに contributors を集約。
+ *   - bookings: applications で status='scheduled' AND interview_at IS NOT NULL のもの。
+ *   レスポンス: {
+ *     slots: [{ datetime, contributors: [{ id, name }] }],
+ *     bookings: [{ applicantId, applicantName, interviewAt, status }]
+ *   }
+ *
+ *   slots と bookings は重複してもよい (UI 側で同 datetime に重ねて表示)。
+ */
+interviewersRouter.get(
+  "/orgs/:eventId/actions/:actionId/calendar",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionId = c.req.param("actionId");
+
+    const found = await findMemberApplicationAction(db, eventId, actionId);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    // interviewers ごとの slots を読み出し、datetime → contributors に集約
+    const allInterviewers = await db
+      .select()
+      .from(interviewers)
+      .where(eq(interviewers.eventActionId, actionId))
+      .all();
+
+    const interviewerById = new Map(
+      allInterviewers.map((i) => [i.id, i] as const),
+    );
+
+    const slotRows = await Promise.all(
+      allInterviewers.map((i) =>
+        db
+          .select()
+          .from(interviewerSlots)
+          .where(eq(interviewerSlots.interviewerId, i.id))
+          .all(),
+      ),
+    );
+
+    // datetime → Set<interviewerId> で重複を除去しつつ集約
+    const datetimeToContributors = new Map<string, Set<string>>();
+    slotRows.forEach((rows) => {
+      for (const r of rows) {
+        const set = datetimeToContributors.get(r.slotDatetime) ?? new Set();
+        set.add(r.interviewerId);
+        datetimeToContributors.set(r.slotDatetime, set);
+      }
+    });
+
+    const slots = Array.from(datetimeToContributors.entries())
+      .map(([datetime, contribIds]) => ({
+        datetime,
+        contributors: Array.from(contribIds)
+          .map((id) => {
+            const iv = interviewerById.get(id);
+            return iv ? { id: iv.id, name: iv.name } : null;
+          })
+          .filter((x): x is { id: string; name: string } => x !== null)
+          .sort((a, b) => a.name.localeCompare(b.name, "ja")),
+      }))
+      .sort((a, b) => a.datetime.localeCompare(b.datetime));
+
+    // bookings: 同 event の確定済 application
+    const bookedRows = await db
+      .select({
+        id: applications.id,
+        name: applications.name,
+        interviewAt: applications.interviewAt,
+      })
+      .from(applications)
+      .where(
+        and(
+          eq(applications.eventId, eventId),
+          eq(applications.status, "scheduled"),
+          isNotNull(applications.interviewAt),
+        ),
+      )
+      .all();
+
+    const bookings = bookedRows
+      .filter((b): b is { id: string; name: string; interviewAt: string } =>
+        typeof b.interviewAt === "string" && b.interviewAt.length > 0,
+      )
+      .map((b) => ({
+        applicantId: b.id,
+        applicantName: b.name,
+        interviewAt: b.interviewAt,
+        status: "scheduled" as const,
+      }))
+      .sort((a, b) => a.interviewAt.localeCompare(b.interviewAt));
+
+    return c.json({ slots, bookings });
   },
 );
 
