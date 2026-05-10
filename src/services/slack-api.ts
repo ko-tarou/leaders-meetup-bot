@@ -4,6 +4,23 @@ export type SlackResponse = {
   [key: string]: unknown;
 };
 
+// Sprint 24 (role_management): Slack workspace のユーザー情報。
+// users.list / users.info の members[] / user 要素に対応する最小フィールド。
+export type SlackUser = {
+  id: string;
+  name?: string;
+  real_name?: string;
+  profile?: {
+    display_name?: string;
+    real_name?: string;
+    image_72?: string;
+  };
+  deleted?: boolean;
+  is_bot?: boolean;
+  is_restricted?: boolean;
+  is_ultra_restricted?: boolean;
+};
+
 export class SlackClient {
   private token: string;
   private signingSecret: string;
@@ -156,6 +173,120 @@ export class SlackClient {
     users: string,
   ): Promise<SlackResponse> {
     return this.callApi("conversations.invite", { channel, users });
+  }
+
+  /**
+   * Sprint 24 (role_management): ワークスペース全員を pagination で取得する。
+   * users:read scope が必要。
+   *
+   * - limit: 1 ページあたりの上限 (Slack 推奨 200, max 1000)
+   * - max_pages: 安全弁。デフォルト 20 (= 最大 4000 人)
+   *
+   * deleted / bot / restricted の除外は呼び出し側の責務とする。
+   */
+  async listAllUsers(opts?: {
+    limit?: number;
+    maxPages?: number;
+  }): Promise<{ ok: boolean; error?: string; members: SlackUser[] }> {
+    const limit = opts?.limit ?? 200;
+    const MAX_PAGES = opts?.maxPages ?? 20;
+    const all: SlackUser[] = [];
+    let cursor = "";
+    let pages = 0;
+
+    while (pages < MAX_PAGES) {
+      const params: Record<string, string | number> = { limit };
+      if (cursor) params.cursor = cursor;
+      const res = await this.callApiGet("users.list", params);
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: typeof res.error === "string" ? res.error : "unknown",
+          members: all,
+        };
+      }
+      const members = (res.members as SlackUser[] | undefined) ?? [];
+      all.push(...members);
+      const meta = res.response_metadata as
+        | { next_cursor?: string }
+        | undefined;
+      cursor = meta?.next_cursor ?? "";
+      pages++;
+      if (!cursor) break;
+    }
+    return { ok: true, members: all };
+  }
+
+  /**
+   * Sprint 24 (role_management): bulk invite。Slack API の users はカンマ区切り
+   * 文字列で最大 1000 まで指定可能。空配列なら何もせず ok=true を返す。
+   *
+   * - public channel: `channels:manage` (or `channels:write.invites`) scope
+   * - private channel: `groups:write` (or `groups:write.invites`) scope
+   *
+   * 既に member な user が含まれていると `already_in_channel` が返るため、
+   * 呼び出し側でエラー耐性のある処理にすること。
+   */
+  async conversationsInviteBulk(
+    channel: string,
+    userIds: string[],
+  ): Promise<SlackResponse> {
+    if (userIds.length === 0) return { ok: true };
+    return this.callApi("conversations.invite", {
+      channel,
+      users: userIds.join(","),
+    });
+  }
+
+  /**
+   * Sprint 24 (role_management): channel から user を kick する。
+   * - public channel: `channels:manage` scope
+   * - private channel: `groups:write` scope
+   * bot 自身を kick しないよう、呼び出し側で auth.test の user_id を除外すること。
+   */
+  async conversationsKick(
+    channel: string,
+    userId: string,
+  ): Promise<SlackResponse> {
+    return this.callApi("conversations.kick", { channel, user: userId });
+  }
+
+  /**
+   * Sprint 24 (role_management): channel の現在の member 一覧を pagination で取得。
+   * - public channel: `channels:read` scope
+   * - private channel: `groups:read` scope
+   */
+  async listAllChannelMembers(
+    channel: string,
+    opts?: { limit?: number; maxPages?: number },
+  ): Promise<{ ok: boolean; error?: string; members: string[] }> {
+    const limit = opts?.limit ?? 200;
+    const MAX_PAGES = opts?.maxPages ?? 20;
+    const all: string[] = [];
+    let cursor = "";
+    let pages = 0;
+
+    while (pages < MAX_PAGES) {
+      const params: Record<string, string | number> = { channel, limit };
+      if (cursor) params.cursor = cursor;
+      const res = await this.callApiGet("conversations.members", params);
+      if (!res.ok) {
+        return {
+          ok: false,
+          error: typeof res.error === "string" ? res.error : "unknown",
+          members: all,
+        };
+      }
+      const members = (res.members as string[] | undefined) ?? [];
+      all.push(...members);
+      const meta = res.response_metadata as
+        | { next_cursor?: string }
+        | undefined;
+      cursor = meta?.next_cursor ?? "";
+      pages++;
+      if (!cursor) break;
+    }
+    return { ok: true, members: all };
   }
 
   // ADR-0006: workspace bootstrap で team_id を取得するために使う
