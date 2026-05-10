@@ -110,19 +110,32 @@ export type ReminderItem = {
   message: string | null;
 };
 
+export type AutoScheduleFrequency = "daily" | "weekly" | "monthly" | "yearly";
+
+// candidate_rule は frequency 別に shape が変わる discriminated union。
+// 既存 monthly row は { type:"weekday", weekday, weeks, monthOffset } で保存されている
+// ため、互換のため type は "weekday" のまま (monthly 専用) としつつ別 type を追加する。
+export type AutoScheduleCandidateRule =
+  | { type: "daily" }
+  | { type: "weekly"; weekday: number; weeksAhead?: number }
+  | { type: "weekday"; weekday: number; weeks: number[]; monthOffset?: number }
+  | { type: "yearly"; month: number; day: number };
+
 export type AutoSchedule = {
   id: string;
   meetingId: string;
-  candidateRule: {
-    type: "weekday";
-    weekday: number;
-    weeks: number[];
-    monthOffset?: number;
-  };
+  frequency: AutoScheduleFrequency;
+  candidateRule: AutoScheduleCandidateRule;
   pollStartDay: number;
-  pollStartTime: string; // HH:MM UTC
+  pollStartTime: string; // HH:MM JST
   pollCloseDay: number;
-  pollCloseTime: string; // HH:MM UTC
+  pollCloseTime: string; // HH:MM JST
+  // weekly 用 (0=Sun .. 6=Sat)
+  pollStartWeekday?: number | null;
+  pollCloseWeekday?: number | null;
+  // yearly 用 (1-12)
+  pollStartMonth?: number | null;
+  pollCloseMonth?: number | null;
   reminderTime: string;
   messageTemplate?: string | null;
   reminderMessageTemplate?: string | null;
