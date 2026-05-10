@@ -1,21 +1,20 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { api } from "../../api";
-import type { EventAction, InterviewerWithMeta } from "../../types";
+import type { EventAction, InterviewerSummary } from "../../types";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { colors } from "../../styles/tokens";
-import { AddInterviewerModal } from "./AddInterviewerModal";
-import { InterviewerSlotsEditor } from "./InterviewerSlotsEditor";
+import { InterviewerEntryViewer } from "./InterviewerEntryViewer";
 
-// 005-interviewer / Sprint 25:
+// 005-interviewer-simplify / PR #139:
 // member_application action の「面接官」サブタブ。
-// - 面接官の一覧、追加、削除
-// - 面接官個別の slot 編集（編集モードに切替）
 //
-// 編集モードでは InterviewerSlotsEditor を表示し、戻ると一覧に復帰する。
-// 一覧の取得は list endpoint が slots/inviteUrl を同梱するため N+1 にならない。
+// 旧仕様 (Sprint 25): admin が面接官を 1 人ずつ追加し、各人ごとに招待 URL を
+//   発行 → メールで送る運用だった。
+// 新仕様: action ごとに 1 つの form URL を共有する。面接官は公開フォームから
+//   名前 + 利用可能 slot を提出 (name で upsert)。admin は閲覧 + 削除のみ。
 
 type Props = {
   eventId: string;
@@ -25,43 +24,83 @@ type Props = {
 export function InterviewersTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
-  const [interviewers, setInterviewers] = useState<InterviewerWithMeta[] | null>(
-    null,
-  );
+  const [entries, setEntries] = useState<InterviewerSummary[] | null>(null);
+  const [formUrl, setFormUrl] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setInterviewers(null);
+    setEntries(null);
+    setFormUrl("");
     setError(null);
-    api.interviewers
-      .list(eventId, action.id)
-      .then((list) => {
+    setRefreshing(true);
+    Promise.all([
+      api.interviewers.list(eventId, action.id),
+      api.interviewers.getFormToken(eventId, action.id),
+    ])
+      .then(([list, tokenRes]) => {
         if (cancelled) return;
-        setInterviewers(Array.isArray(list) ? list : []);
+        setEntries(Array.isArray(list) ? list : []);
+        setFormUrl(tokenRes.formUrl);
       })
       .catch((e) => {
         if (cancelled) return;
-        setInterviewers([]);
-        setError(e instanceof Error ? e.message : "取得に失敗しました");
+        setEntries([]);
+        setError(e instanceof Error ? e.message : "読み込みに失敗しました");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setRefreshing(false);
       });
     return () => {
       cancelled = true;
     };
   }, [eventId, action.id, refreshKey]);
 
-  const handleDelete = async (iv: InterviewerWithMeta) => {
+  const handleCopy = async () => {
+    if (!formUrl) return;
+    try {
+      await navigator.clipboard.writeText(formUrl);
+      toast.success("URL をコピーしました");
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
+  const handleRotate = async () => {
     const ok = await confirm({
-      message: `面接官「${iv.name}」を削除しますか？登録済みの slot も併せて削除されます。`,
+      title: "URL を再生成しますか？",
+      message:
+        "現在の URL を無効にして新しい URL を発行します。\n旧 URL を共有済みの面接官にはアクセスできなくなります。",
+      variant: "danger",
+      confirmLabel: "再生成",
+    });
+    if (!ok) return;
+    setRotating(true);
+    try {
+      const res = await api.interviewers.rotateFormToken(eventId, action.id);
+      setFormUrl(res.formUrl);
+      toast.success("URL を再生成しました");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "再生成に失敗しました");
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  const handleDelete = async (entry: InterviewerSummary) => {
+    const ok = await confirm({
+      message: `「${entry.name}」のエントリーを削除しますか？登録された slot も併せて削除されます。`,
       variant: "danger",
       confirmLabel: "削除",
     });
     if (!ok) return;
     try {
-      await api.interviewers.delete(eventId, action.id, iv.id);
+      await api.interviewers.delete(eventId, action.id, entry.id);
       toast.success("削除しました");
       setRefreshKey((k) => k + 1);
     } catch (e) {
@@ -69,158 +108,163 @@ export function InterviewersTab({ eventId, action }: Props) {
     }
   };
 
-  const handleCopyInvite = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success("招待リンクをコピーしました");
-    } catch {
-      toast.error("コピーに失敗しました");
-    }
-  };
-
-  // 編集モード: 1 名の slot 編集
-  if (editingId && interviewers) {
-    const target = interviewers.find((i) => i.id === editingId);
-    if (!target) {
-      // 編集中に削除等で見つからなくなった場合は一覧に戻す
-      setEditingId(null);
-      return null;
-    }
+  // 詳細表示: 1 entry の slots 閲覧
+  if (viewingId) {
     return (
-      <InterviewerSlotsEditor
-        title={`${target.name} さんの利用可能日時`}
-        description="この面接官が面談可能な時間帯をクリックでマークしてください。応募ページの候補にはここで選択された時間帯が反映されます。"
-        initialSlots={target.slots ?? []}
-        onSave={async (slots) => {
-          await api.interviewers.updateSlots(
-            eventId,
-            action.id,
-            target.id,
-            slots,
-          );
-          setRefreshKey((k) => k + 1);
-        }}
-        onBack={() => setEditingId(null)}
+      <InterviewerEntryViewer
+        eventId={eventId}
+        actionId={action.id}
+        entryId={viewingId}
+        onBack={() => setViewingId(null)}
       />
     );
   }
 
   return (
     <div style={{ padding: "1rem" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.75rem",
-          marginBottom: "1rem",
-        }}
-      >
-        <h3 style={{ margin: 0 }}>面接官</h3>
-        <Button onClick={() => setShowAdd(true)} size="sm">
-          + 面接官追加
-        </Button>
-      </div>
+      <h3 style={{ margin: 0, marginBottom: "0.75rem" }}>面接官</h3>
 
-      <p
-        style={{
-          color: colors.textSecondary,
-          fontSize: "0.875rem",
-          marginTop: 0,
-          marginBottom: "1rem",
-        }}
-      >
-        登録した面接官に「招待リンク」を送ると、各自が自分の利用可能日時を入力できます。
-        応募ページには全員の slot を OR 結合した候補が表示されます。
-      </p>
-
-      {error && (
-        <div role="alert" style={errorStyle}>
-          {error}
+      {/* URL 共有セクション */}
+      <section style={urlBoxStyle} aria-label="面接官フォーム URL">
+        <div style={urlLabelStyle}>面接官フォーム URL</div>
+        <p style={urlDescStyle}>
+          このリンクを面接官に共有してください。誰でもアクセスし、名前と利用可能な日時を入力できます。
+          同じ名前で再度フォームを開けば内容は上書きされます。
+        </p>
+        <div style={urlRowStyle}>
+          <input
+            readOnly
+            value={formUrl}
+            placeholder={refreshing ? "読み込み中..." : ""}
+            style={urlInputStyle}
+            aria-label="面接官フォーム URL"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <Button
+            size="sm"
+            onClick={handleCopy}
+            disabled={!formUrl || refreshing}
+          >
+            コピー
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleRotate}
+            disabled={!formUrl || refreshing || rotating}
+            isLoading={rotating}
+          >
+            URL を再生成
+          </Button>
         </div>
-      )}
+      </section>
 
-      {interviewers === null ? (
-        <div style={{ color: colors.textSecondary }}>読み込み中...</div>
-      ) : interviewers.length === 0 ? (
-        <div
-          style={{
-            padding: "1.5rem",
-            textAlign: "center",
-            color: colors.textSecondary,
-            background: colors.surface,
-            border: `1px dashed ${colors.border}`,
-            borderRadius: "0.375rem",
-          }}
-        >
-          面接官がまだ登録されていません。「+ 面接官追加」から追加してください。
-        </div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>名前</th>
-                <th style={thStyle}>メールアドレス</th>
-                <th style={thStyle}>登録 slot 数</th>
-                <th style={thStyle}>招待リンク</th>
-                <th style={thStyle}>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {interviewers.map((iv) => (
-                <tr key={iv.id}>
-                  <td style={tdStyle}>{iv.name}</td>
-                  <td style={tdStyle}>
-                    <span style={{ wordBreak: "break-all" }}>{iv.email}</span>
-                  </td>
-                  <td style={{ ...tdStyle, textAlign: "right" }}>
-                    {iv.slots?.length ?? 0}
-                  </td>
-                  <td style={tdStyle}>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyInvite(iv.inviteUrl)}
-                      style={linkBtnStyle}
-                    >
-                      コピー
-                    </button>
-                  </td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: "0.25rem" }}>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setEditingId(iv.id)}
-                      >
-                        slot 編集
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleDelete(iv)}
-                      >
-                        削除
-                      </Button>
-                    </div>
-                  </td>
+      {/* エントリー一覧 */}
+      <section style={{ marginTop: "1.5rem" }}>
+        <h4 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem" }}>
+          提出済みエントリー
+        </h4>
+        {error && (
+          <div role="alert" style={errorStyle}>
+            {error}
+          </div>
+        )}
+        {entries === null ? (
+          <div style={{ color: colors.textSecondary }}>読み込み中...</div>
+        ) : entries.length === 0 ? (
+          <div style={emptyStyle}>
+            まだエントリーはありません。上の URL を面接官に共有してください。
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>名前</th>
+                  <th style={thStyle}>登録 slot 数</th>
+                  <th style={thStyle}>最終更新</th>
+                  <th style={thStyle}>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {showAdd && (
-        <AddInterviewerModal
-          eventId={eventId}
-          actionId={action.id}
-          onClose={() => setShowAdd(false)}
-          onAdded={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr key={e.id}>
+                    <td style={tdStyle}>{e.name}</td>
+                    <td style={{ ...tdStyle, textAlign: "right" }}>
+                      {e.slotsCount}
+                    </td>
+                    <td style={tdStyle}>
+                      {new Date(e.updatedAt).toLocaleString("ja-JP")}
+                    </td>
+                    <td style={tdStyle}>
+                      <div style={{ display: "flex", gap: "0.25rem" }}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setViewingId(e.id)}
+                        >
+                          詳細
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleDelete(e)}
+                        >
+                          削除
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
+
+const urlBoxStyle: CSSProperties = {
+  padding: "0.75rem 1rem",
+  background: colors.primarySubtle,
+  border: `1px solid ${colors.primary}`,
+  borderRadius: "0.5rem",
+};
+
+const urlLabelStyle: CSSProperties = {
+  fontSize: "0.75rem",
+  color: colors.textSecondary,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  marginBottom: "0.25rem",
+};
+
+const urlDescStyle: CSSProperties = {
+  margin: "0 0 0.5rem",
+  fontSize: "0.8rem",
+  color: colors.text,
+  lineHeight: 1.5,
+};
+
+const urlRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+};
+
+const urlInputStyle: CSSProperties = {
+  flex: "1 1 280px",
+  minWidth: 0,
+  padding: "0.4rem 0.5rem",
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: "0.375rem",
+  fontFamily: "monospace",
+  fontSize: "0.8rem",
+  background: colors.background,
+  color: colors.text,
+};
 
 const tableStyle: CSSProperties = {
   width: "100%",
@@ -243,14 +287,13 @@ const tdStyle: CSSProperties = {
   verticalAlign: "middle",
 };
 
-const linkBtnStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
-  color: colors.primary,
-  cursor: "pointer",
-  padding: 0,
-  fontSize: "0.875rem",
-  textDecoration: "underline",
+const emptyStyle: CSSProperties = {
+  padding: "1.5rem",
+  textAlign: "center",
+  color: colors.textSecondary,
+  background: colors.surface,
+  border: `1px dashed ${colors.border}`,
+  borderRadius: "0.375rem",
 };
 
 const errorStyle: CSSProperties = {
