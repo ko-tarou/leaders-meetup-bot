@@ -12,6 +12,11 @@ import { ChannelManagementSection } from "../components/ChannelManagementSection
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
 import { InterviewersTab } from "../components/member-application/InterviewersTab";
 import { CalendarTab } from "../components/member-application/CalendarTab";
+import { RoleMainTab } from "../components/role-management/RoleMainTab";
+import { RolesTab } from "../components/role-management/RolesTab";
+import { RoleMembersTab } from "../components/role-management/RoleMembersTab";
+import { RoleSyncTab } from "../components/role-management/RoleSyncTab";
+import { RoleSettingsTab } from "../components/role-management/RoleSettingsTab";
 import { ScheduleSection } from "../components/ScheduleSection";
 import { SchedulePollingMainTab } from "../components/schedule/SchedulePollingMainTab";
 import { ScheduleChannelTab } from "../components/schedule/ScheduleChannelTab";
@@ -69,6 +74,22 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
   // Sprint 23 PR-A: weekly_reminder は一覧ベース UX に再構成。サブタブを廃止。
   if (actionType === "weekly_reminder") {
     return [];
+  }
+  // Sprint 24 / role_management: 「メイン / ロール / メンバー名簿 / 同期 / その他設定」
+  // の 5 sub-tab。それぞれ独立した責務を持つ:
+  //   - main:     ロール一覧サマリ + workspace 設定状況
+  //   - roles:    CRUD + メンバー/チャンネル割当 (一番重い)
+  //   - members:  workspace 全員 + 保有ロール表示
+  //   - sync:     diff preview + sync 実行
+  //   - settings: workspaceId 編集 + 共通の 有効/無効/削除
+  if (actionType === "role_management") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "roles", label: "ロール" },
+      { id: "members", label: "メンバー名簿" },
+      { id: "sync", label: "同期" },
+      { id: "settings", label: "その他設定" },
+    ];
   }
   // Sprint 005-tabs: schedule_polling は MeetingDetail の二重タブを解消し、
   // ActionDetailPage 直下の 5 sub-tab に再設計
@@ -340,6 +361,15 @@ export function ActionDetailPage() {
           onChange={() => setRefreshKey((k) => k + 1)}
         />
       )}
+      {subTab === "roles" && actionType === "role_management" && (
+        <RolesTab eventId={eventId} action={action} />
+      )}
+      {subTab === "members" && actionType === "role_management" && (
+        <RoleMembersTab eventId={eventId} action={action} />
+      )}
+      {subTab === "sync" && actionType === "role_management" && (
+        <RoleSyncTab eventId={eventId} action={action} />
+      )}
       {actionType !== "weekly_reminder" &&
         actionType !== "schedule_polling" &&
         subTab === "settings" && (
@@ -434,6 +464,8 @@ function ActionMainContent({
       );
     case "attendance_check":
       return <AttendanceCheckMain action={action} />;
+    case "role_management":
+      return <RoleMainTab eventId={eventId} action={action} />;
     default:
       return null;
   }
@@ -474,6 +506,14 @@ function ActionSettingsContent({
     case "attendance_check":
       return (
         <AttendanceCheckForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "role_management":
+      return (
+        <RoleSettingsTab
           eventId={eventId}
           action={action}
           onSaved={onSaved}
