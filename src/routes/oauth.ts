@@ -31,6 +31,20 @@ const REQUIRED_SCOPES = [
   "groups:history",
 ];
 
+// 005-user-oauth: admin user の権限で bot を private channel に invite するため、
+// user OAuth token も同時に取得する。
+//   channels:write / groups:write: bot を public/private channel に invite
+//   channels:read / groups:read:   user 視点で見える channel 一覧の取得
+//
+// scope を増やすと再認証時の同意画面項目が増えるので、必要最小限に絞っている。
+// im:write / mpim:write は現時点で不要のため含めない。
+const REQUIRED_USER_SCOPES = [
+  "channels:write",
+  "groups:write",
+  "channels:read",
+  "groups:read",
+];
+
 oauth.get("/install", async (c) => {
   const db = drizzle(c.env.DB);
   const state = crypto.randomUUID();
@@ -44,6 +58,9 @@ oauth.get("/install", async (c) => {
   const authUrl = new URL("https://slack.com/oauth/v2/authorize");
   authUrl.searchParams.set("client_id", c.env.SLACK_CLIENT_ID);
   authUrl.searchParams.set("scope", REQUIRED_SCOPES.join(","));
+  // 005-user-oauth: user_scope を併記。Slack 側で同意画面に user OAuth 用の
+  // 同意項目が追加され、callback で authed_user.access_token が返る。
+  authUrl.searchParams.set("user_scope", REQUIRED_USER_SCOPES.join(","));
   authUrl.searchParams.set("redirect_uri", c.env.OAUTH_REDIRECT_URL);
   authUrl.searchParams.set("state", state);
 
@@ -108,6 +125,14 @@ oauth.get("/callback", async (c) => {
     ok: boolean;
     access_token?: string;
     team?: { id: string; name: string };
+    // 005-user-oauth: user_scope を要求すると authed_user 配下に
+    // access_token / scope / id が返る。ユーザーが user OAuth 同意を
+    // 拒否した場合は authed_user.access_token が undefined になる。
+    authed_user?: {
+      id?: string;
+      access_token?: string;
+      scope?: string;
+    };
     error?: string;
   };
 
@@ -139,16 +164,30 @@ oauth.get("/callback", async (c) => {
     c.env.WORKSPACE_TOKEN_KEY,
   );
 
+  // 005-user-oauth: authed_user.access_token があれば encrypt して保存。
+  // ユーザーが user_scope に同意しなかった場合は null のままにする
+  // (既存 row の user token を上書きしないため undefined 経路で残す)。
+  const authedUserId = tokenJson.authed_user?.id ?? null;
+  const userScope = tokenJson.authed_user?.scope ?? null;
+  const userAccessTokenPlain = tokenJson.authed_user?.access_token;
+  const encryptedUserAccessToken = userAccessTokenPlain
+    ? await encryptToken(userAccessTokenPlain, c.env.WORKSPACE_TOKEN_KEY)
+    : null;
+
   if (existing) {
-    // 再インストール扱い: bot_token / signing_secret / name 更新
-    await db
-      .update(workspaces)
-      .set({
-        name: teamName,
-        botToken: encryptedBotToken,
-        signingSecret: encryptedSigningSecret,
-      })
-      .where(eq(workspaces.id, existing.id));
+    // 再インストール扱い: bot_token / signing_secret / name 更新。
+    // user OAuth 系は新規取得したときだけ更新し、未同意なら旧値を保持する。
+    const updates: Partial<typeof workspaces.$inferInsert> = {
+      name: teamName,
+      botToken: encryptedBotToken,
+      signingSecret: encryptedSigningSecret,
+    };
+    if (encryptedUserAccessToken) {
+      updates.userAccessToken = encryptedUserAccessToken;
+      updates.userScope = userScope;
+      updates.authedUserId = authedUserId;
+    }
+    await db.update(workspaces).set(updates).where(eq(workspaces.id, existing.id));
   } else {
     // 新規登録
     await db.insert(workspaces).values({
@@ -157,6 +196,9 @@ oauth.get("/callback", async (c) => {
       slackTeamId: teamId,
       botToken: encryptedBotToken,
       signingSecret: encryptedSigningSecret,
+      userAccessToken: encryptedUserAccessToken,
+      userScope,
+      authedUserId,
       createdAt: new Date().toISOString(),
     });
   }
