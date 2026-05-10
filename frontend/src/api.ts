@@ -6,8 +6,8 @@ import type {
   EventAction,
   EventActionType,
   HowFound,
-  Interviewer,
-  InterviewerWithMeta,
+  InterviewerEntry,
+  InterviewerSummary,
   InterviewLocation,
   Meeting,
   MeetingDetail,
@@ -551,61 +551,37 @@ export const api = {
       request<{ ok: boolean }>(`/applications/${id}`, { method: "DELETE" }),
   },
 
-  // 面接官 (005-interviewer / Sprint 25)
-  // member_application action に紐づく面接官の CRUD と slot 編集。
-  // /interviewer/:token は admin auth を持たない公開エンドポイントのため
-  // ここには含めない（fetch を直接叩く）。
+  // 面接官 (005-interviewer-simplify / PR #139)
+  // 単一フォーム URL 方式に再設計。admin は閲覧 + 削除 + URL 発行/再生成のみ。
+  // 面接官による slot 編集は公開ページ /interviewer-form/:token から行う
+  // ため、この admin client には含めない (fetch を直接叩く)。
   interviewers: {
+    /** 提出済みエントリー一覧 (件数 + 最終更新)。 */
     list: (eventId: string, actionId: string) =>
-      request<InterviewerWithMeta[]>(
+      request<InterviewerSummary[]>(
         `/orgs/${eventId}/actions/${actionId}/interviewers`,
       ),
-    create: (
-      eventId: string,
-      actionId: string,
-      data: { name: string; email: string },
-    ) =>
-      request<InterviewerWithMeta>(
-        `/orgs/${eventId}/actions/${actionId}/interviewers`,
-        {
-          method: "POST",
-          body: JSON.stringify(data),
-        },
+    /** 1 entry の slots 詳細 (admin 閲覧用)。 */
+    getEntry: (eventId: string, actionId: string, interviewerId: string) =>
+      request<InterviewerEntry>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
       ),
-    update: (
-      eventId: string,
-      actionId: string,
-      interviewerId: string,
-      data: { name?: string; email?: string },
-    ) =>
-      request<Interviewer>(
-        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}`,
-        {
-          method: "PUT",
-          body: JSON.stringify(data),
-        },
-      ),
+    /** entry を削除 (slots も CASCADE で同時削除)。 */
     delete: (eventId: string, actionId: string, interviewerId: string) =>
       request<{ ok: boolean }>(
         `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}`,
         { method: "DELETE" },
       ),
-    getSlots: (eventId: string, actionId: string, interviewerId: string) =>
-      request<{ slots: string[] }>(
-        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
+    /** action の form token を取得 (未設定なら自動生成)。 */
+    getFormToken: (eventId: string, actionId: string) =>
+      request<{ token: string; formUrl: string }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewer-form-token`,
       ),
-    updateSlots: (
-      eventId: string,
-      actionId: string,
-      interviewerId: string,
-      slots: string[],
-    ) =>
-      request<{ ok: boolean; slots: string[] }>(
-        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
-        {
-          method: "PUT",
-          body: JSON.stringify({ slots }),
-        },
+    /** 旧 token を失効させて新 token を発行する。 */
+    rotateFormToken: (eventId: string, actionId: string) =>
+      request<{ token: string; formUrl: string }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewer-form-token/rotate`,
+        { method: "POST" },
       ),
   },
 

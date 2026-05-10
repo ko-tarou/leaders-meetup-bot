@@ -297,24 +297,29 @@ export type Application = {
   decidedAt: string | null;
 };
 
-// 面接官 (005-interviewer / Sprint 25)
-// member_application action に紐づく面接官。1 action : N 人。
-// 各面接官は accessToken で /interviewer/:token 公開ページにアクセスでき、
-// 自分の利用可能 slot を編集する。応募ページは全面接官の slot を
-// OR 結合した値を取得する。
-export type Interviewer = {
+// 面接官 (005-interviewer-simplify / PR #139 単一フォーム URL 方式)
+// member_application action に紐づく「提出済みエントリー」。1 action : N 人。
+//
+// 旧仕様 (Sprint 25 / 招待リンク方式): 面接官ごとに access token を発行し、
+//   admin が 1 人ずつ追加 + email を持っていた。
+// 新仕様: action ごとに 1 つの form token を共有し、面接官は公開フォームから
+//   「名前 + 利用可能 slot」を提出する。name で upsert される。
+
+// 一覧 API (`GET /orgs/:eventId/actions/:actionId/interviewers`) のレスポンス要素。
+export type InterviewerSummary = {
   id: string;
-  eventActionId: string;
   name: string;
-  email: string;
-  accessToken: string;
-  createdAt: string;
+  slotsCount: number;
+  /** entry が初めて作成された日時 (ISO 8601 UTC)。BE は同梱で返すが UI では
+   *  最終更新を優先表示するため optional 扱い。 */
+  createdAt?: string;
   updatedAt: string;
 };
 
-// list / create endpoint は便宜上 inviteUrl と slots を同梱して返す
-// （N+1 を避けるため）。
-export type InterviewerWithMeta = Interviewer & {
-  inviteUrl: string;
-  slots?: string[];
+// 詳細 API (`GET /orgs/.../interviewers/:id/slots`) のレスポンス。
+export type InterviewerEntry = {
+  id: string;
+  name: string;
+  slots: string[];
+  updatedAt: string;
 };
