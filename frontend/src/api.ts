@@ -2,6 +2,7 @@ import type {
   Application,
   ApplicationStatus,
   AutoSchedule,
+  CalendarData,
   Event,
   EventAction,
   EventActionType,
@@ -582,6 +583,28 @@ export const api = {
       request<{ token: string; formUrl: string }>(
         `/orgs/${eventId}/actions/${actionId}/interviewer-form-token/rotate`,
         { method: "POST" },
+      ),
+    /**
+     * カレンダー集約ビュー: 全 interviewer の slots を datetime ごとに集約 +
+     * 確定済 application (status='scheduled') の bookings を同梱で返す。
+     */
+    getCalendar: (eventId: string, actionId: string) =>
+      request<CalendarData>(
+        `/orgs/${eventId}/actions/${actionId}/calendar`,
+      ),
+    /**
+     * admin が任意 entry の slots を上書き編集する。
+     * 「初期 admin」エントリーをカレンダータブから直接編集する用途。
+     */
+    updateSlots: (
+      eventId: string,
+      actionId: string,
+      interviewerId: string,
+      slots: string[],
+    ) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
+        { method: "PUT", body: JSON.stringify({ slots }) },
       ),
   },
 
