@@ -28,6 +28,11 @@ export type DecryptedWorkspace = {
   botToken: string; // decrypted
   signingSecret: string; // decrypted
   createdAt: string;
+  // 005-user-oauth: admin user の権限で bot を private channel に invite するための
+  // user OAuth token。再認証していない既存 workspace では null。
+  userAccessToken: string | null; // decrypted
+  userScope: string | null;
+  authedUserId: string | null;
 };
 
 /**
@@ -70,6 +75,11 @@ export async function getDecryptedWorkspace(
     ws.signingSecret,
     env.WORKSPACE_TOKEN_KEY,
   );
+  // 005-user-oauth: user_access_token は optional。null の場合は復号もスキップ。
+  // 復号失敗時は例外を伝播 (= 鍵不整合の早期検知)。
+  const userAccessToken = ws.userAccessToken
+    ? await decryptToken(ws.userAccessToken, env.WORKSPACE_TOKEN_KEY)
+    : null;
   return {
     id: ws.id,
     name: ws.name,
@@ -77,6 +87,9 @@ export async function getDecryptedWorkspace(
     botToken,
     signingSecret,
     createdAt: ws.createdAt,
+    userAccessToken,
+    userScope: ws.userScope ?? null,
+    authedUserId: ws.authedUserId ?? null,
   };
 }
 
@@ -120,4 +133,23 @@ export async function getSlackClientForTeam(
   const ws = await getWorkspaceBySlackTeamId(env.DB, teamId);
   if (!ws) return null;
   return createSlackClientForWorkspace(env, ws.id);
+}
+
+/**
+ * 005-user-oauth: user OAuth token を使う SlackClient を生成。
+ *
+ * bot は自身を private channel に join できないため、admin user の権限で
+ * bot を invite したい操作 (一括招待) で使う。user_access_token が NULL
+ * (= 再認証されていない既存 workspace) の場合は null を返す。
+ *
+ * signing_secret は user-token API 呼び出しでは使わないが、SlackClient の
+ * 既存コンストラクタに合わせて bot 側と同じ signing_secret を渡している。
+ */
+export async function createUserSlackClientForWorkspace(
+  env: Env,
+  workspaceId: string,
+): Promise<SlackClient | null> {
+  const ws = await getDecryptedWorkspace(env, workspaceId);
+  if (!ws || !ws.userAccessToken) return null;
+  return new SlackClient(ws.userAccessToken, ws.signingSecret);
 }
