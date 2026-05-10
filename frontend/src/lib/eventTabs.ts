@@ -50,6 +50,12 @@ export const ACTION_META: Record<
       "毎週指定曜日に Slack チャンネルへ匿名投票（出席/欠席/未定）を送ります",
     icon: "🙋",
   },
+  role_management: {
+    label: "ロール管理",
+    description:
+      "ロール定義・メンバー割当・チャンネル管理を一元化（Slack 無料プラン代替）",
+    icon: "🛡",
+  },
 };
 
 // 共通タブ (イベント直下)
