@@ -142,10 +142,14 @@ export const applications = sqliteTable(
   (t) => [index("idx_applications_event_id").on(t.eventId)],
 );
 
-// 005-interviewer: 面接官 (interviewer)
+// 005-interviewer-simplify: 面接官 (interviewer)
 // member_application アクションに紐づく面接官を管理する。
 // 旧 event_actions.config.leaderAvailableSlots を interviewer × interviewer_slots に正規化。
-// access_token は推測困難な hex 32文字以上で発行し、面接官は招待リンクから自分の slot を編集する。
+//
+// PR #139: 単一フォーム URL 方式に再設計。
+//   - per-interviewer の email / access_token を廃止 (migration 0032 で drop)。
+//   - action 単位の form token は event_actions.config.interviewerFormToken に保存。
+//   - 面接官は name のみで識別し、共有フォーム URL から提出する。
 export const interviewers = sqliteTable(
   "interviewers",
   {
@@ -154,8 +158,6 @@ export const interviewers = sqliteTable(
       .notNull()
       .references(() => eventActions.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    email: text("email").notNull(),
-    accessToken: text("access_token").notNull().unique(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
