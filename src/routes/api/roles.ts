@@ -49,6 +49,7 @@ import {
   computeSyncDiff,
   executeSync,
   readWorkspaceId,
+  type SyncOperation,
 } from "../../services/role-sync";
 import type { SlackUser } from "../../services/slack-api";
 
@@ -542,6 +543,18 @@ rolesRouter.get(
 /**
  * POST /orgs/:eventId/actions/:actionId/sync
  *   sync-diff を計算 → invite / kick を実行する。
+ *
+ *   body (optional): {
+ *     operations: [
+ *       { channelId: string, invite: boolean, kick: boolean },
+ *       ...
+ *     ]
+ *   }
+ *
+ *   - body 未指定 / operations 未指定 → 全 channel × invite + kick (従来動作)
+ *   - operations 指定時 → 配列に含まれる channel のみ、各フラグに従って実行
+ *
+ *   後方互換性: 既存呼び出し側 (body なし POST) は壊れない。
  */
 rolesRouter.post(
   "/orgs/:eventId/actions/:actionId/sync",
@@ -553,8 +566,50 @@ rolesRouter.post(
     const found = await findRoleManagementAction(db, eventId, actionId);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
+    // body は optional。Content-Type 未設定 / body 空でも 400 にしない。
+    let operations: SyncOperation[] | undefined;
     try {
-      const result = await executeSync(c.env, found.action);
+      const raw = await c.req.text();
+      if (raw && raw.trim().length > 0) {
+        const parsed = JSON.parse(raw) as { operations?: unknown };
+        if (parsed && typeof parsed === "object" && "operations" in parsed) {
+          const ops = parsed.operations;
+          if (!Array.isArray(ops)) {
+            return c.json({ error: "operations must be an array" }, 400);
+          }
+          const validated: SyncOperation[] = [];
+          for (const o of ops) {
+            if (
+              !o ||
+              typeof o !== "object" ||
+              typeof (o as { channelId?: unknown }).channelId !== "string" ||
+              typeof (o as { invite?: unknown }).invite !== "boolean" ||
+              typeof (o as { kick?: unknown }).kick !== "boolean"
+            ) {
+              return c.json(
+                {
+                  error:
+                    "each operation must be { channelId: string, invite: boolean, kick: boolean }",
+                },
+                400,
+              );
+            }
+            const op = o as SyncOperation;
+            validated.push({
+              channelId: op.channelId,
+              invite: op.invite,
+              kick: op.kick,
+            });
+          }
+          operations = validated;
+        }
+      }
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+
+    try {
+      const result = await executeSync(c.env, found.action, operations);
       return c.json(result);
     } catch (e) {
       return c.json(

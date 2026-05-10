@@ -201,14 +201,34 @@ async function fetchChannelName(
 }
 
 /**
+ * 1 channel × 方向 (invite/kick) ごとに「実行するか」を指定するフィルタ。
+ * sync UI から「特定の channel の invite だけ実行」のような selective 実行を
+ * 可能にするため使用する。
+ *
+ * `operations` 未指定なら全 channel × invite + kick を実行する (従来動作)。
+ * `operations` 指定時:
+ *   - 配列に含まれない channel は完全スキップ (invite/kick とも実行しない)
+ *   - 含まれる channel は invite/kick の各フラグに従って selective 実行
+ */
+export type SyncOperation = {
+  channelId: string;
+  invite: boolean;
+  kick: boolean;
+};
+
+/**
  * computeSyncDiff の結果を Slack に適用する。
  * - invite は bulk 1 回 (Slack 側で 1000 ユーザーまで comma-separated 可)
  * - kick は 1 user ごと API call
  * 失敗は errors[] に集約し、成功カウントは別途返す。
+ *
+ * operations 引数で channel × 方向の selective 実行を制御する。詳細は
+ * SyncOperation の docstring を参照。
  */
 export async function executeSync(
   env: Env,
   action: ActionRow,
+  operations?: SyncOperation[],
 ): Promise<SyncExecuteResult> {
   const workspaceId = readWorkspaceId(action);
   if (!workspaceId) {
@@ -221,20 +241,38 @@ export async function executeSync(
 
   const diff = await computeSyncDiff(env, action);
 
+  // operations が指定されていれば channelId をキーとする lookup を作る。
+  // 未指定 (undefined) なら従来動作 = 全 channel × invite + kick。
+  const opsMap: Map<string, SyncOperation> | null = operations
+    ? new Map(operations.map((o) => [o.channelId, o]))
+    : null;
+
   let invited = 0;
   let kicked = 0;
   const errors: SyncExecuteResult["errors"] = [];
 
   for (const ch of diff.channels) {
+    // operations 指定時 & 該当 channel が含まれていない場合はスキップ。
+    // fetch_members error も「ユーザーが選んでいない以上」は通知しない。
+    const op = opsMap ? opsMap.get(ch.channelId) : null;
+    if (opsMap && !op) continue;
+
+    const doInvite = op ? op.invite : true;
+    const doKick = op ? op.kick : true;
+
     if (ch.error) {
-      errors.push({
-        channelId: ch.channelId,
-        action: "fetch_members",
-        error: ch.error,
-      });
+      // この channel は何かしら実行しようとしている (op で 1 つ以上 true)
+      // ときだけ fetch_members エラーを通知する。
+      if (doInvite || doKick) {
+        errors.push({
+          channelId: ch.channelId,
+          action: "fetch_members",
+          error: ch.error,
+        });
+      }
       continue;
     }
-    if (ch.toInvite.length > 0) {
+    if (doInvite && ch.toInvite.length > 0) {
       const res = await slack.conversationsInviteBulk(
         ch.channelId,
         ch.toInvite,
@@ -250,17 +288,19 @@ export async function executeSync(
         });
       }
     }
-    for (const userId of ch.toKick) {
-      const res = await slack.conversationsKick(ch.channelId, userId);
-      if (res.ok) {
-        kicked++;
-      } else {
-        errors.push({
-          channelId: ch.channelId,
-          action: "kick",
-          userId,
-          error: res.error ?? "unknown",
-        });
+    if (doKick) {
+      for (const userId of ch.toKick) {
+        const res = await slack.conversationsKick(ch.channelId, userId);
+        if (res.ok) {
+          kicked++;
+        } else {
+          errors.push({
+            channelId: ch.channelId,
+            action: "kick",
+            userId,
+            error: res.error ?? "unknown",
+          });
+        }
       }
     }
   }

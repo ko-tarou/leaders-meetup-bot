@@ -709,9 +709,21 @@ export const api = {
       request<SyncDiffResponse>(
         `/orgs/${eventId}/actions/${actionId}/sync-diff`,
       ),
-    sync: (eventId: string, actionId: string) =>
+    /**
+     * sync を実行する。body に operations を渡すと channel × invite/kick の
+     * selective 実行ができる。body 未指定 (= undefined) なら従来通り
+     * 全 channel × 両方向を実行する。
+     */
+    sync: (
+      eventId: string,
+      actionId: string,
+      body?: {
+        operations?: { channelId: string; invite: boolean; kick: boolean }[];
+      },
+    ) =>
       request<SyncResult>(`/orgs/${eventId}/actions/${actionId}/sync`, {
         method: "POST",
+        body: JSON.stringify(body ?? {}),
       }),
 
     // 005-user-oauth: bot を全 channel に一括招待 (admin user の user token を使用)。

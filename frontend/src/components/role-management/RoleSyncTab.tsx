@@ -3,6 +3,7 @@ import type {
   BotBulkInviteResult,
   ChannelDiff,
   EventAction,
+  SlackUser,
   SyncDiffResponse,
   SyncResult,
 } from "../../types";
@@ -13,11 +14,16 @@ import { colors } from "../../styles/tokens";
 
 // Sprint 24 / role_management:
 // 「同期」タブ。
-// - 「diff を取得」ボタンで sync-diff を呼び、各 channel の toInvite/toKick を表示
-// - 「同期実行」ボタンで sync を呼び、invite/kick を実行
-// - エラー時は scope 不足 / bot 未参加 などのヒントを併記
+// - 「diff を計算」ボタンで sync-diff を呼び、各 channel ごとに
+//   invite/kick の checkbox を表示
+// - クイックボタン (全選択 / invite のみ / kick のみ / 全クリア) と
+//   各 channel × invite/kick の個別 toggle で実行範囲を絞れる
+// - 「選択分を実行」で operations 配列を BE に送り、selective 実行する
 //
 // 確認ダイアログを必ず挟む (kick が破壊的操作のため)。
+//
+// Slack user ID → 表示名解決はベストエフォート: workspace-members を
+// fetch してキャッシュし、解決できないときは ID をそのまま表示する。
 
 type Config = { workspaceId?: string };
 
@@ -35,6 +41,9 @@ type Props = {
   action: EventAction;
 };
 
+// 各 channel に対する「invite/kick を実行するか」フラグ。
+type ChannelOps = { invite: boolean; kick: boolean };
+
 export function RoleSyncTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -45,6 +54,10 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [diffLoading, setDiffLoading] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // per-channel の checkbox 状態。channelId をキーに { invite, kick } を保持する。
+  const [ops, setOps] = useState<Record<string, ChannelOps>>({});
+  // Slack user ID → 表示名のキャッシュ (best-effort)。
+  const [userMap, setUserMap] = useState<Record<string, SlackUser>>({});
   // 005-user-oauth: bot 一括招待
   const [bulkInviteResult, setBulkInviteResult] =
     useState<BotBulkInviteResult | null>(null);
@@ -52,12 +65,8 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [bulkInviteOAuthRequired, setBulkInviteOAuthRequired] = useState(false);
   const [bulkInviting, setBulkInviting] = useState(false);
 
-  const totalInvite = diff?.channels.reduce(
-    (acc, c) => acc + c.toInvite.length,
-    0,
-  );
-  const totalKick = diff?.channels.reduce((acc, c) => acc + c.toKick.length, 0);
-
+  // 「diff を計算」: sync-diff を取得して、各 channel に差分があれば
+  // 対応する方向のチェックボックスを default で ON にする。
   const fetchDiff = async () => {
     setDiffLoading(true);
     setDiffError(null);
@@ -65,6 +74,29 @@ export function RoleSyncTab({ eventId, action }: Props) {
     try {
       const res = await api.roles.syncDiff(eventId, action.id);
       setDiff(res);
+      // default: 差分があれば該当方向 true、なければ false
+      const initialOps: Record<string, ChannelOps> = {};
+      for (const c of res.channels) {
+        initialOps[c.channelId] = {
+          invite: c.toInvite.length > 0,
+          kick: c.toKick.length > 0,
+        };
+      }
+      setOps(initialOps);
+
+      // 表示名解決 (best-effort): まだ取れていなければ workspace-members を fetch。
+      // Slack の users.list scope が無いと 502 で失敗するので、その時は
+      // 黙って ID 表示にフォールバックする。
+      if (Object.keys(userMap).length === 0) {
+        try {
+          const members = await api.roles.workspaceMembers(eventId, action.id);
+          const map: Record<string, SlackUser> = {};
+          for (const m of members) map[m.id] = m;
+          setUserMap(map);
+        } catch {
+          /* noop: ID 表示にフォールバック */
+        }
+      }
     } catch (e) {
       setDiffError(
         e instanceof Error ? e.message : "diff の取得に失敗しました",
@@ -74,14 +106,58 @@ export function RoleSyncTab({ eventId, action }: Props) {
     }
   };
 
+  // 全 channel に対して invite/kick を一括設定 (クイックボタン)。
+  const setAllOps = (invite: boolean, kick: boolean) => {
+    if (!diff) return;
+    const next: Record<string, ChannelOps> = {};
+    for (const c of diff.channels) {
+      // 差分が 0 件の方向は強制的に false (chexbox 自体 disabled)
+      next[c.channelId] = {
+        invite: invite && c.toInvite.length > 0,
+        kick: kick && c.toKick.length > 0,
+      };
+    }
+    setOps(next);
+  };
+
+  // 個別 channel × 方向の toggle。
+  const toggle = (channelId: string, key: "invite" | "kick") => {
+    setOps((prev) => {
+      const cur = prev[channelId] ?? { invite: false, kick: false };
+      return { ...prev, [channelId]: { ...cur, [key]: !cur[key] } };
+    });
+  };
+
+  // 実行: ops から operations[] を組み立て、件数を確認ダイアログで提示してから
+  // sync を呼ぶ。invite=false かつ kick=false の channel は送信から除外する
+  // (BE 側でも結果は同じだがネットワーク量を抑える)。
   const runSync = async () => {
     if (!diff) {
-      toast.error("先に diff を取得してください");
+      toast.error("先に diff を計算してください");
       return;
+    }
+    const operations = diff.channels
+      .map((c) => {
+        const o = ops[c.channelId] ?? { invite: false, kick: false };
+        return { channelId: c.channelId, invite: o.invite, kick: o.kick };
+      })
+      .filter((o) => o.invite || o.kick);
+    if (operations.length === 0) {
+      toast.error("実行する操作がありません");
+      return;
+    }
+    // 件数を集計してダイアログに出す。
+    let totalInvites = 0;
+    let totalKicks = 0;
+    for (const o of operations) {
+      const c = diff.channels.find((d) => d.channelId === o.channelId);
+      if (!c) continue;
+      if (o.invite) totalInvites += c.toInvite.length;
+      if (o.kick) totalKicks += c.toKick.length;
     }
     const ok = await confirm({
       title: "同期実行",
-      message: `${totalInvite ?? 0} 件の invite と ${totalKick ?? 0} 件の kick を実行します。よろしいですか？`,
+      message: `${operations.length} チャンネルに対し、invite ${totalInvites} 件 / kick ${totalKicks} 件 を実行します。よろしいですか？`,
       variant: "danger",
       confirmLabel: "実行",
     });
@@ -89,7 +165,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const res = await api.roles.sync(eventId, action.id);
+      const res = await api.roles.sync(eventId, action.id, { operations });
       setSyncResult(res);
       if (res.errors.length === 0) {
         toast.success(
@@ -104,6 +180,14 @@ export function RoleSyncTab({ eventId, action }: Props) {
       try {
         const next = await api.roles.syncDiff(eventId, action.id);
         setDiff(next);
+        const nextOps: Record<string, ChannelOps> = {};
+        for (const c of next.channels) {
+          nextOps[c.channelId] = {
+            invite: c.toInvite.length > 0,
+            kick: c.toKick.length > 0,
+          };
+        }
+        setOps(nextOps);
       } catch {
         /* noop: 失敗しても sync 自体は完了している */
       }
@@ -156,12 +240,44 @@ export function RoleSyncTab({ eventId, action }: Props) {
     }
   };
 
+  // ID → 表示名: workspaceMembers の cache から「@displayName (ID)」形式で返す。
+  // cache に無ければ ID をそのまま返す。
+  const formatUser = (id: string): string => {
+    const u = userMap[id];
+    if (!u) return id;
+    const name = u.displayName?.trim() || u.realName?.trim() || u.name;
+    return name ? `@${name}` : id;
+  };
+
   if (!workspaceId) {
     return (
       <div style={s.warn}>
         ワークスペースが未設定です。「その他設定」タブから登録してください。
       </div>
     );
+  }
+
+  // diff の集計 (画面上部のサマリー & 確定実行ボタン用)。
+  const totalChannels = diff?.channels.length ?? 0;
+  const totalInviteAll = diff?.channels.reduce(
+    (acc, c) => acc + c.toInvite.length,
+    0,
+  ) ?? 0;
+  const totalKickAll = diff?.channels.reduce(
+    (acc, c) => acc + c.toKick.length,
+    0,
+  ) ?? 0;
+
+  // 現在チェック ON の合計 (実行時の予告に使う)。
+  let plannedInvites = 0;
+  let plannedKicks = 0;
+  if (diff) {
+    for (const c of diff.channels) {
+      const o = ops[c.channelId];
+      if (!o) continue;
+      if (o.invite) plannedInvites += c.toInvite.length;
+      if (o.kick) plannedKicks += c.toKick.length;
+    }
   }
 
   return (
@@ -231,11 +347,12 @@ export function RoleSyncTab({ eventId, action }: Props) {
 
       <hr style={s.divider} />
 
-      <h3 style={s.heading}>メンバー同期</h3>
+      <h3 style={s.heading}>メンバー同期 (per-channel 実行)</h3>
       <p style={s.desc}>
         ロール × メンバー × チャンネル の対応関係から「各チャンネルに居るべき
         メンバー」を計算し、Slack 側の現状と diff を取って invite / kick で同期
-        します。bot 自身は kick 対象から除外されます。
+        します。各チャンネルごとに invite / kick のどちらを実行するか
+        個別に選択できます。bot 自身は kick 対象から除外されます。
       </p>
 
       <div style={s.actionRow}>
@@ -244,14 +361,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
           disabled={diffLoading || syncing}
           style={s.secondaryBtn}
         >
-          {diffLoading ? "取得中..." : "diff を取得"}
-        </button>
-        <button
-          onClick={runSync}
-          disabled={!diff || syncing || diffLoading}
-          style={s.primaryBtn}
-        >
-          {syncing ? "同期中..." : "同期実行"}
+          {diffLoading ? "計算中..." : "diff を計算"}
         </button>
       </div>
 
@@ -265,26 +375,76 @@ export function RoleSyncTab({ eventId, action }: Props) {
       {diff && (
         <div style={{ marginTop: "1rem" }}>
           <div style={s.summary}>
-            workspace: {diff.workspaceId} / 対象 {diff.channels.length} チャンネル
-            {totalInvite !== undefined && (
-              <>
-                {" "}
-                / 招待 {totalInvite} 件 / 退出 {totalKick} 件
-              </>
-            )}
+            workspace: {diff.workspaceId} / 対象 {totalChannels} チャンネル / 招待
+            候補 {totalInviteAll} 件 / 退出候補 {totalKickAll} 件
           </div>
 
-          {diff.channels.length === 0 ? (
+          {totalChannels === 0 ? (
             <div style={s.empty}>
               管理対象のチャンネルがありません。「ロール」タブから各ロールに
               チャンネルを割当ててください。
             </div>
           ) : (
-            <div style={{ display: "grid", gap: "0.5rem" }}>
-              {diff.channels.map((c) => (
-                <ChannelDiffRow key={c.channelId} diff={c} />
-              ))}
-            </div>
+            <>
+              {/* クイック選択ボタン群 */}
+              <div style={s.quickRow}>
+                <button
+                  type="button"
+                  onClick={() => setAllOps(true, true)}
+                  style={s.quickBtn}
+                >
+                  全選択
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllOps(true, false)}
+                  style={s.quickBtn}
+                >
+                  全 invite のみ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllOps(false, true)}
+                  style={s.quickBtn}
+                >
+                  全 kick のみ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllOps(false, false)}
+                  style={s.quickBtn}
+                >
+                  全クリア
+                </button>
+              </div>
+
+              {/* per-channel control */}
+              <div style={{ display: "grid", gap: "0.5rem" }}>
+                {diff.channels.map((c) => (
+                  <ChannelDiffRow
+                    key={c.channelId}
+                    diff={c}
+                    ops={
+                      ops[c.channelId] ?? { invite: false, kick: false }
+                    }
+                    onToggle={(key) => toggle(c.channelId, key)}
+                    formatUser={formatUser}
+                  />
+                ))}
+              </div>
+
+              <div style={{ ...s.actionRow, marginTop: "1rem" }}>
+                <button
+                  onClick={runSync}
+                  disabled={syncing || diffLoading}
+                  style={s.primaryBtn}
+                >
+                  {syncing
+                    ? "実行中..."
+                    : `選択分を実行 (invite ${plannedInvites} / kick ${plannedKicks})`}
+                </button>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -329,7 +489,17 @@ export function RoleSyncTab({ eventId, action }: Props) {
   );
 }
 
-function ChannelDiffRow({ diff }: { diff: ChannelDiff }) {
+function ChannelDiffRow({
+  diff,
+  ops,
+  onToggle,
+  formatUser,
+}: {
+  diff: ChannelDiff;
+  ops: ChannelOps;
+  onToggle: (key: "invite" | "kick") => void;
+  formatUser: (id: string) => string;
+}) {
   const noChange =
     !diff.error && diff.toInvite.length === 0 && diff.toKick.length === 0;
   return (
@@ -337,23 +507,65 @@ function ChannelDiffRow({ diff }: { diff: ChannelDiff }) {
       <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
         <strong>#{diff.channelName}</strong>
         <span style={s.metaInline}>{diff.channelId}</span>
-        {noChange && <span style={s.okBadge}>変更なし</span>}
+        {noChange && <span style={s.okBadge}>差分なし</span>}
       </div>
       {diff.error && (
         <div style={{ ...s.error, marginTop: "0.5rem" }}>
           取得失敗: {diff.error}
         </div>
       )}
-      {diff.toInvite.length > 0 && (
-        <div style={s.diffSection}>
-          <span style={s.inviteLabel}>+ invite ({diff.toInvite.length}):</span>{" "}
-          <span style={s.diffUsers}>{diff.toInvite.join(", ")}</span>
-        </div>
-      )}
-      {diff.toKick.length > 0 && (
-        <div style={s.diffSection}>
-          <span style={s.kickLabel}>− kick ({diff.toKick.length}):</span>{" "}
-          <span style={s.diffUsers}>{diff.toKick.join(", ")}</span>
+      {!diff.error && !noChange && (
+        <div style={{ marginTop: "0.5rem" }}>
+          {/* checkbox row */}
+          <div style={s.checkboxRow}>
+            <label
+              style={{
+                ...s.checkboxLabel,
+                opacity: diff.toInvite.length === 0 ? 0.4 : 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={ops.invite}
+                disabled={diff.toInvite.length === 0}
+                onChange={() => onToggle("invite")}
+              />
+              <span style={s.inviteLabel}>
+                invite ({diff.toInvite.length})
+              </span>
+            </label>
+            <label
+              style={{
+                ...s.checkboxLabel,
+                opacity: diff.toKick.length === 0 ? 0.4 : 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={ops.kick}
+                disabled={diff.toKick.length === 0}
+                onChange={() => onToggle("kick")}
+              />
+              <span style={s.kickLabel}>kick ({diff.toKick.length})</span>
+            </label>
+          </div>
+
+          {diff.toInvite.length > 0 && (
+            <div style={s.diffSection}>
+              <span style={s.inviteLabel}>+ invite 候補:</span>{" "}
+              <span style={s.diffUsers}>
+                {diff.toInvite.map(formatUser).join(", ")}
+              </span>
+            </div>
+          )}
+          {diff.toKick.length > 0 && (
+            <div style={s.diffSection}>
+              <span style={s.kickLabel}>− kick 候補:</span>{" "}
+              <span style={s.diffUsers}>
+                {diff.toKick.map(formatUser).join(", ")}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -416,6 +628,20 @@ const s: Record<string, CSSProperties> = {
     gap: "0.5rem",
     marginBottom: "0.75rem",
   },
+  quickRow: {
+    display: "flex",
+    gap: "0.5rem",
+    marginBottom: "0.75rem",
+    flexWrap: "wrap",
+  },
+  quickBtn: {
+    padding: "0.25rem 0.625rem",
+    fontSize: "0.75rem",
+    border: `1px solid ${colors.borderStrong}`,
+    background: colors.background,
+    borderRadius: "0.25rem",
+    cursor: "pointer",
+  },
   primaryBtn: {
     background: colors.primary,
     color: colors.textInverse,
@@ -467,6 +693,17 @@ const s: Record<string, CSSProperties> = {
   kickLabel: {
     color: colors.danger,
     fontWeight: 600,
+  },
+  checkboxRow: {
+    display: "flex",
+    gap: "1.25rem",
+    fontSize: "0.875rem",
+  },
+  checkboxLabel: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.375rem",
+    cursor: "pointer",
   },
   okBadge: {
     fontSize: "0.7rem",
