@@ -963,6 +963,113 @@ meetingsRouter.delete("/reminders/:id", async (c) => {
 
 // --- Auto Schedules ---
 
+type Frequency = "daily" | "weekly" | "monthly" | "yearly";
+const FREQUENCIES: ReadonlyArray<Frequency> = ["daily", "weekly", "monthly", "yearly"];
+
+function isFrequency(v: unknown): v is Frequency {
+  return typeof v === "string" && (FREQUENCIES as readonly string[]).includes(v);
+}
+
+/** frequency 別の candidateRule 形状チェック */
+function validateCandidateRule(frequency: Frequency, rule: unknown): string | null {
+  if (typeof rule !== "object" || rule === null) {
+    return "candidateRule must be an object";
+  }
+  const r = rule as Record<string, unknown>;
+  switch (frequency) {
+    case "daily":
+      // type のみ。値は緩く許容
+      return null;
+    case "weekly":
+      if (typeof r.weekday !== "number" || r.weekday < 0 || r.weekday > 6) {
+        return "candidateRule.weekday must be 0..6 (weekly)";
+      }
+      if (
+        r.weeksAhead !== undefined &&
+        (typeof r.weeksAhead !== "number" || r.weeksAhead < 0 || r.weeksAhead > 8)
+      ) {
+        return "candidateRule.weeksAhead must be 0..8 (weekly)";
+      }
+      return null;
+    case "monthly":
+      if (typeof r.weekday !== "number" || r.weekday < 0 || r.weekday > 6) {
+        return "candidateRule.weekday must be 0..6 (monthly)";
+      }
+      if (!Array.isArray(r.weeks)) {
+        return "candidateRule.weeks must be an array (monthly)";
+      }
+      if (
+        r.monthOffset !== undefined &&
+        (typeof r.monthOffset !== "number" ||
+          !Number.isInteger(r.monthOffset) ||
+          r.monthOffset < 0 ||
+          r.monthOffset > 12)
+      ) {
+        return "candidateRule.monthOffset must be 0..12 (monthly)";
+      }
+      return null;
+    case "yearly":
+      if (typeof r.month !== "number" || r.month < 1 || r.month > 12) {
+        return "candidateRule.month must be 1..12 (yearly)";
+      }
+      if (typeof r.day !== "number" || r.day < 1 || r.day > 28) {
+        return "candidateRule.day must be 1..28 (yearly)";
+      }
+      return null;
+  }
+}
+
+/** frequency 別の poll start/close フィールドバリデーション */
+function validateFrequencyFields(
+  frequency: Frequency,
+  body: {
+    pollStartDay?: number;
+    pollCloseDay?: number;
+    pollStartWeekday?: number | null;
+    pollCloseWeekday?: number | null;
+    pollStartMonth?: number | null;
+    pollCloseMonth?: number | null;
+  },
+): string | null {
+  const inRange = (n: unknown, lo: number, hi: number) =>
+    typeof n === "number" && n >= lo && n <= hi;
+  switch (frequency) {
+    case "daily":
+      // start/close day は使用しないので未検証
+      return null;
+    case "weekly":
+      if (!inRange(body.pollStartWeekday, 0, 6)) {
+        return "pollStartWeekday must be 0..6 (weekly)";
+      }
+      if (!inRange(body.pollCloseWeekday, 0, 6)) {
+        return "pollCloseWeekday must be 0..6 (weekly)";
+      }
+      return null;
+    case "monthly":
+      if (!inRange(body.pollStartDay, 1, 28)) {
+        return "pollStartDay must be 1..28 (monthly)";
+      }
+      if (!inRange(body.pollCloseDay, 1, 28)) {
+        return "pollCloseDay must be 1..28 (monthly)";
+      }
+      return null;
+    case "yearly":
+      if (!inRange(body.pollStartDay, 1, 28)) {
+        return "pollStartDay must be 1..28 (yearly)";
+      }
+      if (!inRange(body.pollCloseDay, 1, 28)) {
+        return "pollCloseDay must be 1..28 (yearly)";
+      }
+      if (!inRange(body.pollStartMonth, 1, 12)) {
+        return "pollStartMonth must be 1..12 (yearly)";
+      }
+      if (!inRange(body.pollCloseMonth, 1, 12)) {
+        return "pollCloseMonth must be 1..12 (yearly)";
+      }
+      return null;
+  }
+}
+
 meetingsRouter.get("/meetings/:meetingId/auto-schedule", async (c) => {
   const db = drizzle(c.env.DB);
   const meetingId = c.req.param("meetingId");
@@ -993,11 +1100,16 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
   if (!meeting) return c.json({ error: "Meeting not found" }, 404);
 
   const body = await c.req.json<{
-    candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
-    pollStartDay: number;
+    frequency?: string;
+    candidateRule: Record<string, unknown>;
+    pollStartDay?: number;
     pollStartTime?: string;
-    pollCloseDay: number;
+    pollCloseDay?: number;
     pollCloseTime?: string;
+    pollStartWeekday?: number | null;
+    pollCloseWeekday?: number | null;
+    pollStartMonth?: number | null;
+    pollCloseMonth?: number | null;
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -1006,20 +1118,18 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     autoRespondTemplate?: string | null;
   }>();
 
-  if (!body.candidateRule?.type || body.candidateRule.weekday == null || !body.candidateRule.weeks) {
-    return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
+  // frequency 未指定なら monthly 互換
+  const frequency: Frequency = isFrequency(body.frequency) ? body.frequency : "monthly";
+
+  if (!body.candidateRule || typeof body.candidateRule !== "object") {
+    return c.json({ error: "candidateRule is required" }, 400);
   }
-  if (
-    body.candidateRule.monthOffset !== undefined &&
-    (!Number.isInteger(body.candidateRule.monthOffset) ||
-      body.candidateRule.monthOffset < 0 ||
-      body.candidateRule.monthOffset > 12)
-  ) {
-    return c.json({ error: "candidateRule.monthOffset must be an integer between 0 and 12" }, 400);
-  }
-  if (!body.pollStartDay || !body.pollCloseDay || body.pollStartDay < 1 || body.pollStartDay > 28 || body.pollCloseDay < 1 || body.pollCloseDay > 28) {
-    return c.json({ error: "pollStartDay and pollCloseDay must be between 1 and 28" }, 400);
-  }
+  const ruleError = validateCandidateRule(frequency, body.candidateRule);
+  if (ruleError) return c.json({ error: ruleError }, 400);
+
+  const fieldError = validateFrequencyFields(frequency, body);
+  if (fieldError) return c.json({ error: fieldError }, 400);
+
   if (body.pollStartTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollStartTime)) {
     return c.json({ error: "pollStartTime must be HH:MM format" }, 400);
   }
@@ -1038,14 +1148,20 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
+  // 非 monthly 系では pollStartDay/pollCloseDay は使われないが NOT NULL なので 1 を入れる
   const record = {
     id,
     meetingId,
+    frequency,
     candidateRule: JSON.stringify(body.candidateRule),
-    pollStartDay: body.pollStartDay,
+    pollStartDay: body.pollStartDay ?? 1,
     pollStartTime: body.pollStartTime ?? "00:00",
-    pollCloseDay: body.pollCloseDay,
+    pollCloseDay: body.pollCloseDay ?? 1,
     pollCloseTime: body.pollCloseTime ?? "00:00",
+    pollStartWeekday: body.pollStartWeekday ?? null,
+    pollCloseWeekday: body.pollCloseWeekday ?? null,
+    pollStartMonth: body.pollStartMonth ?? null,
+    pollCloseMonth: body.pollCloseMonth ?? null,
     reminderTime: body.reminderTime ?? "09:00",
     messageTemplate: body.messageTemplate ?? null,
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
@@ -1073,11 +1189,16 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
   if (!existing) return c.json({ error: "Not found" }, 404);
 
   const body = await c.req.json<{
-    candidateRule?: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
+    frequency?: string;
+    candidateRule?: Record<string, unknown>;
     pollStartDay?: number;
     pollStartTime?: string;
     pollCloseDay?: number;
     pollCloseTime?: string;
+    pollStartWeekday?: number | null;
+    pollCloseWeekday?: number | null;
+    pollStartMonth?: number | null;
+    pollCloseMonth?: number | null;
     reminderTime?: string;
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
@@ -1087,28 +1208,62 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
     autoRespondTemplate?: string | null;
   }>();
 
-  if (body.pollStartDay != null && (body.pollStartDay < 1 || body.pollStartDay > 28)) {
-    return c.json({ error: "pollStartDay must be between 1 and 28" }, 400);
+  // frequency が body にあれば差し替え、なければ既存値を維持
+  const frequency: Frequency = isFrequency(body.frequency)
+    ? body.frequency
+    : isFrequency(existing.frequency)
+      ? existing.frequency
+      : "monthly";
+
+  if (body.candidateRule !== undefined) {
+    const ruleError = validateCandidateRule(frequency, body.candidateRule);
+    if (ruleError) return c.json({ error: ruleError }, 400);
   }
-  if (body.pollCloseDay != null && (body.pollCloseDay < 1 || body.pollCloseDay > 28)) {
-    return c.json({ error: "pollCloseDay must be between 1 and 28" }, 400);
+  // フィールドのバリデーションは「指定された場合のみ」行う (部分更新)
+  // ただし frequency が body で切り替わる場合は新 frequency に必要なフィールドを揃える必要がある
+  if (body.frequency !== undefined) {
+    const merged = {
+      pollStartDay: body.pollStartDay ?? existing.pollStartDay,
+      pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
+      pollStartWeekday: body.pollStartWeekday ?? existing.pollStartWeekday,
+      pollCloseWeekday: body.pollCloseWeekday ?? existing.pollCloseWeekday,
+      pollStartMonth: body.pollStartMonth ?? existing.pollStartMonth,
+      pollCloseMonth: body.pollCloseMonth ?? existing.pollCloseMonth,
+    };
+    const fieldError = validateFrequencyFields(frequency, merged);
+    if (fieldError) return c.json({ error: fieldError }, 400);
+  } else {
+    // frequency 据え置きの場合、個別フィールドが指定されたら最小限の範囲チェック
+    if (body.pollStartDay != null && (body.pollStartDay < 1 || body.pollStartDay > 28)) {
+      return c.json({ error: "pollStartDay must be between 1 and 28" }, 400);
+    }
+    if (body.pollCloseDay != null && (body.pollCloseDay < 1 || body.pollCloseDay > 28)) {
+      return c.json({ error: "pollCloseDay must be between 1 and 28" }, 400);
+    }
+    if (
+      body.pollStartWeekday != null &&
+      (body.pollStartWeekday < 0 || body.pollStartWeekday > 6)
+    ) {
+      return c.json({ error: "pollStartWeekday must be 0..6" }, 400);
+    }
+    if (
+      body.pollCloseWeekday != null &&
+      (body.pollCloseWeekday < 0 || body.pollCloseWeekday > 6)
+    ) {
+      return c.json({ error: "pollCloseWeekday must be 0..6" }, 400);
+    }
+    if (body.pollStartMonth != null && (body.pollStartMonth < 1 || body.pollStartMonth > 12)) {
+      return c.json({ error: "pollStartMonth must be 1..12" }, 400);
+    }
+    if (body.pollCloseMonth != null && (body.pollCloseMonth < 1 || body.pollCloseMonth > 12)) {
+      return c.json({ error: "pollCloseMonth must be 1..12" }, 400);
+    }
   }
   if (body.pollStartTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollStartTime)) {
     return c.json({ error: "pollStartTime must be HH:MM format" }, 400);
   }
   if (body.pollCloseTime !== undefined && !/^[0-2]\d:[0-5]\d$/.test(body.pollCloseTime)) {
     return c.json({ error: "pollCloseTime must be HH:MM format" }, 400);
-  }
-  if (body.candidateRule && (!body.candidateRule.type || body.candidateRule.weekday == null || !body.candidateRule.weeks)) {
-    return c.json({ error: "candidateRule must have type, weekday, and weeks" }, 400);
-  }
-  if (
-    body.candidateRule?.monthOffset !== undefined &&
-    (!Number.isInteger(body.candidateRule.monthOffset) ||
-      body.candidateRule.monthOffset < 0 ||
-      body.candidateRule.monthOffset > 12)
-  ) {
-    return c.json({ error: "candidateRule.monthOffset must be an integer between 0 and 12" }, 400);
   }
 
   let remindersStr: string = existing.reminders;
@@ -1123,11 +1278,24 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
   await db
     .update(autoSchedules)
     .set({
+      frequency,
       candidateRule: body.candidateRule ? JSON.stringify(body.candidateRule) : existing.candidateRule,
       pollStartDay: body.pollStartDay ?? existing.pollStartDay,
       pollStartTime: body.pollStartTime ?? existing.pollStartTime,
       pollCloseDay: body.pollCloseDay ?? existing.pollCloseDay,
       pollCloseTime: body.pollCloseTime ?? existing.pollCloseTime,
+      pollStartWeekday:
+        body.pollStartWeekday === undefined
+          ? existing.pollStartWeekday
+          : body.pollStartWeekday,
+      pollCloseWeekday:
+        body.pollCloseWeekday === undefined
+          ? existing.pollCloseWeekday
+          : body.pollCloseWeekday,
+      pollStartMonth:
+        body.pollStartMonth === undefined ? existing.pollStartMonth : body.pollStartMonth,
+      pollCloseMonth:
+        body.pollCloseMonth === undefined ? existing.pollCloseMonth : body.pollCloseMonth,
       reminderTime: body.reminderTime ?? existing.reminderTime,
       messageTemplate:
         body.messageTemplate === undefined ? existing.messageTemplate : body.messageTemplate,
