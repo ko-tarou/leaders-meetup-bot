@@ -211,6 +211,13 @@
       "when": 1780809600000,
       "tag": "0032_interviewer_simplify",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1781414400000,
+      "tag": "0033_role_management",
+      "breakpoints": true
     }
   ]
 }
