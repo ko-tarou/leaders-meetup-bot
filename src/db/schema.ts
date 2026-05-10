@@ -142,6 +142,46 @@ export const applications = sqliteTable(
   (t) => [index("idx_applications_event_id").on(t.eventId)],
 );
 
+// 005-interviewer: 面接官 (interviewer)
+// member_application アクションに紐づく面接官を管理する。
+// 旧 event_actions.config.leaderAvailableSlots を interviewer × interviewer_slots に正規化。
+// access_token は推測困難な hex 32文字以上で発行し、面接官は招待リンクから自分の slot を編集する。
+export const interviewers = sqliteTable(
+  "interviewers",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    accessToken: text("access_token").notNull().unique(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_interviewers_event_action").on(t.eventActionId)],
+);
+
+// 面接官の予約可能 slot (UTC ISO)。同 interviewer × slot_datetime で UNIQUE。
+export const interviewerSlots = sqliteTable(
+  "interviewer_slots",
+  {
+    id: text("id").primaryKey(),
+    interviewerId: text("interviewer_id")
+      .notNull()
+      .references(() => interviewers.id, { onDelete: "cascade" }),
+    slotDatetime: text("slot_datetime").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    unique("interviewer_slots_interviewer_slot_uniq").on(
+      t.interviewerId,
+      t.slotDatetime,
+    ),
+    index("idx_interviewer_slots_interviewer").on(t.interviewerId),
+  ],
+);
+
 // ADR-0008: PR レビュー依頼一覧（pr_review_list アクション用）
 // タスクと類似だが PR 専用。GitHub 連携なし、ユーザーが手動で追加
 export const prReviews = sqliteTable(

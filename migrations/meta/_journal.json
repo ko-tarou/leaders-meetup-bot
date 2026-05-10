@@ -197,6 +197,13 @@
       "when": 1779600000000,
       "tag": "0030_drop_reminder_days_before",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1780204800000,
+      "tag": "0031_interviewers",
+      "breakpoints": true
     }
   ]
 }
