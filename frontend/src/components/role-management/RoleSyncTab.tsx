@@ -1,11 +1,12 @@
 import { useState, type CSSProperties } from "react";
 import type {
+  BotBulkInviteResult,
   ChannelDiff,
   EventAction,
   SyncDiffResponse,
   SyncResult,
 } from "../../types";
-import { api } from "../../api";
+import { api, APIError } from "../../api";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { colors } from "../../styles/tokens";
@@ -44,6 +45,12 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [diffLoading, setDiffLoading] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // 005-user-oauth: bot 一括招待
+  const [bulkInviteResult, setBulkInviteResult] =
+    useState<BotBulkInviteResult | null>(null);
+  const [bulkInviteError, setBulkInviteError] = useState<string | null>(null);
+  const [bulkInviteOAuthRequired, setBulkInviteOAuthRequired] = useState(false);
+  const [bulkInviting, setBulkInviting] = useState(false);
 
   const totalInvite = diff?.channels.reduce(
     (acc, c) => acc + c.toInvite.length,
@@ -107,6 +114,48 @@ export function RoleSyncTab({ eventId, action }: Props) {
     }
   };
 
+  // 005-user-oauth: bot 一括招待。admin user の user_access_token で全 channel
+  // に対し bot を invite する。private channel への bot 投入が主用途。
+  const runBulkInviteBot = async () => {
+    const ok = await confirm({
+      title: "bot を一括招待",
+      message:
+        "admin (= OAuth 認証した人) が member の全チャンネルに bot を一括招待します。よろしいですか？",
+      variant: "danger",
+      confirmLabel: "実行",
+    });
+    if (!ok) return;
+    setBulkInviting(true);
+    setBulkInviteResult(null);
+    setBulkInviteError(null);
+    setBulkInviteOAuthRequired(false);
+    try {
+      const res = await api.roles.bulkInviteBot(eventId, action.id);
+      setBulkInviteResult(res);
+      if (res.failed === 0) {
+        toast.success(
+          `招待完了: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 合計 ${res.totalChannels} チャンネル`,
+        );
+      } else {
+        toast.warning(
+          `一部失敗: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 失敗 ${res.failed}`,
+        );
+      }
+    } catch (e) {
+      // user_oauth_required は backend が 400 で error code として返す。
+      // APIError.body に JSON 文字列が入るので包含判定で識別する。
+      if (e instanceof APIError && e.body.includes("user_oauth_required")) {
+        setBulkInviteOAuthRequired(true);
+      } else {
+        setBulkInviteError(
+          e instanceof Error ? e.message : "bot 一括招待に失敗しました",
+        );
+      }
+    } finally {
+      setBulkInviting(false);
+    }
+  };
+
   if (!workspaceId) {
     return (
       <div style={s.warn}>
@@ -117,6 +166,72 @@ export function RoleSyncTab({ eventId, action }: Props) {
 
   return (
     <div>
+      <section style={s.section}>
+        <h3 style={s.heading}>bot をチャンネルに一括招待</h3>
+        <p style={s.desc}>
+          admin (= OAuth 認証した人) が member の全チャンネルに bot を一括招待
+          します。bot は private channel に自分で join できないため、
+          まずこの操作で bot を投入してから「同期」を実行してください。
+        </p>
+        <div style={s.actionRow}>
+          <button
+            onClick={runBulkInviteBot}
+            disabled={bulkInviting}
+            style={s.primaryBtn}
+          >
+            {bulkInviting ? "招待中..." : "bot を一括招待"}
+          </button>
+        </div>
+        {bulkInviteOAuthRequired && (
+          <div style={s.warn}>
+            user OAuth 認証が必要です。
+            <a href="/slack/oauth/install" style={{ marginLeft: "0.5rem" }}>
+              再インストール
+            </a>
+            してから再度お試しください。
+          </div>
+        )}
+        {bulkInviteError && (
+          <div style={s.error}>エラー: {bulkInviteError}</div>
+        )}
+        {bulkInviteResult && (
+          <div style={s.resultBox}>
+            <div>
+              <strong>合計:</strong> {bulkInviteResult.totalChannels} チャンネル
+            </div>
+            <div>
+              <strong>新規招待:</strong> {bulkInviteResult.invited}
+            </div>
+            <div>
+              <strong>既存:</strong> {bulkInviteResult.alreadyMember}
+            </div>
+            <div>
+              <strong>失敗:</strong> {bulkInviteResult.failed}
+            </div>
+          </div>
+        )}
+        {bulkInviteResult && bulkInviteResult.errors.length > 0 && (
+          <div style={{ marginTop: "0.5rem" }}>
+            <h4 style={s.subHeading}>失敗詳細</h4>
+            <div style={{ display: "grid", gap: "0.25rem" }}>
+              {bulkInviteResult.errors.map((err, i) => (
+                <div key={i} style={s.errorRow}>
+                  <div>
+                    channel:{" "}
+                    {err.channelName ? `#${err.channelName}` : err.channelId}
+                  </div>
+                  <div style={s.errorMsg}>{err.error}</div>
+                  <ScopeHint message={err.error} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <hr style={s.divider} />
+
+      <h3 style={s.heading}>メンバー同期</h3>
       <p style={s.desc}>
         ロール × メンバー × チャンネル の対応関係から「各チャンネルに居るべき
         メンバー」を計算し、Slack 側の現状と diff を取って invite / kick で同期
@@ -276,6 +391,14 @@ function ScopeHint({ message }: { message: string }) {
 }
 
 const s: Record<string, CSSProperties> = {
+  section: {
+    marginBottom: "1rem",
+  },
+  divider: {
+    border: "none",
+    borderTop: `1px solid ${colors.border}`,
+    margin: "1.5rem 0",
+  },
   desc: {
     color: colors.textSecondary,
     fontSize: "0.875rem",
