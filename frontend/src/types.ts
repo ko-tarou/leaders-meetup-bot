@@ -426,3 +426,18 @@ export type SyncResult = {
     error: string;
   }[];
 };
+
+// 005-user-oauth: POST /bot-bulk-invite の結果。
+//   admin user の user_access_token で取得した全 channel に対して
+//   bot を invite した結果サマリ。
+//   - totalChannels: user token で見えた channel 数 (archived は除外)
+//   - alreadyMember: 既に bot が member だった channel
+//   - invited: 新規 invite 成功
+//   - failed: invite 失敗 (errors[] に詳細)
+export type BotBulkInviteResult = {
+  totalChannels: number;
+  alreadyMember: number;
+  invited: number;
+  failed: number;
+  errors: { channelId: string; channelName?: string; error: string }[];
+};

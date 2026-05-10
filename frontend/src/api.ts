@@ -2,6 +2,7 @@ import type {
   Application,
   ApplicationStatus,
   AutoSchedule,
+  BotBulkInviteResult,
   CalendarData,
   Event,
   EventAction,
@@ -712,6 +713,15 @@ export const api = {
       request<SyncResult>(`/orgs/${eventId}/actions/${actionId}/sync`, {
         method: "POST",
       }),
+
+    // 005-user-oauth: bot を全 channel に一括招待 (admin user の user token を使用)。
+    // user_access_token が無い workspace は { error: 'user_oauth_required' } で
+    // 400 が返るため、呼び出し側で APIError をハンドリングして再認証ガイドを出す。
+    bulkInviteBot: (eventId: string, actionId: string) =>
+      request<BotBulkInviteResult>(
+        `/orgs/${eventId}/actions/${actionId}/bot-bulk-invite`,
+        { method: "POST" },
+      ),
   },
 
   // Slack Workspaces (ADR-0006)

@@ -218,6 +218,13 @@
       "when": 1781414400000,
       "tag": "0033_role_management",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1782019200000,
+      "tag": "0034_workspaces_user_oauth",
+      "breakpoints": true
     }
   ]
 }
