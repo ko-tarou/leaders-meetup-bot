@@ -1,7 +1,10 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api";
 import type { MeetingDetail, Workspace } from "../../types";
-import { ChannelSelector } from "../ChannelSelector";
+import {
+  ChannelPicker,
+  type SlackChannelLike,
+} from "../ui/ChannelPicker";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { colors, fontSize, radius, space } from "../../styles/tokens";
@@ -10,6 +13,11 @@ import { colors, fontSize, radius, space } from "../../styles/tokens";
 // schedule_polling は 1 meeting あたり 1 channel なので、ChannelManagementSection の
 // ような複数登録 UI ではなく「現在の channel 表示 + 編集」のシンプルな form にする。
 // channel 変更は api.updateMeeting({ channelId }) で永続化する。
+//
+// PR レビュー一覧 / task_management と同じ「workspace + 検索 + ページング」UI に
+// 揃えるため、編集モードでは ChannelPicker を再利用する。単一 channel しか持たない
+// ので、現在の channel ID を registeredChannelIds に渡して候補から除外し、
+// 別の channel を 1 つ選ぶと自動で updateMeeting が走る フローにしている。
 
 type Props = { meetingId: string; onChanged?: () => void };
 
@@ -21,9 +29,8 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
   const [editing, setEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // 編集中の選択値
-  const [draftWorkspaceId, setDraftWorkspaceId] = useState("");
-  const [draftChannelId, setDraftChannelId] = useState("");
+  // ChannelPicker 用の workspace 選択
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -57,31 +64,35 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
     };
   }, [meeting?.channelId]);
 
-  const startEdit = () => {
-    if (!meeting) return;
-    setDraftWorkspaceId(meeting.workspaceId ?? workspaces[0]?.id ?? "");
-    setDraftChannelId(meeting.channelId);
-    setEditing(true);
-  };
+  // 編集モードに入るたびに workspace 選択を meeting に合わせて初期化
+  useEffect(() => {
+    if (!editing || !meeting) return;
+    setSelectedWorkspaceId(meeting.workspaceId ?? workspaces[0]?.id ?? "");
+  }, [editing, meeting, workspaces]);
 
-  const cancelEdit = () => {
-    setEditing(false);
-    setDraftChannelId("");
-    setDraftWorkspaceId("");
-  };
-
-  const handleSave = async () => {
-    if (!draftChannelId) {
-      toast.error("チャンネルを選択してください");
-      return;
+  // 現在 channel を候補から除外するため Set として渡す。
+  // workspace を切り替えた場合は除外不要なので空 Set にする。
+  const registeredIdSet = useMemo(() => {
+    if (!meeting) return new Set<string>();
+    if (selectedWorkspaceId && meeting.workspaceId && selectedWorkspaceId !== meeting.workspaceId) {
+      return new Set<string>();
     }
+    return new Set<string>([meeting.channelId]);
+  }, [meeting, selectedWorkspaceId]);
+
+  const fetchChannelsForPicker = (workspaceId: string) =>
+    api.getSlackChannels(workspaceId).then((list) =>
+      Array.isArray(list) ? list : [],
+    );
+
+  const handleAdd = async (channel: SlackChannelLike) => {
+    if (submitting) return;
     setSubmitting(true);
     try {
-      await api.updateMeeting(meetingId, { channelId: draftChannelId });
-      toast.success("チャンネルを更新しました");
-      // 最新を取り直す
+      await api.updateMeeting(meetingId, { channelId: channel.id });
       const updated = await api.getMeeting(meetingId);
       setMeeting(updated);
+      toast.success(`チャンネルを #${channel.name} に変更しました`);
       setEditing(false);
       onChanged?.();
     } catch (e) {
@@ -112,7 +123,7 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
           </dd>
         </dl>
         <div style={{ marginTop: space.md }}>
-          <Button variant="primary" onClick={startEdit}>
+          <Button variant="primary" onClick={() => setEditing(true)}>
             チャンネルを変更
           </Button>
         </div>
@@ -123,48 +134,27 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
   return (
     <div style={cardStyle}>
       <h3 style={headingStyle}>チャンネルを変更</h3>
+      <p style={descStyle}>
+        新しいチャンネルを選択すると、自動的に保存されます。
+        現在のチャンネル: <code>#{channelName || meeting.channelId}</code>
+      </p>
 
-      <label style={fieldStyle}>
-        <span style={labelStyle}>ワークスペース</span>
-        {workspaces.length === 0 ? (
-          <span style={{ color: colors.textMuted, fontSize: fontSize.sm }}>
-            ワークスペースが登録されていません
-          </span>
-        ) : (
-          <select
-            value={draftWorkspaceId}
-            onChange={(e) => {
-              setDraftWorkspaceId(e.target.value);
-              // workspace 切替時は channel 選択をクリア
-              setDraftChannelId("");
-            }}
-            disabled={submitting}
-            style={inputStyle}
-          >
-            <option value="">-- ワークスペースを選択 --</option>
-            {workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </label>
+      <ChannelPicker
+        workspaces={workspaces}
+        selectedWorkspaceId={selectedWorkspaceId}
+        onWorkspaceChange={setSelectedWorkspaceId}
+        fetchChannels={fetchChannelsForPicker}
+        registeredChannelIds={registeredIdSet}
+        onAdd={handleAdd}
+        disabled={submitting}
+      />
 
-      <label style={fieldStyle}>
-        <span style={labelStyle}>チャンネル</span>
-        <ChannelSelector
-          value={draftChannelId}
-          workspaceId={draftWorkspaceId || undefined}
-          onChange={(id) => setDraftChannelId(id)}
-        />
-      </label>
-
-      <div style={{ display: "flex", gap: space.sm, marginTop: space.sm }}>
-        <Button variant="primary" onClick={handleSave} isLoading={submitting}>
-          保存
-        </Button>
-        <Button variant="secondary" onClick={cancelEdit} disabled={submitting}>
+      <div style={{ display: "flex", gap: space.sm, marginTop: space.md }}>
+        <Button
+          variant="secondary"
+          onClick={() => setEditing(false)}
+          disabled={submitting}
+        >
           キャンセル
         </Button>
       </div>
@@ -205,26 +195,4 @@ const dtStyle: CSSProperties = {
 const ddStyle: CSSProperties = {
   margin: 0,
   fontSize: fontSize.sm,
-};
-
-const fieldStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: space.xs,
-  marginTop: space.md,
-};
-
-const labelStyle: CSSProperties = {
-  fontSize: fontSize.sm,
-  color: colors.textSecondary,
-  fontWeight: 500,
-};
-
-const inputStyle: CSSProperties = {
-  padding: "8px 12px",
-  border: `1px solid ${colors.borderStrong}`,
-  borderRadius: radius.sm,
-  fontSize: fontSize.sm,
-  fontFamily: "inherit",
-  background: colors.background,
 };
