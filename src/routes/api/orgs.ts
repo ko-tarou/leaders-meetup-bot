@@ -140,6 +140,7 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "member_application",
     "weekly_reminder",
     "attendance_check",
+    "role_management",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(

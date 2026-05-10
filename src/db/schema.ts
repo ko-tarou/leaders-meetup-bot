@@ -45,6 +45,7 @@ export const eventActions = sqliteTable(
       .notNull()
       .references(() => events.id),
     // 'schedule_polling' | 'task_management' | 'member_welcome' | 'pr_review_list'
+    // | 'member_application' | 'weekly_reminder' | 'attendance_check' | 'role_management'
     actionType: text("action_type").notNull(),
     // アクション固有設定（JSON 文字列）
     config: text("config").notNull().default("{}"),
@@ -444,6 +445,71 @@ export const attendanceVotes = sqliteTable(
   (t) => [
     unique("attendance_votes_poll_user_uniq").on(t.pollId, t.slackUserId),
     index("idx_attendance_votes_poll_id").on(t.pollId),
+  ],
+);
+
+// Sprint 24: ロール管理 (role_management) アクション用
+//
+// Slack 無料プランの user-group 代替として、ロール → メンバー → チャンネル の関係を
+// 持ち、cron / 手動同期で各 channel の参加メンバーを自動的に invite / kick する。
+//
+// 関係:
+//   slack_roles (1) ── (N) slack_role_members
+//   slack_roles (1) ── (N) slack_role_channels
+//
+// PK は複合キーとし、(role_id, slack_user_id) / (role_id, channel_id) の重複を物理的に防ぐ。
+export const slackRoles = sqliteTable(
+  "slack_roles",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_slack_roles_event_action").on(t.eventActionId)],
+);
+
+export const slackRoleMembers = sqliteTable(
+  "slack_role_members",
+  {
+    roleId: text("role_id")
+      .notNull()
+      .references(() => slackRoles.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    addedAt: text("added_at").notNull(),
+  },
+  (t) => [
+    // 複合主キー: 同 role × 同 user の重複を物理的に防ぐ。
+    // Drizzle の sqliteTable で複合 PK を表現するには primaryKey() を使う。
+    // ここでは index のみ追加し、複合 PK は migration 側 (CREATE TABLE) で表現する。
+    // schema 上は (role_id, slack_user_id) の UNIQUE インデックスで等価を担保する。
+    uniqueIndex("slack_role_members_role_user_uniq").on(
+      t.roleId,
+      t.slackUserId,
+    ),
+    index("idx_slack_role_members_user").on(t.slackUserId),
+  ],
+);
+
+export const slackRoleChannels = sqliteTable(
+  "slack_role_channels",
+  {
+    roleId: text("role_id")
+      .notNull()
+      .references(() => slackRoles.id, { onDelete: "cascade" }),
+    channelId: text("channel_id").notNull(),
+    addedAt: text("added_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("slack_role_channels_role_channel_uniq").on(
+      t.roleId,
+      t.channelId,
+    ),
+    index("idx_slack_role_channels_channel").on(t.channelId),
   ],
 );
 
