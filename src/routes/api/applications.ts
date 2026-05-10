@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and, isNotNull } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { events, eventActions, applications } from "../../db/schema";
+import {
+  events,
+  eventActions,
+  applications,
+  interviewers,
+  interviewerSlots,
+} from "../../db/schema";
 
 export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
@@ -29,10 +35,15 @@ applicationsRouter.get("/apply/:eventId/event", async (c) => {
   });
 });
 
-// Sprint 19 PR1: 公開エンドポイント。eventId の member_application アクションから
-// リーダーが事前にマークした候補日時 (leaderAvailableSlots) を返す。認証不要。
-// 応募ページはこの結果を WeekCalendarPicker.restrictTo に渡し、
-// 候補のみ選択可能にする。
+// Sprint 19 PR1 / 005-interviewer:
+// 公開エンドポイント。eventId の member_application アクションに紐づく
+// 全面接官 (interviewers) の予約可能日時 (interviewer_slots) を集計して返す。認証不要。
+// 旧仕様 (event_actions.config.leaderAvailableSlots) は migrate-legacy endpoint で
+// 「初期 admin」面接官に移行済み。互換のため、もし interviewer_slots が空かつ
+// レガシー config に値があればフォールバックで返す（移行未実施の event 向けセーフティネット）。
+//
+// 応答型は維持: { enabled, eventName?, leaderAvailableSlots: string[] }
+// FE (WeekCalendarPicker.restrictTo) は中身が interviewer 由来かを意識しなくて良い。
 applicationsRouter.get("/apply/:eventId/availability", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
@@ -57,17 +68,33 @@ applicationsRouter.get("/apply/:eventId/availability", async (c) => {
     return c.json({ enabled: false, leaderAvailableSlots: [] });
   }
 
-  let config: { leaderAvailableSlots?: unknown } = {};
-  try {
-    config = JSON.parse(action.config || "{}");
-  } catch {
-    config = {};
-  }
-  const slots = Array.isArray(config.leaderAvailableSlots)
-    ? (config.leaderAvailableSlots as unknown[]).filter(
+  // 1) interviewer_slots から集計 (新仕様)
+  const slotRows = await db
+    .select({ slotDatetime: interviewerSlots.slotDatetime })
+    .from(interviewerSlots)
+    .innerJoin(
+      interviewers,
+      eq(interviewerSlots.interviewerId, interviewers.id),
+    )
+    .where(eq(interviewers.eventActionId, action.id))
+    .all();
+  let slots = Array.from(new Set(slotRows.map((r) => r.slotDatetime)));
+
+  // 2) フォールバック: interviewer_slots が空 & レガシー config に値があれば、
+  //    レガシー値をそのまま返す (移行未実施の event の互換維持)。
+  if (slots.length === 0) {
+    let config: { leaderAvailableSlots?: unknown } = {};
+    try {
+      config = JSON.parse(action.config || "{}");
+    } catch {
+      config = {};
+    }
+    if (Array.isArray(config.leaderAvailableSlots)) {
+      slots = (config.leaderAvailableSlots as unknown[]).filter(
         (s): s is string => typeof s === "string",
-      )
-    : [];
+      );
+    }
+  }
 
   // 確定済み面談 (interviewAt が設定済み) の slot を集計し、新規応募候補から除外する。
   // 同一 slot に複数応募者を重ねないための整合性ガード。
@@ -84,7 +111,9 @@ applicationsRouter.get("/apply/:eventId/availability", async (c) => {
   const bookedSet = new Set(
     booked.map((b) => b.interviewAt).filter((s): s is string => !!s),
   );
-  const availableSlots = slots.filter((s) => !bookedSet.has(s));
+  const availableSlots = slots
+    .filter((s) => !bookedSet.has(s))
+    .sort((a, b) => a.localeCompare(b));
 
   return c.json({
     enabled: true,
