@@ -6,6 +6,8 @@ import type {
   EventAction,
   EventActionType,
   HowFound,
+  Interviewer,
+  InterviewerWithMeta,
   InterviewLocation,
   Meeting,
   MeetingDetail,
@@ -547,6 +549,64 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/applications/${id}`, { method: "DELETE" }),
+  },
+
+  // 面接官 (005-interviewer / Sprint 25)
+  // member_application action に紐づく面接官の CRUD と slot 編集。
+  // /interviewer/:token は admin auth を持たない公開エンドポイントのため
+  // ここには含めない（fetch を直接叩く）。
+  interviewers: {
+    list: (eventId: string, actionId: string) =>
+      request<InterviewerWithMeta[]>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers`,
+      ),
+    create: (
+      eventId: string,
+      actionId: string,
+      data: { name: string; email: string },
+    ) =>
+      request<InterviewerWithMeta>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers`,
+        {
+          method: "POST",
+          body: JSON.stringify(data),
+        },
+      ),
+    update: (
+      eventId: string,
+      actionId: string,
+      interviewerId: string,
+      data: { name?: string; email?: string },
+    ) =>
+      request<Interviewer>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(data),
+        },
+      ),
+    delete: (eventId: string, actionId: string, interviewerId: string) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}`,
+        { method: "DELETE" },
+      ),
+    getSlots: (eventId: string, actionId: string, interviewerId: string) =>
+      request<{ slots: string[] }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
+      ),
+    updateSlots: (
+      eventId: string,
+      actionId: string,
+      interviewerId: string,
+      slots: string[],
+    ) =>
+      request<{ ok: boolean; slots: string[] }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ slots }),
+        },
+      ),
   },
 
   // Slack Workspaces (ADR-0006)
