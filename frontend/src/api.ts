@@ -22,6 +22,12 @@ import type {
   PRReviewStatus,
   Reminder,
   ReminderItem,
+  SlackRole,
+  SlackRoleChannelRow,
+  SlackRoleMemberRow,
+  SlackUser,
+  SyncDiffResponse,
+  SyncResult,
   Task,
   TaskAssignee,
   TaskFilters,
@@ -606,6 +612,106 @@ export const api = {
         `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
         { method: "PUT", body: JSON.stringify({ slots }) },
       ),
+  },
+
+  // ロール管理 (Sprint 24 / role_management action)
+  // 概念: action ごとに roles[] を管理し、各 role に members[] と channels[] を割当てる。
+  // 同期 API は workspace の Slack channel members を期待値に合わせて invite/kick する。
+  roles: {
+    list: (eventId: string, actionId: string) =>
+      request<SlackRole[]>(`/orgs/${eventId}/actions/${actionId}/roles`),
+    create: (
+      eventId: string,
+      actionId: string,
+      data: { name: string; description?: string },
+    ) =>
+      request<SlackRole>(`/orgs/${eventId}/actions/${actionId}/roles`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    update: (
+      eventId: string,
+      actionId: string,
+      roleId: string,
+      data: { name?: string; description?: string },
+    ) =>
+      request<SlackRole>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}`,
+        { method: "PUT", body: JSON.stringify(data) },
+      ),
+    delete: (eventId: string, actionId: string, roleId: string) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}`,
+        { method: "DELETE" },
+      ),
+
+    // メンバー (= Slack user) 割当
+    getMembers: (eventId: string, actionId: string, roleId: string) =>
+      request<SlackRoleMemberRow[]>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/members`,
+      ),
+    addMembers: (
+      eventId: string,
+      actionId: string,
+      roleId: string,
+      slackUserIds: string[],
+    ) =>
+      request<{ ok: boolean; added: number }>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/members`,
+        { method: "POST", body: JSON.stringify({ slackUserIds }) },
+      ),
+    removeMember: (
+      eventId: string,
+      actionId: string,
+      roleId: string,
+      slackUserId: string,
+    ) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/members/${slackUserId}`,
+        { method: "DELETE" },
+      ),
+
+    // チャンネル割当
+    getChannels: (eventId: string, actionId: string, roleId: string) =>
+      request<SlackRoleChannelRow[]>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/channels`,
+      ),
+    addChannels: (
+      eventId: string,
+      actionId: string,
+      roleId: string,
+      channelIds: string[],
+    ) =>
+      request<{ ok: boolean; added: number }>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/channels`,
+        { method: "POST", body: JSON.stringify({ channelIds }) },
+      ),
+    removeChannel: (
+      eventId: string,
+      actionId: string,
+      roleId: string,
+      channelId: string,
+    ) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/channels/${channelId}`,
+        { method: "DELETE" },
+      ),
+
+    // workspace 全員 (action.config.workspaceId のワークスペース)
+    workspaceMembers: (eventId: string, actionId: string) =>
+      request<SlackUser[]>(
+        `/orgs/${eventId}/actions/${actionId}/workspace-members`,
+      ),
+
+    // 同期: 各 channel の現状 vs 期待値を返す → 実行
+    syncDiff: (eventId: string, actionId: string) =>
+      request<SyncDiffResponse>(
+        `/orgs/${eventId}/actions/${actionId}/sync-diff`,
+      ),
+    sync: (eventId: string, actionId: string) =>
+      request<SyncResult>(`/orgs/${eventId}/actions/${actionId}/sync`, {
+        method: "POST",
+      }),
   },
 
   // Slack Workspaces (ADR-0006)
