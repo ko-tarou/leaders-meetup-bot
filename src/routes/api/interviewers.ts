@@ -29,6 +29,33 @@ export const interviewersRouter = new Hono<{ Bindings: Env }>();
 // ----------------------------------------------------------------------------
 
 /**
+ * D1 / libSQL の bind パラメータ上限 (100) を回避するため、
+ * interviewer_slots の bulk INSERT を分割する際の chunk サイズ。
+ * 1 行あたり 4 カラム (id, interviewerId, slotDatetime, createdAt) bind するため
+ * 20 行 * 4 = 80 で安全マージン込み。
+ */
+const SLOT_INSERT_CHUNK_SIZE = 20;
+
+/**
+ * interviewer_slots の bulk INSERT を chunk 化して実行する。
+ * D1 bind limit (100) 回避のため。
+ */
+async function insertSlotsInChunks(
+  db: ReturnType<typeof drizzle>,
+  rows: Array<{
+    id: string;
+    interviewerId: string;
+    slotDatetime: string;
+    createdAt: string;
+  }>,
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += SLOT_INSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + SLOT_INSERT_CHUNK_SIZE);
+    await db.insert(interviewerSlots).values(chunk);
+  }
+}
+
+/**
  * 推測困難な access_token を生成する。
  * crypto.getRandomValues で 24 バイト → hex で 48 文字。
  * Base64URL でも良いが、URL に直接埋める都合 hex の方が安全 (special char なし)。
@@ -349,7 +376,7 @@ interviewersRouter.put(
         slotDatetime: s,
         createdAt: now,
       }));
-      await db.insert(interviewerSlots).values(rows);
+      await insertSlotsInChunks(db, rows);
     }
     return c.json({ ok: true, slots: unique.sort((a, b) => a.localeCompare(b)) });
   },
@@ -439,7 +466,7 @@ interviewersRouter.post(
         createdAt: now,
       }));
     if (toInsert.length > 0) {
-      await db.insert(interviewerSlots).values(toInsert);
+      await insertSlotsInChunks(db, toInsert);
     }
 
     // event_actions.config.leaderAvailableSlots を [] にクリア
@@ -546,7 +573,7 @@ interviewersRouter.put("/interviewer/:token/slots", async (c) => {
       slotDatetime: s,
       createdAt: now,
     }));
-    await db.insert(interviewerSlots).values(rows);
+    await insertSlotsInChunks(db, rows);
   }
   return c.json({ ok: true, slots: unique.sort((a, b) => a.localeCompare(b)) });
 });
