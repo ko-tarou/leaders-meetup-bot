@@ -11,6 +11,7 @@ import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
 import { LeaderAvailabilityEditor } from "../components/LeaderAvailabilityEditor";
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
+import { InterviewersTab } from "../components/member-application/InterviewersTab";
 import { ScheduleSection } from "../components/ScheduleSection";
 import { SchedulePollingMainTab } from "../components/schedule/SchedulePollingMainTab";
 import { ScheduleChannelTab } from "../components/schedule/ScheduleChannelTab";
@@ -52,9 +53,13 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
   }
   // Sprint 19 PR1: member_application は「候補日時設定」サブタブを持つ
   // Sprint 24: 「メール」サブタブを追加 (複数テンプレ管理)
+  // 005-interviewer / Sprint 25: 「面接官」サブタブを追加。
+  // 並びは「メイン → 面接官 → 候補日時設定（廃止予定） → メール → その他設定」。
+  // 面接官管理が日時設定の上位概念なので候補日時設定の前に置く。
   if (actionType === "member_application") {
     return [
       { id: "main", label: "メイン" },
+      { id: "interviewers", label: "面接官" },
       { id: "availability", label: "候補日時設定" },
       { id: "email", label: "メール" },
       { id: "settings", label: "その他設定" },
@@ -320,6 +325,9 @@ export function ActionDetailPage() {
           eventId={eventId}
           actionType={actionType as EventActionType}
         />
+      )}
+      {subTab === "interviewers" && actionType === "member_application" && (
+        <InterviewersTab eventId={eventId} action={action} />
       )}
       {subTab === "availability" && actionType === "member_application" && (
         <LeaderAvailabilityEditor
