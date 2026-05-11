@@ -237,10 +237,16 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
       )
       .get();
     if (action) {
+      // 通知テンプレ placeholder ({studentId} 等) 用に application の追加フィールドを渡す。
+      // 未設定フィールドは render 時に空文字へ置換される。
       await sendApplicationNotification(c.env, action.config, {
         name: application.name,
         email: application.email,
         appliedAt: application.appliedAt,
+        studentId: application.studentId,
+        howFound: application.howFound,
+        interviewLocation: application.interviewLocation,
+        interviewAt: application.interviewAt,
       });
     }
   } catch (e) {
