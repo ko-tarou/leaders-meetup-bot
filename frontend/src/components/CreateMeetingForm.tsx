@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import type { Workspace } from "../types";
-import { ChannelSelector } from "./ChannelSelector";
+import { SingleChannelPicker } from "./ui/SingleChannelPicker";
 import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { colors, fontSize, radius, space } from "../styles/tokens";
@@ -12,7 +12,7 @@ import { colors, fontSize, radius, space } from "../styles/tokens";
 //
 // モーダルではなくページ内インライン form として描画する（呼び出し側で
 // showCreate state で出し分け）。workspace は api.workspaces.list() から取得し、
-// 1件のみなら自動選択。channel は ChannelSelector を再利用。
+// 1件のみなら自動選択。channel は SingleChannelPicker（検索 + ページング）で選ぶ。
 
 type Props = {
   eventId: string;
@@ -114,14 +114,15 @@ export function CreateMeetingForm({ eventId, onCancel, onCreated }: Props) {
         )}
       </label>
 
-      <label style={fieldStyle}>
+      <div style={fieldStyle}>
         <span style={labelStyle}>チャンネル</span>
-        <ChannelSelector
+        <SingleChannelPicker
           value={channelId}
-          workspaceId={workspaceId || undefined}
+          workspaceId={workspaceId}
           onChange={(id) => setChannelId(id)}
+          disabled={submitting}
         />
-      </label>
+      </div>
 
       <div style={{ display: "flex", gap: space.sm, marginTop: space.sm }}>
         <Button variant="primary" onClick={handleSubmit} isLoading={submitting}>

@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../../api";
 import type { MeetingDetail, Workspace } from "../../types";
-import {
-  ChannelPicker,
-  type SlackChannelLike,
-} from "../ui/ChannelPicker";
+import { SingleChannelPicker } from "../ui/SingleChannelPicker";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { colors, fontSize, radius, space } from "../../styles/tokens";
@@ -15,9 +12,9 @@ import { colors, fontSize, radius, space } from "../../styles/tokens";
 // channel 変更は api.updateMeeting({ channelId }) で永続化する。
 //
 // PR レビュー一覧 / task_management と同じ「workspace + 検索 + ページング」UI に
-// 揃えるため、編集モードでは ChannelPicker を再利用する。単一 channel しか持たない
-// ので、現在の channel ID を registeredChannelIds に渡して候補から除外し、
-// 別の channel を 1 つ選ぶと自動で updateMeeting が走る フローにしている。
+// 揃えるため、編集モードでは SingleChannelPicker (内部で ChannelPicker をラップ) を
+// 使う。workspace dropdown は親側で表示し、SingleChannelPicker は単一 workspace 配下
+// の channel 検索 + 選択に専念する。channel 選択時に自動的に updateMeeting が走る。
 
 type Props = { meetingId: string; onChanged?: () => void };
 
@@ -29,7 +26,7 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
   const [editing, setEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // ChannelPicker 用の workspace 選択
+  // 編集時の workspace 選択（親が SingleChannelPicker に workspaceId を渡す）
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
 
   useEffect(() => {
@@ -70,29 +67,21 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
     setSelectedWorkspaceId(meeting.workspaceId ?? workspaces[0]?.id ?? "");
   }, [editing, meeting, workspaces]);
 
-  // 現在 channel を候補から除外するため Set として渡す。
-  // workspace を切り替えた場合は除外不要なので空 Set にする。
-  const registeredIdSet = useMemo(() => {
-    if (!meeting) return new Set<string>();
-    if (selectedWorkspaceId && meeting.workspaceId && selectedWorkspaceId !== meeting.workspaceId) {
-      return new Set<string>();
-    }
-    return new Set<string>([meeting.channelId]);
-  }, [meeting, selectedWorkspaceId]);
+  // 編集中、SingleChannelPicker に渡す「現在の選択 (除外したい channel)」。
+  // workspace を別に切り替えた場合は元 channel ID は別 WS なので無効。
+  const currentChannelForPicker =
+    selectedWorkspaceId && meeting?.workspaceId === selectedWorkspaceId
+      ? meeting.channelId
+      : "";
 
-  const fetchChannelsForPicker = (workspaceId: string) =>
-    api.getSlackChannels(workspaceId).then((list) =>
-      Array.isArray(list) ? list : [],
-    );
-
-  const handleAdd = async (channel: SlackChannelLike) => {
+  const handleChange = async (channelId: string, channelNameSel: string) => {
     if (submitting) return;
     setSubmitting(true);
     try {
-      await api.updateMeeting(meetingId, { channelId: channel.id });
+      await api.updateMeeting(meetingId, { channelId });
       const updated = await api.getMeeting(meetingId);
       setMeeting(updated);
-      toast.success(`チャンネルを #${channel.name} に変更しました`);
+      toast.success(`チャンネルを #${channelNameSel} に変更しました`);
       setEditing(false);
       onChanged?.();
     } catch (e) {
@@ -139,13 +128,46 @@ export function ScheduleChannelTab({ meetingId, onChanged }: Props) {
         現在のチャンネル: <code>#{channelName || meeting.channelId}</code>
       </p>
 
-      <ChannelPicker
-        workspaces={workspaces}
-        selectedWorkspaceId={selectedWorkspaceId}
-        onWorkspaceChange={setSelectedWorkspaceId}
-        fetchChannels={fetchChannelsForPicker}
-        registeredChannelIds={registeredIdSet}
-        onAdd={handleAdd}
+      {workspaces.length > 0 && (
+        <div style={{ marginBottom: space.sm }}>
+          <label
+            style={{
+              display: "block",
+              fontSize: fontSize.sm,
+              color: colors.textSecondary,
+              marginBottom: space.xs,
+            }}
+          >
+            ワークスペース
+          </label>
+          <select
+            value={selectedWorkspaceId}
+            onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+            disabled={submitting}
+            style={{
+              padding: "0.4rem 0.6rem",
+              border: `1px solid ${colors.borderStrong}`,
+              borderRadius: radius.sm,
+              fontSize: fontSize.sm,
+              minWidth: "200px",
+            }}
+          >
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <SingleChannelPicker
+        value={currentChannelForPicker}
+        channelName={
+          currentChannelForPicker ? channelName || currentChannelForPicker : ""
+        }
+        workspaceId={selectedWorkspaceId}
+        onChange={handleChange}
         disabled={submitting}
       />
 
