@@ -60,6 +60,12 @@ export type ChannelPickerProps = {
   channelNameAsButton?: boolean;
   /** 候補リストの上に表示する追加コンテンツ (任意) */
   headerExtra?: ReactNode;
+  /**
+   * workspace ドロップダウンを非表示にするか。
+   * 親が外側で workspace を選択済みの場合 (SingleChannelPicker 等) に使う。
+   * workspaces は単一要素を渡しつつドロップダウンだけ隠す用途。
+   */
+  hideWorkspaceSelector?: boolean;
 };
 
 export function ChannelPicker({
@@ -73,6 +79,7 @@ export function ChannelPicker({
   pageSize = 20,
   channelNameAsButton = false,
   headerExtra,
+  hideWorkspaceSelector = false,
 }: ChannelPickerProps) {
   const [availableChannels, setAvailableChannels] = useState<SlackChannelLike[]>(
     [],
@@ -150,18 +157,20 @@ export function ChannelPicker({
   return (
     <>
       <div style={controlsRowStyle}>
-        <select
-          value={selectedWorkspaceId}
-          onChange={(e) => onWorkspaceChange(e.target.value)}
-          style={{ ...fieldStyle, minWidth: "180px", flex: "0 0 auto" }}
-          disabled={disabled}
-        >
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
+        {!hideWorkspaceSelector && (
+          <select
+            value={selectedWorkspaceId}
+            onChange={(e) => onWorkspaceChange(e.target.value)}
+            style={{ ...fieldStyle, minWidth: "180px", flex: "0 0 auto" }}
+            disabled={disabled}
+          >
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="text"
           value={search}
