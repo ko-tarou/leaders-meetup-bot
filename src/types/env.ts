@@ -25,4 +25,14 @@ export type Env = {
   // Wrangler secrets で管理（kota が手動で設定: `npx wrangler secret put ADMIN_TOKEN`）
   // 未設定の場合、保護対象 API は 500 を返す。
   ADMIN_TOKEN: string;
+
+  // Sprint 26: Google OAuth (Gmail API) credentials。
+  // GCP Console で作成した OAuth 2.0 client の値を `wrangler secret put` で設定する。
+  // 未設定の場合、Gmail OAuth install endpoint は 500 を返す (fail closed)。
+  //
+  // Authorized redirect URI (GCP Console 側に登録必須):
+  //   https://leaders-meetup-bot.akokoa1221.workers.dev/api/google-oauth/callback
+  //   http://localhost:8787/api/google-oauth/callback   # ローカル開発時
+  GOOGLE_CLIENT_ID: string;
+  GOOGLE_CLIENT_SECRET: string;
 };
