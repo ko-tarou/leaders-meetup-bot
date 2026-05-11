@@ -5,7 +5,7 @@ import type { EventAction, SlackUser, Workspace } from "../../types";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useIsReadOnly } from "../../hooks/usePublicMode";
-import { ChannelSelector } from "../ChannelSelector";
+import { SingleChannelPicker } from "../ui/SingleChannelPicker";
 import { colors } from "../../styles/tokens";
 
 // member_application: 応募時の Slack 通知タブ。
@@ -235,10 +235,11 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
           {workspaceId && (
             <div style={styles.section}>
               <label style={styles.label}>通知先チャンネル</label>
-              <ChannelSelector
+              <SingleChannelPicker
                 value={channelId}
                 workspaceId={workspaceId}
                 onChange={(id) => setChannelId(id)}
+                disabled={isReadOnly}
               />
             </div>
           )}
