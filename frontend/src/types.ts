@@ -324,6 +324,21 @@ export type GmailAccount = {
   updatedAt: string;
 };
 
+// 005-gmail-watcher: gmail_accounts.watcher_config に保存される 1 件分の監視設定。
+// 1 gmail_account = 1 watcher のシンプル構成。
+// keywords は OR match (subject/snippet に 1 つでも含まれれば通知)。
+// 空配列なら「全件通知」扱い。
+// messageTemplate 未設定 / 空文字なら BE のデフォルト文面が使われる。
+export type GmailWatcherConfig = {
+  enabled: boolean;
+  keywords: string[];
+  workspaceId: string;
+  channelId: string;
+  channelName?: string;
+  mentionUserIds: string[];
+  messageTemplate?: string;
+};
+
 // Sprint 26: 応募成功時の Gmail 自動送信設定。
 // event_actions.config.autoSendEmail に保存される。
 export type AutoSendEmailConfig = {

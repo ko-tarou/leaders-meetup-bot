@@ -10,6 +10,7 @@ import type {
   EventAction,
   EventActionType,
   GmailAccount,
+  GmailWatcherConfig,
   HowFound,
   InterviewerEntry,
   InterviewerSummary,
@@ -850,6 +851,15 @@ export const api = {
     install: () =>
       request<{ authUrl: string }>(`/google-oauth/install`, {
         method: "POST",
+      }),
+    // 005-gmail-watcher: メール監視設定。1 gmail_account = 1 watcher。
+    // 未設定 (= まだ一度も保存していない) のときは null が返る。
+    getWatcher: (id: string) =>
+      request<GmailWatcherConfig | null>(`/gmail-accounts/${id}/watcher`),
+    setWatcher: (id: string, config: GmailWatcherConfig) =>
+      request<{ ok: boolean }>(`/gmail-accounts/${id}/watcher`, {
+        method: "PUT",
+        body: JSON.stringify(config),
       }),
   },
 };
