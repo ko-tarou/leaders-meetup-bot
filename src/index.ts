@@ -7,6 +7,7 @@ import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
 import { processAttendanceCheck } from "./services/attendance-check";
+import { processGmailWatchers } from "./services/gmail-watcher";
 import { SlackClient } from "./services/slack-api";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -40,6 +41,7 @@ export default {
       "autoCycles",
       "weeklyReminders",
       "attendanceCheck",
+      "gmailWatchers",
     ];
     ctx.waitUntil(
       Promise.allSettled([
@@ -47,6 +49,9 @@ export default {
         processAutoCycles(env.DB, client),
         processWeeklyReminders(env.DB, client),
         processAttendanceCheck(env.DB, client),
+        // 005-gmail-watcher: 連携済 Gmail を polling し、キーワード一致時 Slack 通知。
+        // workspaceId ごとに動的に SlackClient を取得するため、上記 4 つと違い env を受け取る。
+        processGmailWatchers(env),
       ]).then((results) => {
         results.forEach((r, i) => {
           if (r.status === "rejected") {
