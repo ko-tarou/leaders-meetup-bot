@@ -755,14 +755,6 @@ export const api = {
         body: JSON.stringify(body ?? {}),
       }),
 
-    // 005-user-oauth: bot を全 channel に一括招待 (admin user の user token を使用)。
-    // user_access_token が無い workspace は { error: 'user_oauth_required' } で
-    // 400 が返るため、呼び出し側で APIError をハンドリングして再認証ガイドを出す。
-    bulkInviteBot: (eventId: string, actionId: string) =>
-      request<BotBulkInviteResult>(
-        `/orgs/${eventId}/actions/${actionId}/bot-bulk-invite`,
-        { method: "POST" },
-      ),
   },
 
   // 公開管理 (public-management): action 単位で公開 URL を発行する。
@@ -824,5 +816,13 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/workspaces/${id}`, { method: "DELETE" }),
+    // 005-user-oauth: bot を全 channel に一括招待 (admin user の user token を使用)。
+    // user_access_token が無い workspace は { error: 'user_oauth_required' } で
+    // 400 が返るため、呼び出し側で APIError をハンドリングして再認証ガイドを出す。
+    bulkInviteBot: (workspaceId: string) =>
+      request<BotBulkInviteResult>(
+        `/workspaces/${workspaceId}/bot-bulk-invite`,
+        { method: "POST" },
+      ),
   },
 };
