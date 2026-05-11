@@ -9,8 +9,13 @@
 // 検知しない。ログイン直後の reload など、必要に応じて呼び出し側で対応する。
 
 const PUBLIC_MODE_KEY = "devhub_ops:public_mode";
+const PUBLIC_GRANTED_KEY = "devhub_ops:public_granted";
 
 export type PublicMode = "view" | "edit";
+
+// 公開モードでアクセス可能な action を表す。
+// PublicEntryPage の認証成功時に保存され、route ガードで使用する。
+export type PublicGranted = { eventId: string; actionType: string };
 
 export function getPublicMode(): PublicMode | null {
   try {
@@ -37,10 +42,44 @@ export function clearPublicMode(): void {
   }
 }
 
+export function getPublicGranted(): PublicGranted | null {
+  try {
+    const raw = localStorage.getItem(PUBLIC_GRANTED_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<PublicGranted>;
+    if (typeof p.eventId === "string" && typeof p.actionType === "string") {
+      return { eventId: p.eventId, actionType: p.actionType };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setPublicGranted(granted: PublicGranted): void {
+  try {
+    localStorage.setItem(PUBLIC_GRANTED_KEY, JSON.stringify(granted));
+  } catch {
+    // noop
+  }
+}
+
+export function clearPublicGranted(): void {
+  try {
+    localStorage.removeItem(PUBLIC_GRANTED_KEY);
+  } catch {
+    // noop
+  }
+}
+
 export function usePublicMode(): PublicMode | null {
   return getPublicMode();
 }
 
 export function useIsReadOnly(): boolean {
   return getPublicMode() === "view";
+}
+
+export function usePublicGranted(): PublicGranted | null {
+  return getPublicGranted();
 }
