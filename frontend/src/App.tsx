@@ -244,7 +244,7 @@ function PublicLogoutButton() {
     <button
       type="button"
       onClick={handleLogout}
-      style={logoutButtonStyle}
+      style={{ ...workspacesLinkStyle, cursor: "pointer" }}
     >
       ログアウト
     </button>
@@ -296,15 +296,4 @@ const badgeStyle: React.CSSProperties = {
   border: `1px solid ${colors.borderStrong}`,
   color: colors.textSecondary,
   whiteSpace: "nowrap",
-};
-
-const logoutButtonStyle: React.CSSProperties = {
-  color: colors.primary,
-  fontSize: 13,
-  padding: "6px 10px",
-  border: `1px solid ${colors.borderStrong}`,
-  borderRadius: 4,
-  background: colors.background,
-  whiteSpace: "nowrap",
-  cursor: "pointer",
 };

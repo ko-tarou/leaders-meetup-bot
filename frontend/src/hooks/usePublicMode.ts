@@ -46,14 +46,9 @@ export function getPublicGranted(): PublicGranted | null {
   try {
     const raw = localStorage.getItem(PUBLIC_GRANTED_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      typeof (parsed as PublicGranted).eventId === "string" &&
-      typeof (parsed as PublicGranted).actionType === "string"
-    ) {
-      return parsed as PublicGranted;
+    const p = JSON.parse(raw) as Partial<PublicGranted>;
+    if (typeof p.eventId === "string" && typeof p.actionType === "string") {
+      return { eventId: p.eventId, actionType: p.actionType };
     }
     return null;
   } catch {
