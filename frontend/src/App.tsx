@@ -1,9 +1,15 @@
-import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { clearAdminToken } from "./api";
 import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
 import { EventSwitcher } from "./components/EventSwitcher";
 import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import { ToastProvider } from "./components/ui/Toast";
 import { EventProvider, useEvents } from "./contexts/EventContext";
+import {
+  clearPublicGranted,
+  clearPublicMode,
+  usePublicMode,
+} from "./hooks/usePublicMode";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
@@ -71,6 +77,8 @@ export function App() {
 // useEvents は EventProvider 配下でしか使えないので、子コンポーネントとして分離。
 function AppShell() {
   const { tokenInvalid, fetchError } = useEvents();
+  const publicMode = usePublicMode();
+  const isPublic = publicMode !== null;
   if (tokenInvalid) {
     return <AdminTokenPrompt message={fetchError ?? undefined} />;
   }
@@ -99,9 +107,20 @@ function AppShell() {
             flexWrap: "wrap",
           }}
         >
-          <Link to="/" style={titleLinkStyle}>
-            <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
-          </Link>
+          {isPublic ? (
+            // 公開モード時はタイトルをただのテキストにし、
+            // EventSwitcher / Workspace管理 / 公開管理 などの navigation を隠す。
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
+              <span style={badgeStyle}>
+                {publicMode === "view" ? "閲覧モード" : "編集モード"}
+              </span>
+            </div>
+          ) : (
+            <Link to="/" style={titleLinkStyle}>
+              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
+            </Link>
+          )}
           <div
             style={{
               display: "flex",
@@ -110,13 +129,19 @@ function AppShell() {
               flexWrap: "wrap",
             }}
           >
-            <EventSwitcher />
-            <Link to="/workspaces" style={workspacesLinkStyle}>
-              Workspace管理
-            </Link>
-            <Link to="/public-management" style={workspacesLinkStyle}>
-              公開管理
-            </Link>
+            {isPublic ? (
+              <PublicLogoutButton />
+            ) : (
+              <>
+                <EventSwitcher />
+                <Link to="/workspaces" style={workspacesLinkStyle}>
+                  Workspace管理
+                </Link>
+                <Link to="/public-management" style={workspacesLinkStyle}>
+                  公開管理
+                </Link>
+              </>
+            )}
           </div>
         </div>
         <BackLink />
@@ -141,6 +166,31 @@ function AppShell() {
         <Route path="/public-management" element={<PublicManagementPage />} />
       </Routes>
     </div>
+  );
+}
+
+// 公開モードからのログアウトボタン。
+// localStorage の public_mode / public_granted / admin_token をクリアして
+// /public ログインページや本来の参照元に戻れる状態にする。
+function PublicLogoutButton() {
+  const navigate = useNavigate();
+  const handleLogout = () => {
+    clearPublicMode();
+    clearPublicGranted();
+    clearAdminToken();
+    // ログアウト後はトップへ。token が無いので AdminTokenPrompt が出る。
+    navigate("/", { replace: true });
+    // localStorage の状態を確実に反映させるため reload する。
+    window.location.reload();
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleLogout}
+      style={logoutButtonStyle}
+    >
+      ログアウト
+    </button>
   );
 }
 
@@ -179,4 +229,25 @@ const workspacesLinkStyle: React.CSSProperties = {
   borderRadius: 4,
   background: colors.background,
   whiteSpace: "nowrap",
+};
+
+const badgeStyle: React.CSSProperties = {
+  fontSize: 12,
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: colors.surface,
+  border: `1px solid ${colors.borderStrong}`,
+  color: colors.textSecondary,
+  whiteSpace: "nowrap",
+};
+
+const logoutButtonStyle: React.CSSProperties = {
+  color: colors.primary,
+  fontSize: 13,
+  padding: "6px 10px",
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: 4,
+  background: colors.background,
+  whiteSpace: "nowrap",
+  cursor: "pointer",
 };
