@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { setAdminToken } from "../api";
-import { setPublicMode } from "../hooks/usePublicMode";
+import { setPublicGranted, setPublicMode } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
 // 公開管理 (public-management): /public/:token のパスワード入力ページ。
@@ -67,6 +67,12 @@ export function PublicEntryPage() {
           }>;
           const matched = actions.find((a) => a.id === data.actionId);
           if (matched) {
+            // 公開モードで許可された action を localStorage に保存し、
+            // App.tsx の route ガードで他 action / event への遷移を防ぐ。
+            setPublicGranted({
+              eventId: data.eventId,
+              actionType: matched.actionType,
+            });
             navigate(
               `/events/${data.eventId}/actions/${matched.actionType}`,
               { replace: true },
