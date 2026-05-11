@@ -819,10 +819,19 @@ export const api = {
     // 005-user-oauth: bot を全 channel に一括招待 (admin user の user token を使用)。
     // user_access_token が無い workspace は { error: 'user_oauth_required' } で
     // 400 が返るため、呼び出し側で APIError をハンドリングして再認証ガイドを出す。
-    bulkInviteBot: (workspaceId: string) =>
-      request<BotBulkInviteResult>(
-        `/workspaces/${workspaceId}/bot-bulk-invite`,
+    //
+    // hotfix: Cloudflare Workers の subrequest 上限 (free=50/req) のため
+    // 1 呼び出しで処理できる channel 数に上限がある。`offset` を渡せばその
+    // 位置から再開する。`nextOffset` が null になるまで呼び出し側でループする。
+    bulkInviteBot: (workspaceId: string, opts?: { offset?: number }) => {
+      const qs =
+        opts?.offset !== undefined && opts.offset > 0
+          ? `?offset=${opts.offset}`
+          : "";
+      return request<BotBulkInviteResult>(
+        `/workspaces/${workspaceId}/bot-bulk-invite${qs}`,
         { method: "POST" },
-      ),
+      );
+    },
   },
 };

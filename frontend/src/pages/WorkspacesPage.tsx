@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { Workspace } from "../types";
+import type { BotBulkInviteResult, Workspace } from "../types";
 import { api, APIError } from "../api";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
@@ -74,14 +74,38 @@ export function WorkspacesPage() {
     if (!ok) return;
     setBulkInviteLoading(ws.id);
     try {
-      const res = await api.workspaces.bulkInviteBot(ws.id);
-      if (res.failed === 0) {
+      // Cloudflare Workers の subrequest 上限のため、backend は 1 invocation
+      // あたり最大 batchSize 件しか invite を実行しない。nextOffset を辿って
+      // 全 channel を処理するまで loop する。
+      // 進捗を toast で逐次更新できると親切だが、まずは単純集計で出す。
+      let offset = 0;
+      let totalChannels = 0;
+      let invited = 0;
+      let alreadyMember = 0;
+      let failed = 0;
+      const errors: BotBulkInviteResult["errors"] = [];
+      // safety guard: 想定外の無限ループ防止。
+      // 4000 channel / 35 batch ≒ 115 iterations が現実的上限。
+      const MAX_ITERATIONS = 200;
+      let iter = 0;
+      while (iter < MAX_ITERATIONS) {
+        const res = await api.workspaces.bulkInviteBot(ws.id, { offset });
+        totalChannels = res.totalChannels;
+        invited += res.invited;
+        alreadyMember += res.alreadyMember;
+        failed += res.failed;
+        errors.push(...res.errors);
+        if (res.nextOffset === null) break;
+        offset = res.nextOffset;
+        iter++;
+      }
+      if (failed === 0) {
         toast.success(
-          `招待完了: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 合計 ${res.totalChannels}`,
+          `招待完了: 新規 ${invited} / 既存 ${alreadyMember} / 合計 ${totalChannels}`,
         );
       } else {
         toast.warning(
-          `一部失敗: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 失敗 ${res.failed}`,
+          `一部失敗: 新規 ${invited} / 既存 ${alreadyMember} / 失敗 ${failed}`,
         );
       }
     } catch (e) {
