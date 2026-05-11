@@ -11,13 +11,14 @@ import { colors } from "../../styles/tokens";
 // member_application: 応募時の Slack 通知タブ。
 //
 // action.config.notifications に
-//   { enabled, workspaceId, channelId, channelName, mentionUserIds }
+//   { enabled, workspaceId, channelId, channelName, mentionUserIds,
+//     messageTemplate }
 // を保存する。応募作成 (POST /apply/:eventId) 成功時に BE から指定チャンネルへ
 // メッセージを post する。通知失敗は応募 API を失敗させない (fail-soft)。
 //
 // UI 構成 (リファクタ後):
 //   1. 「☑ 有効化」: toggle 即保存
-//   2. チャンネル / メンションは Display モード (#channelName / "田中 太郎, ...")
+//   2. チャンネル / メンション / 通知文は Display モード
 //      + 「編集」ボタンでセクションごとに展開する Edit モード
 //
 // channelName は既存データでは無い場合があるため、表示時は `channelName || channelId`
@@ -29,7 +30,53 @@ type NotificationsConfig = {
   channelId: string;
   channelName: string;
   mentionUserIds: string[];
+  // 通知文テンプレ。空文字 / 未設定なら BE 側で DEFAULT_TEMPLATE を使う。
+  messageTemplate: string;
 };
+
+// BE: src/services/application-notification.ts:DEFAULT_TEMPLATE と同期。
+// 空文字 / 未設定保存時はこの文面で通知が送られる。
+const DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
+名前: {name}
+メール: {email}
+応募日時: {appliedAt} (JST)`;
+
+// プレビュー用サンプルデータ。BE の placeholder 仕様と一対一対応。
+const SAMPLE_VARS: Record<string, string> = {
+  mentions: "<@U1>",
+  name: "鈴木 太郎",
+  email: "suzuki@example.com",
+  appliedAt: "2026/05/11 14:30",
+  studentId: "1EP1-1",
+  howFound: "joint_briefing",
+  interviewLocation: "online",
+  interviewAt: "2026/05/15 10:00",
+};
+
+// 表示用に並べる placeholder の一覧 (キー + 説明)。
+const PLACEHOLDERS: { key: string; desc: string }[] = [
+  { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+  { key: "name", desc: "応募者名" },
+  { key: "email", desc: "メール" },
+  { key: "appliedAt", desc: "応募日時 (JST)" },
+  { key: "studentId", desc: "学生証番号" },
+  { key: "howFound", desc: "どこで知ったか" },
+  { key: "interviewLocation", desc: "面接場所" },
+  { key: "interviewAt", desc: "希望面接日時 (JST)" },
+];
+
+/**
+ * `{key}` を vars[key] で置換。未定義 key は元の `{key}` を残す。
+ * BE: src/services/application-notification.ts:renderTemplate と同等。
+ */
+function renderTemplate(
+  template: string,
+  vars: Record<string, string>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (m, key: string) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : m,
+  );
+}
 
 type Props = {
   eventId: string;
@@ -51,6 +98,8 @@ function readInitialConfig(action: EventAction): NotificationsConfig {
       mentionUserIds: Array.isArray(n.mentionUserIds)
         ? (n.mentionUserIds.filter((u) => typeof u === "string") as string[])
         : [],
+      messageTemplate:
+        typeof n.messageTemplate === "string" ? n.messageTemplate : "",
     };
   } catch {
     return {
@@ -59,6 +108,7 @@ function readInitialConfig(action: EventAction): NotificationsConfig {
       channelId: "",
       channelName: "",
       mentionUserIds: [],
+      messageTemplate: "",
     };
   }
 }
@@ -76,10 +126,14 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const [mentionUserIds, setMentionUserIds] = useState<string[]>(
     initial.mentionUserIds,
   );
+  const [messageTemplate, setMessageTemplate] = useState<string>(
+    initial.messageTemplate,
+  );
 
   // 編集モードフラグ (セクション独立)
   const [editingChannel, setEditingChannel] = useState<boolean>(false);
   const [editingMentions, setEditingMentions] = useState<boolean>(false);
+  const [editingTemplate, setEditingTemplate] = useState<boolean>(false);
 
   // チャンネル編集 draft
   const [draftWorkspaceId, setDraftWorkspaceId] = useState<string>(workspaceId);
@@ -89,6 +143,10 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   // メンション編集 draft
   const [draftMentionUserIds, setDraftMentionUserIds] =
     useState<string[]>(mentionUserIds);
+
+  // 通知文編集 draft (空文字 = デフォルト扱い)
+  const [draftMessageTemplate, setDraftMessageTemplate] =
+    useState<string>(messageTemplate);
 
   // 共通: workspace / members fetch (display と edit 両方で使う)
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
@@ -218,6 +276,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
       channelId,
       channelName,
       mentionUserIds,
+      messageTemplate,
     };
     const merged: NotificationsConfig = { ...current, ...patch };
     const newConfig = { ...baseConfig, notifications: merged };
@@ -231,6 +290,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
       setChannelId(merged.channelId);
       setChannelName(merged.channelName);
       setMentionUserIds(merged.mentionUserIds);
+      setMessageTemplate(merged.messageTemplate);
       onSaved?.();
       return merged;
     } catch (e) {
@@ -299,6 +359,43 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
       setEditingMentions(false);
     }
   };
+
+  // 通知文編集
+  const startEditTemplate = () => {
+    // 現在保存値が空ならテキストエリアに DEFAULT_TEMPLATE を出して編集しやすく。
+    setDraftMessageTemplate(messageTemplate || DEFAULT_TEMPLATE);
+    setEditingTemplate(true);
+  };
+
+  const saveTemplate = async () => {
+    // trim 後が DEFAULT_TEMPLATE と完全一致 or 空なら、空文字を保存して
+    // 「デフォルト扱い」に戻す (BE 側は空文字 → DEFAULT_TEMPLATE)。
+    const trimmed = draftMessageTemplate.trim();
+    const next =
+      trimmed === "" || trimmed === DEFAULT_TEMPLATE.trim()
+        ? ""
+        : draftMessageTemplate;
+    const result = await saveNotifications({ messageTemplate: next });
+    if (result) {
+      toast.success("通知文を保存しました");
+      setEditingTemplate(false);
+    }
+  };
+
+  const resetTemplateToDefault = () => {
+    setDraftMessageTemplate(DEFAULT_TEMPLATE);
+  };
+
+  // 通知文 display 用 (空ならデフォルトを表示)。
+  const displayTemplate = messageTemplate || DEFAULT_TEMPLATE;
+  const isDefaultTemplate = !messageTemplate;
+
+  // 編集中のリアルタイムプレビュー (textarea 下に常時表示)。
+  // {mentions} を空にすると先頭にスペース余りが出るため、render 結果は trim する。
+  const previewText = useMemo(
+    () => renderTemplate(draftMessageTemplate, SAMPLE_VARS).trim(),
+    [draftMessageTemplate],
+  );
 
   // メンション display 用名前
   const mentionNames = useMemo(
@@ -523,6 +620,84 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
             )}
           </div>
 
+          {/* === 通知文 === */}
+          <div style={styles.section}>
+            {!editingTemplate ? (
+              <div style={styles.summaryRow}>
+                <div style={styles.summaryBody}>
+                  <div style={styles.summaryLabel}>
+                    通知文{isDefaultTemplate ? " (デフォルト)" : ""}
+                  </div>
+                  <pre style={styles.templatePreview}>{displayTemplate}</pre>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={startEditTemplate}
+                  disabled={isReadOnly || saving}
+                >
+                  編集
+                </Button>
+              </div>
+            ) : (
+              <div style={styles.editBox}>
+                <div style={styles.editTitle}>通知文</div>
+
+                <div style={styles.editField}>
+                  <label style={styles.label}>テンプレート</label>
+                  <textarea
+                    value={draftMessageTemplate}
+                    onChange={(e) => setDraftMessageTemplate(e.target.value)}
+                    rows={6}
+                    disabled={isReadOnly || saving}
+                    style={styles.textarea}
+                    placeholder={DEFAULT_TEMPLATE}
+                  />
+                </div>
+
+                <div style={styles.editField}>
+                  <label style={styles.label}>使用可能なプレースホルダー</label>
+                  <div style={styles.placeholderList}>
+                    {PLACEHOLDERS.map((p) => (
+                      <div key={p.key} style={styles.placeholderRow}>
+                        <code style={styles.placeholderKey}>{`{${p.key}}`}</code>
+                        <span style={styles.placeholderDesc}>{p.desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={styles.editField}>
+                  <label style={styles.label}>プレビュー</label>
+                  <pre style={styles.templatePreview}>{previewText}</pre>
+                </div>
+
+                <div style={styles.editActions}>
+                  <Button
+                    variant="primary"
+                    onClick={() => void saveTemplate()}
+                    disabled={saving || isReadOnly}
+                  >
+                    {saving ? "保存中..." : "保存"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setEditingTemplate(false)}
+                    disabled={saving}
+                  >
+                    キャンセル
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={resetTemplateToDefault}
+                    disabled={saving || isReadOnly}
+                  >
+                    デフォルトに戻す
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {workspaceId && workspaceName && (
             <div style={styles.metaSmall}>
               ワークスペース: {workspaceName}
@@ -649,5 +824,54 @@ const styles: Record<string, CSSProperties> = {
     border: `1px solid ${colors.warning}`,
     borderRadius: 4,
     fontSize: "0.875rem",
+  },
+  textarea: {
+    padding: "8px 12px",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: 4,
+    fontSize: "0.875rem",
+    width: "100%",
+    maxWidth: "500px",
+    boxSizing: "border-box",
+    background: colors.background,
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    resize: "vertical",
+    lineHeight: 1.5,
+  },
+  templatePreview: {
+    margin: 0,
+    padding: "0.5rem 0.75rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.surface,
+    fontSize: "0.8125rem",
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    maxWidth: "500px",
+  },
+  placeholderList: {
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    columnGap: "0.5rem",
+    rowGap: "0.125rem",
+    padding: "0.5rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.surface,
+    fontSize: "0.75rem",
+    maxWidth: "500px",
+  },
+  placeholderRow: {
+    display: "contents",
+  },
+  placeholderKey: {
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  },
+  placeholderDesc: {
+    color: colors.textSecondary,
   },
 };
