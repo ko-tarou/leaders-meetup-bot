@@ -25,8 +25,13 @@ export const gmailAccountsRouter = new Hono<{ Bindings: Env }>();
 
 // userinfo.email は callback で oauth2/v2/userinfo から email を取得するために必須。
 // スペース区切りで複数 scope を指定する (Google OAuth 仕様)。
+//
+// 005-gmail-watcher: gmail.readonly を追加。受信メールを polling して
+// キーワード一致時に Slack 通知する watcher 機能で必要。
+// 既存連携アカウントは scope 不足なので、kota が一度 Gmail 連携を解除して再連携する必要がある。
 const GMAIL_SCOPE = [
   "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 分
@@ -266,6 +271,123 @@ gmailAccountsRouter.delete("/gmail-accounts/:id", async (c) => {
     .get();
   if (!row) return c.json({ error: "Not found" }, 404);
   await db.delete(gmailAccounts).where(eq(gmailAccounts.id, id));
+  return c.json({ ok: true });
+});
+
+// === 005-gmail-watcher: メール監視設定 (1 gmail_account = 1 watcher) ===
+//
+// watcher_config は gmail_accounts.watcher_config に JSON 文字列で保存する。
+// 構造:
+//   {
+//     enabled: boolean,
+//     keywords: string[],        // OR match (subject/snippet どちらか一つでも含めば match)
+//     workspaceId: string,       // 通知先 Slack workspace
+//     channelId: string,         // 通知先 Slack channel
+//     channelName?: string,      // 表示用
+//     mentionUserIds: string[],  // 通知時にメンションする Slack user id
+//     messageTemplate?: string,  // 空 or 未設定なら BE のデフォルトを使う
+//   }
+//
+// シンプルさ優先で 1 watcher のみ。将来複数 watcher が必要になったら sub-table に移行する。
+
+type GmailWatcherConfig = {
+  enabled: boolean;
+  keywords: string[];
+  workspaceId: string;
+  channelId: string;
+  channelName?: string;
+  mentionUserIds: string[];
+  messageTemplate?: string;
+};
+
+function parseWatcherConfig(raw: string | null): GmailWatcherConfig | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<GmailWatcherConfig>;
+    if (!parsed || typeof parsed !== "object") return null;
+    return normalizeWatcherConfig(parsed);
+  } catch {
+    return null;
+  }
+}
+
+// 受け取った値を strict に型整形して返す。不正値はデフォルトに fall back する。
+// keywords / mentionUserIds は空配列まで許容する (= UI で「全件通知」「メンションなし」を表現)。
+function normalizeWatcherConfig(
+  raw: Partial<GmailWatcherConfig>,
+): GmailWatcherConfig {
+  const keywords = Array.isArray(raw.keywords)
+    ? raw.keywords
+        .map((k) => (typeof k === "string" ? k.trim() : ""))
+        .filter((k) => k.length > 0)
+    : [];
+  const mentionUserIds = Array.isArray(raw.mentionUserIds)
+    ? raw.mentionUserIds.filter((u): u is string => typeof u === "string" && u.length > 0)
+    : [];
+  return {
+    enabled: Boolean(raw.enabled),
+    keywords,
+    workspaceId: typeof raw.workspaceId === "string" ? raw.workspaceId : "",
+    channelId: typeof raw.channelId === "string" ? raw.channelId : "",
+    channelName:
+      typeof raw.channelName === "string" ? raw.channelName : undefined,
+    mentionUserIds,
+    messageTemplate:
+      typeof raw.messageTemplate === "string" ? raw.messageTemplate : undefined,
+  };
+}
+
+// === GET /gmail-accounts/:id/watcher === (admin)
+// 設定なし (NULL) のときは null を返す。FE 側で「未設定」と判定する。
+gmailAccountsRouter.get("/gmail-accounts/:id/watcher", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const row = await db
+    .select()
+    .from(gmailAccounts)
+    .where(eq(gmailAccounts.id, id))
+    .get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  const config = parseWatcherConfig(row.watcherConfig);
+  return c.json(config);
+});
+
+// === PUT /gmail-accounts/:id/watcher === (admin)
+// body 全体を 1 つの watcher として上書き保存する。
+// enabled=true なら workspaceId / channelId が必須。enabled=false ならゆるく許容。
+gmailAccountsRouter.put("/gmail-accounts/:id/watcher", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = c.req.param("id");
+  const row = await db
+    .select()
+    .from(gmailAccounts)
+    .where(eq(gmailAccounts.id, id))
+    .get();
+  if (!row) return c.json({ error: "Not found" }, 404);
+
+  let body: Partial<GmailWatcherConfig>;
+  try {
+    body = (await c.req.json()) as Partial<GmailWatcherConfig>;
+  } catch {
+    return c.json({ error: "invalid_json" }, 400);
+  }
+  const config = normalizeWatcherConfig(body);
+  if (config.enabled) {
+    if (!config.workspaceId) {
+      return c.json({ error: "workspaceId_required" }, 400);
+    }
+    if (!config.channelId) {
+      return c.json({ error: "channelId_required" }, 400);
+    }
+  }
+
+  await db
+    .update(gmailAccounts)
+    .set({
+      watcherConfig: JSON.stringify(config),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(gmailAccounts.id, id));
   return c.json({ ok: true });
 });
 
