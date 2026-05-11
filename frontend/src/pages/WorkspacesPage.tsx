@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { BotBulkInviteResult, Workspace } from "../types";
+import type {
+  BotBulkInviteResult,
+  GmailAccount,
+  Workspace,
+} from "../types";
 import { api, APIError } from "../api";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
@@ -27,6 +31,12 @@ export function WorkspacesPage() {
     null,
   );
 
+  // Sprint 26: Gmail OAuth で連携した送信元アカウント一覧。
+  // 自動メール送信のため。delete は revoke せず DB から消すだけなので、
+  // 残された refresh_token は使えるが BE 側で id を引けないので実害なし。
+  const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
+  const [gmailInstallLoading, setGmailInstallLoading] = useState(false);
+
   // OAuth callback redirect (?installed=<team_name>) を検出して成功メッセージを表示
   useEffect(() => {
     const installed = searchParams.get("installed");
@@ -38,6 +48,69 @@ export function WorkspacesPage() {
     const t = setTimeout(() => setSuccessMsg(null), 5000);
     return () => clearTimeout(t);
   }, [searchParams, setSearchParams]);
+
+  // Sprint 26: Gmail OAuth callback (?gmail_connected=1&email=<email>) を検出。
+  // BE が /workspaces?gmail_connected=1&email=... に redirect してくるため、
+  // ここで toast を出して URL をクリーンアップする。
+  useEffect(() => {
+    if (!searchParams.get("gmail_connected")) return;
+    const email = searchParams.get("email") ?? "";
+    toast.success(
+      email ? `Gmail を連携しました: ${email}` : "Gmail を連携しました",
+    );
+    searchParams.delete("gmail_connected");
+    searchParams.delete("email");
+    setSearchParams(searchParams, { replace: true });
+    setRefreshKey((k) => k + 1);
+    // toast は dep に含めない (毎レンダリングで identity が変わるため無限ループ防止)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams]);
+
+  // Gmail 連携一覧を取得 (refreshKey で workspace と同時にリロード)
+  useEffect(() => {
+    let cancelled = false;
+    api.gmailAccounts
+      .list()
+      .then((list) => {
+        if (!cancelled) setGmailAccounts(list);
+      })
+      .catch(() => {
+        // 失敗は表示しない (権限切れ等でも workspace 一覧は出したいため)
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  const handleGmailInstall = async () => {
+    setGmailInstallLoading(true);
+    try {
+      const { authUrl } = await api.gmailAccounts.install();
+      window.location.href = authUrl;
+    } catch (e) {
+      setGmailInstallLoading(false);
+      toast.error(
+        e instanceof Error ? e.message : "Gmail 連携の開始に失敗しました",
+      );
+    }
+  };
+
+  const handleGmailDelete = async (acc: GmailAccount) => {
+    const ok = await confirm({
+      title: "Gmail 連携を解除",
+      message: `${acc.email} の連携を解除しますか？\nこのアカウントを使う自動送信設定は無効になります。`,
+      variant: "danger",
+      confirmLabel: "解除",
+    });
+    if (!ok) return;
+    try {
+      await api.gmailAccounts.delete(acc.id);
+      toast.success("解除しました");
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "解除に失敗しました");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -248,6 +321,98 @@ export function WorkspacesPage() {
           </div>
         </div>
       ))}
+
+      {/* Sprint 26: Gmail 連携 — 応募者への自動メール送信に使う Gmail アカウント */}
+      <section
+        style={{
+          marginTop: "2rem",
+          paddingTop: "1rem",
+          borderTop: `1px solid ${colors.border}`,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            marginBottom: "0.5rem",
+            gap: "0.5rem",
+          }}
+        >
+          <h2 style={{ margin: 0 }}>
+            Gmail 連携 ({gmailAccounts.length}件)
+          </h2>
+          <button
+            onClick={handleGmailInstall}
+            disabled={isReadOnly || gmailInstallLoading}
+            style={{
+              marginLeft: "auto",
+              background: colors.primary,
+              color: colors.textInverse,
+              border: "none",
+              padding: "0.5rem 1rem",
+              borderRadius: "0.375rem",
+              fontWeight: "bold",
+              fontSize: "0.95rem",
+              cursor:
+                isReadOnly || gmailInstallLoading ? "not-allowed" : "pointer",
+            }}
+          >
+            {gmailInstallLoading ? "遷移中..." : "+ Gmail を連携"}
+          </button>
+        </div>
+        <p
+          style={{
+            fontSize: "0.85rem",
+            color: colors.textSecondary,
+            marginTop: 0,
+            marginBottom: "0.75rem",
+          }}
+        >
+          応募者への自動メール送信に使う Gmail アカウントを連携します。連携後、メールタブの「自動送信設定」から有効化してください。
+        </p>
+
+        {gmailAccounts.length === 0 ? (
+          <div style={{ color: colors.textSecondary }}>
+            未連携です。「+ Gmail を連携」から OAuth 認証を行ってください。
+          </div>
+        ) : (
+          gmailAccounts.map((acc) => (
+            <div
+              key={acc.id}
+              style={{
+                border: `1px solid ${colors.border}`,
+                borderRadius: "0.375rem",
+                padding: "0.75rem",
+                marginBottom: "0.5rem",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <strong>{acc.email}</strong>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    color: colors.textSecondary,
+                  }}
+                >
+                  連携日: {new Date(acc.createdAt).toLocaleString("ja-JP")}
+                </div>
+              </div>
+              <button
+                onClick={() => handleGmailDelete(acc)}
+                disabled={isReadOnly}
+                style={{
+                  background: colors.danger,
+                  color: colors.textInverse,
+                }}
+              >
+                解除
+              </button>
+            </div>
+          ))
+        )}
+      </section>
 
       {/* 手動登録は fallback として温存 (ADR-0007) — ページ下部に小さく配置 */}
       <div

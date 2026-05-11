@@ -10,6 +10,7 @@ import {
   interviewerSlots,
 } from "../../db/schema";
 import { sendApplicationNotification } from "../../services/application-notification";
+import { sendApplicationAutoEmail } from "../../services/application-email";
 
 export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
@@ -239,7 +240,7 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
     if (action) {
       // 通知テンプレ placeholder ({studentId} 等) 用に application の追加フィールドを渡す。
       // 未設定フィールドは render 時に空文字へ置換される。
-      await sendApplicationNotification(c.env, action.config, {
+      const applicationLike = {
         name: application.name,
         email: application.email,
         appliedAt: application.appliedAt,
@@ -247,10 +248,22 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
         howFound: application.howFound,
         interviewLocation: application.interviewLocation,
         interviewAt: application.interviewAt,
-      });
+      };
+      await sendApplicationNotification(
+        c.env,
+        action.config,
+        applicationLike,
+      );
+      // Sprint 26: Gmail 自動送信 (応募者宛)。fail-soft で notification と
+      // 独立して呼ぶ (片方が失敗しても他方は実行される)。
+      await sendApplicationAutoEmail(
+        c.env,
+        action.config,
+        applicationLike,
+      );
     }
   } catch (e) {
-    console.error("[applications] notification hook error:", e);
+    console.error("[applications] notification/email hook error:", e);
   }
 
   return c.json({ ok: true, id }, 201);

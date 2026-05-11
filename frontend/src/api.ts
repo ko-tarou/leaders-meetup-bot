@@ -9,6 +9,7 @@ import type {
   Event,
   EventAction,
   EventActionType,
+  GmailAccount,
   HowFound,
   InterviewerEntry,
   InterviewerSummary,
@@ -833,5 +834,22 @@ export const api = {
         { method: "POST" },
       );
     },
+  },
+
+  // Sprint 26: Gmail OAuth で連携した送信元アカウントの管理。
+  // - install は POST で authUrl を取得し、FE が `window.location.href` で
+  //   Google 同意画面へ遷移する。302 redirect ではなく JSON で返す理由は、
+  //   FE が `window.location.href = "/api/google-oauth/install"` で遷移すると
+  //   admin token header を付けられないため。
+  // - 連携後は `/workspaces?gmail_connected=1&email=<email>` に戻ってくる。
+  gmailAccounts: {
+    list: () => request<GmailAccount[]>(`/gmail-accounts`),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/gmail-accounts/${id}`, { method: "DELETE" }),
+    /** Google 同意画面へ遷移するための URL を取得する。 */
+    install: () =>
+      request<{ authUrl: string }>(`/google-oauth/install`, {
+        method: "POST",
+      }),
   },
 };

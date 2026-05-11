@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { EmailTemplate, EventAction } from "../types";
+import type {
+  AutoSendEmailConfig,
+  EmailTemplate,
+  EventAction,
+  GmailAccount,
+} from "../types";
 import { api } from "../api";
 import { colors } from "../styles/tokens";
 
@@ -22,6 +27,7 @@ type Props = {
 const DEFAULT_TEMPLATES: ReadonlyArray<Omit<EmailTemplate, "id">> = [
   {
     name: "面談確定の連絡",
+    subject: "【DevelopersHub】面談日時のご連絡",
     body: `{name} 様
 
 ご応募ありがとうございました。
@@ -36,6 +42,7 @@ const DEFAULT_TEMPLATES: ReadonlyArray<Omit<EmailTemplate, "id">> = [
   },
   {
     name: "合格通知",
+    subject: "【DevelopersHub】合格のご連絡",
     body: `{name} 様
 
 面談ありがとうございました。
@@ -47,6 +54,7 @@ const DEFAULT_TEMPLATES: ReadonlyArray<Omit<EmailTemplate, "id">> = [
   },
   {
     name: "不合格通知",
+    subject: "【DevelopersHub】選考結果のご連絡",
     body: `{name} 様
 
 面談ありがとうございました。
@@ -72,11 +80,41 @@ function parseInitialTemplates(
             typeof (t as EmailTemplate).name === "string" &&
             typeof (t as EmailTemplate).body === "string",
         )
-        .map((t: EmailTemplate) => ({ id: t.id, name: t.name, body: t.body }));
+        .map((t: EmailTemplate) => ({
+          id: t.id,
+          name: t.name,
+          // Sprint 26: subject は optional。古いレコードには無いので undefined のまま残す。
+          subject: typeof t.subject === "string" ? t.subject : undefined,
+          body: t.body,
+        }));
     }
     return [];
   } catch {
     return [];
+  }
+}
+
+// Sprint 26: action.config.autoSendEmail を取り出す。
+// 不正な JSON や欠損は空オブジェクト ({} = 自動送信無効) を返す。
+function parseInitialAutoSend(
+  configRaw: string | null | undefined,
+): AutoSendEmailConfig {
+  try {
+    const cfg = JSON.parse(configRaw || "{}");
+    const raw = (cfg as { autoSendEmail?: AutoSendEmailConfig })
+      .autoSendEmail;
+    if (!raw || typeof raw !== "object") return {};
+    return {
+      enabled: !!raw.enabled,
+      gmailAccountId:
+        typeof raw.gmailAccountId === "string" ? raw.gmailAccountId : undefined,
+      templateId:
+        typeof raw.templateId === "string" ? raw.templateId : undefined,
+      replyToEmail:
+        typeof raw.replyToEmail === "string" ? raw.replyToEmail : undefined,
+    };
+  } catch {
+    return {};
   }
 }
 
@@ -95,9 +133,34 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
   const [templates, setTemplates] = useState<EmailTemplate[]>(() =>
     parseInitialTemplates(action.config),
   );
+  // Sprint 26: 自動送信設定。templates と同じ「保存」ボタンでまとめて永続化する。
+  const [autoSend, setAutoSend] = useState<AutoSendEmailConfig>(() =>
+    parseInitialAutoSend(action.config),
+  );
+  const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
+  const [gmailAccountsLoaded, setGmailAccountsLoaded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.gmailAccounts
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        setGmailAccounts(list);
+        setGmailAccountsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // 失敗しても editor 自体は動かせるよう、エラー表示はしない
+        setGmailAccountsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updateAt = (idx: number, patch: Partial<EmailTemplate>) => {
     setTemplates((prev) =>
@@ -130,7 +193,7 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
   const addEmpty = () => {
     setTemplates((prev) => [
       ...prev,
-      { id: genId(), name: "", body: "" },
+      { id: genId(), name: "", subject: "", body: "" },
     ]);
   };
 
@@ -156,6 +219,24 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
       return;
     }
 
+    // Sprint 26: 自動送信が enabled なら必須項目をチェック
+    if (autoSend.enabled) {
+      if (!autoSend.gmailAccountId) {
+        setError("自動送信が有効ですが、Gmail アカウントが未選択です。");
+        return;
+      }
+      if (!autoSend.templateId) {
+        setError("自動送信が有効ですが、テンプレートが未選択です。");
+        return;
+      }
+      if (!templates.some((t) => t.id === autoSend.templateId)) {
+        setError(
+          "自動送信のテンプレートが存在しません。再選択してから保存してください。",
+        );
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       // 既存 config の他フィールド (leaderAvailableSlots 等) を保持してマージ
@@ -173,6 +254,15 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         cfg = {};
       }
       cfg.emailTemplates = templates;
+      // Sprint 26: 自動送信設定。空文字の replyToEmail は保存時に省く。
+      cfg.autoSendEmail = {
+        enabled: !!autoSend.enabled,
+        gmailAccountId: autoSend.gmailAccountId,
+        templateId: autoSend.templateId,
+        ...(autoSend.replyToEmail && autoSend.replyToEmail.trim()
+          ? { replyToEmail: autoSend.replyToEmail.trim() }
+          : {}),
+      };
       await api.events.actions.update(eventId, action.id, {
         config: JSON.stringify(cfg),
       });
@@ -199,6 +289,98 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         <div style={styles.helpHint}>
           (送信時に応募者の値で置換されます。{"{interviewAt}"} は未設定時に
           [未設定] と表示)
+        </div>
+      </div>
+
+      {/* Sprint 26: 応募成功時の Gmail 自動送信設定 */}
+      <div style={styles.autoSendBox}>
+        <div style={styles.autoSendHeader}>
+          <strong>自動送信設定</strong>
+          <label style={styles.toggleLabel}>
+            <input
+              type="checkbox"
+              checked={!!autoSend.enabled}
+              onChange={(e) =>
+                setAutoSend((prev) => ({ ...prev, enabled: e.target.checked }))
+              }
+              disabled={submitting}
+            />
+            <span>有効化</span>
+          </label>
+        </div>
+        <p style={styles.helpHint}>
+          応募が完了した瞬間に、選択した Gmail から応募者へテンプレを自動送信します。失敗しても応募自体は成功します。
+        </p>
+
+        <div style={styles.autoSendRow}>
+          <label style={styles.autoSendLabel}>Gmail アカウント</label>
+          <select
+            value={autoSend.gmailAccountId ?? ""}
+            onChange={(e) =>
+              setAutoSend((prev) => ({
+                ...prev,
+                gmailAccountId: e.target.value || undefined,
+              }))
+            }
+            disabled={submitting}
+            style={styles.select}
+          >
+            <option value="">
+              {gmailAccountsLoaded
+                ? gmailAccounts.length === 0
+                  ? "（未連携 — ワークスペース管理から連携してください）"
+                  : "（選択してください）"
+                : "読み込み中..."}
+            </option>
+            {gmailAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.email}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.autoSendRow}>
+          <label style={styles.autoSendLabel}>テンプレート</label>
+          <select
+            value={autoSend.templateId ?? ""}
+            onChange={(e) =>
+              setAutoSend((prev) => ({
+                ...prev,
+                templateId: e.target.value || undefined,
+              }))
+            }
+            disabled={submitting || templates.length === 0}
+            style={styles.select}
+          >
+            <option value="">
+              {templates.length === 0
+                ? "（テンプレ未登録）"
+                : "（選択してください）"}
+            </option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name || "(無名テンプレ)"}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={styles.autoSendRow}>
+          <label style={styles.autoSendLabel}>Reply-To (任意)</label>
+          <input
+            type="email"
+            value={autoSend.replyToEmail ?? ""}
+            onChange={(e) =>
+              setAutoSend((prev) => ({
+                ...prev,
+                replyToEmail: e.target.value,
+              }))
+            }
+            placeholder="返信先メールアドレス (空欄なら Gmail アカウントが受信)"
+            disabled={submitting}
+            style={styles.select}
+          />
         </div>
       </div>
 
@@ -256,6 +438,14 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
                   </button>
                 </div>
               </div>
+              <input
+                type="text"
+                value={t.subject ?? ""}
+                onChange={(e) => updateAt(i, { subject: e.target.value })}
+                placeholder="件名（プレースホルダ可、未入力なら『ご応募ありがとうございます』）"
+                style={styles.subjectInput}
+                disabled={submitting}
+              />
               <textarea
                 value={t.body}
                 onChange={(e) => updateAt(i, { body: e.target.value })}
@@ -366,6 +556,55 @@ const styles = {
     border: `1px solid ${colors.borderStrong}`,
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
+  } as CSSProperties,
+  subjectInput: {
+    width: "100%",
+    padding: "0.375rem 0.5rem",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.25rem",
+    fontSize: "0.8125rem",
+    marginBottom: "0.5rem",
+    boxSizing: "border-box",
+  } as CSSProperties,
+  autoSendBox: {
+    background: colors.surface,
+    border: `1px solid ${colors.border}`,
+    borderRadius: "0.375rem",
+    padding: "0.75rem 1rem",
+    marginBottom: "1rem",
+  } as CSSProperties,
+  autoSendHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    marginBottom: "0.25rem",
+  } as CSSProperties,
+  toggleLabel: {
+    marginLeft: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    fontSize: "0.875rem",
+    cursor: "pointer",
+  } as CSSProperties,
+  autoSendRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginTop: "0.5rem",
+  } as CSSProperties,
+  autoSendLabel: {
+    minWidth: "9rem",
+    fontSize: "0.8125rem",
+    color: colors.textSecondary,
+  } as CSSProperties,
+  select: {
+    flex: 1,
+    padding: "0.375rem 0.5rem",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.25rem",
+    fontSize: "0.875rem",
+    background: colors.background,
   } as CSSProperties,
   bodyArea: {
     width: "100%",

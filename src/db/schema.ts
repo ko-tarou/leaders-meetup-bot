@@ -536,6 +536,27 @@ export const slackRoleChannels = sqliteTable(
   ],
 );
 
+// Sprint 26: Gmail OAuth で連携済みの Gmail アカウント。
+// 応募者への自動メール送信 (event_actions.config.autoSendEmail) で参照する。
+// access_token / refresh_token は AES-256-GCM 暗号化 (WORKSPACE_TOKEN_KEY 再利用)。
+// 同じ email で再連携した場合は upsert する (UNIQUE email)。
+export const gmailAccounts = sqliteTable(
+  "gmail_accounts",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    refreshTokenEncrypted: text("refresh_token_encrypted").notNull(),
+    // access_token の失効時刻 (UTC ISO 8601)。past なら refresh する。
+    expiresAt: text("expires_at").notNull(),
+    // OAuth 同意で得られた scope (plain text、空白区切り)
+    scope: text("scope").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("gmail_accounts_email_uniq").on(t.email)],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
