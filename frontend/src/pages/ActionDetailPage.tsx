@@ -12,6 +12,7 @@ import { ChannelManagementSection } from "../components/ChannelManagementSection
 import { EmailTemplatesEditor } from "../components/EmailTemplatesEditor";
 import { InterviewersTab } from "../components/member-application/InterviewersTab";
 import { CalendarTab } from "../components/member-application/CalendarTab";
+import { NotificationsTab } from "../components/member-application/NotificationsTab";
 import { RoleMainTab } from "../components/role-management/RoleMainTab";
 import { RolesTab } from "../components/role-management/RolesTab";
 import { RoleMembersTab } from "../components/role-management/RoleMembersTab";
@@ -68,6 +69,7 @@ function getSubTabs(actionType: EventActionType | undefined): SubTabDef[] {
       { id: "interviewers", label: "面接官" },
       { id: "availability", label: "カレンダー" },
       { id: "email", label: "メール" },
+      { id: "notifications", label: "通知" },
       { id: "settings", label: "その他設定" },
     ];
   }
@@ -359,6 +361,13 @@ export function ActionDetailPage() {
           eventId={eventId}
           action={action}
           onChange={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
+      {subTab === "notifications" && actionType === "member_application" && (
+        <NotificationsTab
+          eventId={eventId}
+          action={action}
+          onSaved={() => setRefreshKey((k) => k + 1)}
         />
       )}
       {subTab === "roles" && actionType === "role_management" && (
