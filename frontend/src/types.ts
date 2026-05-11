@@ -477,4 +477,8 @@ export type BotBulkInviteResult = {
   invited: number;
   failed: number;
   errors: { channelId: string; channelName?: string; error: string }[];
+  // 残りがある場合は次回の offset。null なら全件処理完了。
+  // Cloudflare Workers subrequest 上限の制約で 1 invocation あたり 35 channel
+  // までしか invite しないため、frontend で nextOffset を辿って累積処理する。
+  nextOffset: number | null;
 };
