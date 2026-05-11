@@ -69,6 +69,7 @@ applicationsRouter.get("/apply/:eventId/availability", async (c) => {
   }
 
   // 1) interviewer_slots から集計 (新仕様)
+  //    enabled=1 の interviewer のみ集計対象 (無効な面接官は応募候補から除外)。
   const slotRows = await db
     .select({ slotDatetime: interviewerSlots.slotDatetime })
     .from(interviewerSlots)
@@ -76,7 +77,12 @@ applicationsRouter.get("/apply/:eventId/availability", async (c) => {
       interviewers,
       eq(interviewerSlots.interviewerId, interviewers.id),
     )
-    .where(eq(interviewers.eventActionId, action.id))
+    .where(
+      and(
+        eq(interviewers.eventActionId, action.id),
+        eq(interviewers.enabled, 1),
+      ),
+    )
     .all();
   let slots = Array.from(new Set(slotRows.map((r) => r.slotDatetime)));
 

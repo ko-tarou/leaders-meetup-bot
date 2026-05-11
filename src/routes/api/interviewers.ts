@@ -224,8 +224,8 @@ interviewersRouter.post(
 
 /**
  * GET /orgs/:eventId/actions/:actionId/interviewers
- *   提出済み interviewer 一覧 + slots 件数 + 最終更新日時。
- *   レスポンス: [{ id, name, slotsCount, updatedAt }, ...]
+ *   提出済み interviewer 一覧 + slots 件数 + 最終更新日時 + enabled フラグ。
+ *   レスポンス: [{ id, name, slotsCount, enabled, updatedAt }, ...]
  */
 interviewersRouter.get(
   "/orgs/:eventId/actions/:actionId/interviewers",
@@ -255,12 +255,57 @@ interviewersRouter.get(
           id: r.id,
           name: r.name,
           slotsCount: slots.length,
+          enabled: r.enabled,
           createdAt: r.createdAt,
           updatedAt: r.updatedAt,
         };
       }),
     );
     return c.json(result);
+  },
+);
+
+/**
+ * PATCH /orgs/:eventId/actions/:actionId/interviewers/:interviewerId
+ *   interviewer の enabled フラグ (0 = 無効 / 1 = 有効) を更新する。
+ *   body: { enabled: 0 | 1 }
+ *   レスポンス: { ok: true }
+ *
+ *   無効化された interviewer の slots は /apply/:eventId/availability の集計と
+ *   calendar の slots 集計から除外される (bookings は status 独立で表示)。
+ */
+interviewersRouter.patch(
+  "/orgs/:eventId/actions/:actionId/interviewers/:interviewerId",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionId = c.req.param("actionId");
+    const interviewerId = c.req.param("interviewerId");
+
+    const found = await findMemberApplicationAction(db, eventId, actionId);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    const existing = await db
+      .select()
+      .from(interviewers)
+      .where(eq(interviewers.id, interviewerId))
+      .get();
+    if (!existing) return c.json({ error: "interviewer not found" }, 404);
+    if (existing.eventActionId !== actionId) {
+      return c.json({ error: "actionId mismatch" }, 400);
+    }
+
+    const body = await c.req.json<{ enabled?: unknown }>();
+    if (body.enabled !== 0 && body.enabled !== 1) {
+      return c.json({ error: "enabled must be 0 or 1" }, 400);
+    }
+
+    await db
+      .update(interviewers)
+      .set({ enabled: body.enabled, updatedAt: new Date().toISOString() })
+      .where(eq(interviewers.id, interviewerId));
+
+    return c.json({ ok: true });
   },
 );
 
@@ -376,8 +421,10 @@ interviewersRouter.put(
 /**
  * GET /orgs/:eventId/actions/:actionId/calendar
  *   action のカレンダー集約ビュー。
- *   - slots: interviewer_slots を全件 SELECT し、datetime ごとに contributors を集約。
+ *   - slots: enabled=1 の interviewer の interviewer_slots を datetime ごとに集約。
+ *           無効な面接官の slot は表示しない (応募候補と同じ扱い)。
  *   - bookings: applications で status='scheduled' AND interview_at IS NOT NULL のもの。
+ *              bookings は enabled フラグと独立 (確定済の予約は常に表示)。
  *   レスポンス: {
  *     slots: [{ datetime, contributors: [{ id, name }] }],
  *     bookings: [{ applicantId, applicantName, interviewAt, status }]
@@ -395,11 +442,16 @@ interviewersRouter.get(
     const found = await findMemberApplicationAction(db, eventId, actionId);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
-    // interviewers ごとの slots を読み出し、datetime → contributors に集約
+    // enabled=1 の interviewers のみ slots を集計対象とする (無効は除外)
     const allInterviewers = await db
       .select()
       .from(interviewers)
-      .where(eq(interviewers.eventActionId, actionId))
+      .where(
+        and(
+          eq(interviewers.eventActionId, actionId),
+          eq(interviewers.enabled, 1),
+        ),
+      )
       .all();
 
     const interviewerById = new Map(
