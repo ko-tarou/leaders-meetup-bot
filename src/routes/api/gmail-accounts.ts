@@ -8,7 +8,8 @@
  *   - DELETE /gmail-accounts/:id        (admin) - 連携解除 (DB から削除)
  *
  * state: oauth_states を再利用 (Slack OAuth と同じテーブル)。CSRF 防止。
- * scope: `https://www.googleapis.com/auth/gmail.send`
+ * scope: `https://www.googleapis.com/auth/gmail.send` + `https://www.googleapis.com/auth/userinfo.email`
+ *   - userinfo.email は callback で /oauth2/v2/userinfo から email を取得するために必須。
  *
  * 既存 Slack OAuth と違い、Google は同じ App 内で複数 user に対応するため、
  * `prompt=consent` + `access_type=offline` を強制して refresh_token を必ず取得する。
@@ -22,7 +23,12 @@ import { encryptToken } from "../../services/crypto";
 
 export const gmailAccountsRouter = new Hono<{ Bindings: Env }>();
 
-const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+// userinfo.email は callback で oauth2/v2/userinfo から email を取得するために必須。
+// スペース区切りで複数 scope を指定する (Google OAuth 仕様)。
+const GMAIL_SCOPE = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/userinfo.email",
+].join(" ");
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 分
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
