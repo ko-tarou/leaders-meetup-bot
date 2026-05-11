@@ -540,6 +540,11 @@ export const slackRoleChannels = sqliteTable(
 // 応募者への自動メール送信 (event_actions.config.autoSendEmail) で参照する。
 // access_token / refresh_token は AES-256-GCM 暗号化 (WORKSPACE_TOKEN_KEY 再利用)。
 // 同じ email で再連携した場合は upsert する (UNIQUE email)。
+//
+// 005-gmail-watcher: watcher_config を migration 0038 で追加。
+// 1 gmail_account = 1 watcher。JSON 文字列で
+//   { enabled, keywords[], workspaceId, channelId, channelName?,
+//     mentionUserIds[], messageTemplate? } を保存。null = 未設定。
 export const gmailAccounts = sqliteTable(
   "gmail_accounts",
   {
@@ -553,9 +558,24 @@ export const gmailAccounts = sqliteTable(
     scope: text("scope").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    // 005-gmail-watcher: メール監視設定 (JSON 文字列)。null = 未設定。
+    watcherConfig: text("watcher_config"),
   },
   (t) => [uniqueIndex("gmail_accounts_email_uniq").on(t.email)],
 );
+
+// 005-gmail-watcher: cron で処理済 Gmail message を記録し、重複通知を防ぐ。
+// (gmail_account_id, message_id) を複合 PK にすることで物理的に重複を防止。
+// matched=1 のみ Slack 通知を送信 (キーワード一致時)。
+export const gmailProcessedMessages = sqliteTable("gmail_processed_messages", {
+  gmailAccountId: text("gmail_account_id")
+    .notNull()
+    .references(() => gmailAccounts.id, { onDelete: "cascade" }),
+  messageId: text("message_id").notNull(),
+  processedAt: text("processed_at").notNull(),
+  // 1 = キーワード一致 (Slack 通知を送った)、0 = 不一致 (記録のみ)。
+  matched: integer("matched").notNull().default(0),
+});
 
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
