@@ -799,6 +799,12 @@ export const api = {
   workspaces: {
     list: () => request<Workspace[]>("/workspaces"),
     get: (id: string) => request<Workspace>(`/workspaces/${id}`),
+    /**
+     * 任意 workspace の全メンバーを取得する汎用 endpoint。
+     * mention 選択 UI 等、action.config に workspaceId を持たない場面で使う。
+     */
+    members: (workspaceId: string) =>
+      request<SlackUser[]>(`/workspaces/${workspaceId}/members`),
     create: (data: {
       name?: string;
       botToken: string;

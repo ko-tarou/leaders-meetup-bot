@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { SlackClient } from "../../services/slack-api";
+import { SlackClient, type SlackUser } from "../../services/slack-api";
 import { meetings, workspaces } from "../../db/schema";
 import {
   DEFAULT_WORKSPACE_ID,
@@ -67,6 +67,45 @@ workspacesRouter.get("/workspaces/:id", async (c) => {
   const ws = await db.select().from(workspaces).where(eq(workspaces.id, id)).get();
   if (!ws) return c.json({ error: "Not found" }, 404);
   return c.json(toWorkspaceMeta(ws));
+});
+
+/**
+ * 任意 workspace の全メンバー (Slack users.list) を返す汎用 endpoint。
+ *
+ * 既存 /orgs/:eventId/actions/:actionId/workspace-members は action.config 依存だが、
+ * member_application の通知タブのように「action.config に workspaceId を持たないが
+ * Slack ユーザー一覧を取りたい」ケース向けに workspaceId 直指定の汎用版を提供する。
+ *
+ * - deleted / is_bot / USLACKBOT は除外する (mention 選択 UI 用途のため bot は不要)
+ * - Slack の users:read scope が必要
+ */
+workspacesRouter.get("/workspaces/:id/members", async (c) => {
+  const workspaceId = c.req.param("id");
+  const ws = await getDecryptedWorkspace(c.env, workspaceId);
+  if (!ws) return c.json({ error: "workspace_not_found" }, 404);
+
+  const slack = new SlackClient(ws.botToken, ws.signingSecret);
+  const res = await slack.listAllUsers();
+  if (!res.ok) {
+    return c.json({ error: res.error ?? "users.list failed" }, 502);
+  }
+
+  const filtered = res.members
+    .filter((u: SlackUser) => {
+      if (u.deleted) return false;
+      if (u.is_bot) return false;
+      if (u.id === "USLACKBOT") return false;
+      return true;
+    })
+    .map((u: SlackUser) => ({
+      id: u.id,
+      name: u.name ?? u.id,
+      realName: u.real_name ?? u.profile?.real_name,
+      displayName: u.profile?.display_name,
+      imageUrl: u.profile?.image_72,
+    }));
+
+  return c.json(filtered);
 });
 
 workspacesRouter.post("/workspaces", async (c) => {

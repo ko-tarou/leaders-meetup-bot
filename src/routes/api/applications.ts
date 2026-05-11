@@ -9,6 +9,7 @@ import {
   interviewers,
   interviewerSlots,
 } from "../../db/schema";
+import { sendApplicationNotification } from "../../services/application-notification";
 
 export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
@@ -220,6 +221,32 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
     decidedAt: null,
   };
   await db.insert(applications).values(application);
+
+  // member_application action.config.notifications を参照して Slack 通知を送る。
+  // 通知は fail-soft: 失敗しても応募 API 自体は成功させる (通知失敗を握りつぶす)。
+  // 該当 action を取得 (event 単位で member_application は 1 つの想定)。
+  try {
+    const action = await db
+      .select()
+      .from(eventActions)
+      .where(
+        and(
+          eq(eventActions.eventId, eventId),
+          eq(eventActions.actionType, "member_application"),
+        ),
+      )
+      .get();
+    if (action) {
+      await sendApplicationNotification(c.env, action.config, {
+        name: application.name,
+        email: application.email,
+        appliedAt: application.appliedAt,
+      });
+    }
+  } catch (e) {
+    console.error("[applications] notification hook error:", e);
+  }
+
   return c.json({ ok: true, id }, 201);
 });
 
