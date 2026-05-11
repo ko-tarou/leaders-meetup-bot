@@ -584,9 +584,17 @@ async function findActionByFormToken(
 
 /**
  * GET /interviewer-form/:token
- *   token を resolve し、action / event 情報を返す (公開、認証不要)。
- *   レスポンス: { eventId, eventName, actionId, actionLabel }
+ *   token を resolve し、action / event 情報 + 既存エントリー一覧を返す
+ *   (公開、認証不要)。
+ *   レスポンス: {
+ *     eventId, eventName, actionId, actionLabel,
+ *     existingEntries: [{ id, name, slots: string[], updatedAt }, ...]
+ *   }
  *   404: 無効 token
+ *
+ *   existingEntries は面接官が自分の過去エントリーを選択して再編集できるようにするための情報。
+ *   form token を知っていれば誰でも見られる前提 (POC スコープ)。
+ *   admin が同じ URL を共有している現状の運用と同等の privacy レベル。
  */
 interviewersRouter.get("/interviewer-form/:token", async (c) => {
   const db = drizzle(c.env.DB);
@@ -601,11 +609,38 @@ interviewersRouter.get("/interviewer-form/:token", async (c) => {
     .get();
   if (!event) return c.json({ error: "event not found" }, 404);
 
+  // 既存エントリー一覧 (面接官が自分の過去登録を選択して再編集するため)
+  const interviewerRows = await db
+    .select()
+    .from(interviewers)
+    .where(eq(interviewers.eventActionId, action.id))
+    .all();
+  interviewerRows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  const existingEntries = await Promise.all(
+    interviewerRows.map(async (r) => {
+      const slotRows = await db
+        .select()
+        .from(interviewerSlots)
+        .where(eq(interviewerSlots.interviewerId, r.id))
+        .all();
+      return {
+        id: r.id,
+        name: r.name,
+        slots: slotRows
+          .map((s) => s.slotDatetime)
+          .sort((a, b) => a.localeCompare(b)),
+        updatedAt: r.updatedAt,
+      };
+    }),
+  );
+
   return c.json({
     eventId: event.id,
     eventName: event.name,
     actionId: action.id,
     actionLabel: "member_application",
+    existingEntries,
   });
 });
 
