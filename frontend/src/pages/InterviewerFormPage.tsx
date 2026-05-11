@@ -13,18 +13,30 @@ import { colors } from "../styles/tokens";
 //   - 1 action あたり 1 つの token を共有する。誰でも token があれば
 //     アクセスでき、自分の名前 + 利用可能 slot を提出できる。
 //   - 同じ name で再送信すると slots を上書き (BE 側で upsert)。
+//   - 既存エントリーを再編集する場合は上部のドロップダウンで対象を選択し、
+//     名前を再入力せずに slots だけ編集できる (名前変更は新規登録扱い)。
 //   - admin token は持っていても **送らない**。`request<T>()` ヘルパは
 //     x-admin-token を自動注入するため、ここでは fetch を直接叩く。
 //
 // API (BE):
-//   GET  /api/interviewer-form/:token  -> { eventId, eventName, actionId, actionLabel? }
+//   GET  /api/interviewer-form/:token  -> { eventId, eventName, actionId, actionLabel?, existingEntries }
 //   POST /api/interviewer-form/:token  body: { name, slots: string[] }
+
+const NEW_ENTRY = "new" as const;
+
+type ExistingEntry = {
+  id: string;
+  name: string;
+  slots: string[];
+  updatedAt: string;
+};
 
 type FormMeta = {
   eventId: string;
   eventName: string;
   actionId: string;
   actionLabel?: string;
+  existingEntries: ExistingEntry[];
 };
 
 export function InterviewerFormPage() {
@@ -35,16 +47,23 @@ export function InterviewerFormPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // selectedExistingId: "new" = 新規登録、それ以外は既存 entry の id
+  const [selectedExistingId, setSelectedExistingId] = useState<string>(NEW_ENTRY);
   const [name, setName] = useState("");
   const [slots, setSlots] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
 
-  useEffect(() => {
+  /**
+   * meta を fetch する。
+   * @param preserveSelectionForName 指定があれば、再 fetch 後に同名のエントリーを自動選択する
+   *   (送信直後の再 fetch で「いま編集していたエントリー」に追従するため)
+   */
+  const fetchMeta = (preserveSelectionForName?: string) => {
     if (!token) {
       setLoading(false);
       setFetchError("リンクが無効です");
-      return;
+      return () => {};
     }
     let cancelled = false;
     setLoading(true);
@@ -64,6 +83,16 @@ export function InterviewerFormPage() {
       .then((data) => {
         if (cancelled) return;
         setMeta(data);
+        if (preserveSelectionForName) {
+          const entry = data.existingEntries.find(
+            (e) => e.name === preserveSelectionForName,
+          );
+          if (entry) {
+            setSelectedExistingId(entry.id);
+            setName(entry.name);
+            setSlots(entry.slots);
+          }
+        }
       })
       .catch((e) => {
         if (cancelled) return;
@@ -78,7 +107,28 @@ export function InterviewerFormPage() {
     return () => {
       cancelled = true;
     };
+  };
+
+  useEffect(() => {
+    // fetchMeta は token のみ依存する。setState は安定参照なので deps から除外して良い
+    return fetchMeta();
+    // eslint exhaustive-deps を意図的に無視 (このリポジトリは eslint 未設定)
   }, [token]);
+
+  const handleSelectExisting = (id: string) => {
+    setSelectedExistingId(id);
+    setSubmittedAt(null);
+    if (id === NEW_ENTRY) {
+      setName("");
+      setSlots([]);
+      return;
+    }
+    const entry = meta?.existingEntries.find((e) => e.id === id);
+    if (entry) {
+      setName(entry.name);
+      setSlots(entry.slots);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,6 +169,8 @@ export function InterviewerFormPage() {
       }
       setSubmittedAt(new Date().toISOString());
       toast.success("保存しました");
+      // 保存後に existingEntries を再 fetch し、保存したエントリーを選択状態にする
+      fetchMeta(trimmed);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "保存に失敗しました");
     } finally {
@@ -165,6 +217,34 @@ export function InterviewerFormPage() {
       </div>
 
       <form onSubmit={handleSubmit}>
+        {meta.existingEntries.length > 0 && (
+          <Field label="編集対象">
+            <select
+              value={selectedExistingId}
+              onChange={(ev) => handleSelectExisting(ev.target.value)}
+              style={inputStyle}
+            >
+              <option value={NEW_ENTRY}>+ 新規登録</option>
+              {meta.existingEntries.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}（{e.slots.length} 枠）
+                </option>
+              ))}
+            </select>
+            <p
+              style={{
+                color: colors.textSecondary,
+                fontSize: "0.75rem",
+                margin: "0.375rem 0 0",
+                lineHeight: 1.5,
+              }}
+            >
+              既存エントリーを選ぶと slots を読み込みます。お名前を変えたい場合は
+              「+ 新規登録」を選択して別名で保存してください。
+            </p>
+          </Field>
+        )}
+
         <Field label="お名前 *">
           <input
             type="text"
@@ -173,7 +253,12 @@ export function InterviewerFormPage() {
             maxLength={50}
             placeholder="山田 太郎"
             required
-            style={inputStyle}
+            readOnly={selectedExistingId !== NEW_ENTRY}
+            style={
+              selectedExistingId !== NEW_ENTRY
+                ? { ...inputStyle, ...readOnlyInputStyle }
+                : inputStyle
+            }
             autoComplete="name"
           />
         </Field>
@@ -267,6 +352,12 @@ const inputStyle: CSSProperties = {
   boxSizing: "border-box",
   background: colors.background,
   color: colors.text,
+};
+
+const readOnlyInputStyle: CSSProperties = {
+  background: colors.surface,
+  color: colors.textSecondary,
+  cursor: "not-allowed",
 };
 
 const actionsStyle: CSSProperties = {
