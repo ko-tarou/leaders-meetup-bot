@@ -289,8 +289,28 @@ workspacesRouter.post(
   "/workspaces/:workspaceId/bot-bulk-invite",
   async (c) => {
     const workspaceId = c.req.param("workspaceId");
+    // pagination: Cloudflare Workers の subrequest 上限 (free=50/req) を超える
+    // 大規模 workspace (KIT のような 138 channel 級) のために frontend が
+    // 複数回に分けて呼ぶ前提の cursor 方式。
+    // - offset: スキャン開始位置 (= 前回の nextOffset)
+    // - batchSize: 1 呼び出しあたりの invite 数。未指定なら service 側の既定値。
+    const offsetRaw = c.req.query("offset");
+    const batchSizeRaw = c.req.query("batchSize");
+    const offset = offsetRaw ? Number.parseInt(offsetRaw, 10) : 0;
+    const batchSize = batchSizeRaw
+      ? Number.parseInt(batchSizeRaw, 10)
+      : undefined;
+    if (Number.isNaN(offset) || offset < 0) {
+      return c.json({ error: "invalid offset" }, 400);
+    }
+    if (batchSize !== undefined && (Number.isNaN(batchSize) || batchSize < 1)) {
+      return c.json({ error: "invalid batchSize" }, 400);
+    }
     try {
-      const result = await executeBotBulkInvite(c.env, workspaceId);
+      const result = await executeBotBulkInvite(c.env, workspaceId, {
+        offset,
+        batchSize,
+      });
       return c.json(result);
     } catch (e) {
       if (e instanceof BotBulkInviteError) {
@@ -309,7 +329,12 @@ workspacesRouter.post(
         // 4xx / 5xx を BotBulkInviteError.status で分岐させる。
         return c.json({ error: e.message }, e.status as 400 | 404 | 500 | 502);
       }
-      throw e;
+      // Cloudflare Workers の subrequest 上限超過などの想定外 runtime 例外。
+      // 500 を返すが、生 stack を露出しないよう error code を文字列化する。
+      // (旧挙動: throw e で 500 + "Internal Server Error" 固定)
+      console.error("bot-bulk-invite unexpected error", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      return c.json({ error: "internal_error", detail: msg }, 500);
     }
   },
 );
