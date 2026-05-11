@@ -232,6 +232,13 @@
       "when": 1782624000000,
       "tag": "0035_auto_schedule_frequency",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1783228800000,
+      "tag": "0036_interviewers_enabled",
+      "breakpoints": true
     }
   ]
 }
