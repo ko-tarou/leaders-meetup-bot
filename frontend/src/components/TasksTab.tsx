@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Task, TaskAssignee, TaskFilters } from "../types";
 import { api } from "../api";
 import { TaskFormModal } from "./TaskFormModal";
+import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
 // ADR-0002: hackathon の tasks タブ用のタスク一覧。
@@ -37,6 +38,7 @@ export function TasksTab({ eventId }: { eventId: string }) {
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<TaskWithAssignees | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const isReadOnly = useIsReadOnly();
   const update = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -157,7 +159,13 @@ export function TasksTab({ eventId }: { eventId: string }) {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          style={{ background: colors.primary, color: colors.textInverse }}
+          disabled={isReadOnly}
+          style={{
+            background: colors.primary,
+            color: colors.textInverse,
+            opacity: isReadOnly ? 0.5 : 1,
+            cursor: isReadOnly ? "not-allowed" : "pointer",
+          }}
         >
           + 新規タスク
         </button>

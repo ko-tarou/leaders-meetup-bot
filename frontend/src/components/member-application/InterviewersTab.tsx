@@ -5,6 +5,7 @@ import type { EventAction, InterviewerSummary } from "../../types";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { useIsReadOnly } from "../../hooks/usePublicMode";
 import { colors } from "../../styles/tokens";
 import { InterviewerEntryViewer } from "./InterviewerEntryViewer";
 
@@ -24,6 +25,7 @@ type Props = {
 export function InterviewersTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isReadOnly = useIsReadOnly();
   const [entries, setEntries] = useState<InterviewerSummary[] | null>(null);
   const [formUrl, setFormUrl] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +179,7 @@ export function InterviewersTab({ eventId, action }: Props) {
             size="sm"
             variant="secondary"
             onClick={handleRotate}
-            disabled={!formUrl || refreshing || rotating}
+            disabled={isReadOnly || !formUrl || refreshing || rotating}
             isLoading={rotating}
           >
             URL を再生成
@@ -227,6 +229,7 @@ export function InterviewersTab({ eventId, action }: Props) {
                           <input
                             type="checkbox"
                             checked={isEnabled}
+                            disabled={isReadOnly}
                             onChange={() =>
                               handleToggleEnabled(e, isEnabled ? 0 : 1)
                             }
@@ -256,6 +259,7 @@ export function InterviewersTab({ eventId, action }: Props) {
                           <Button
                             size="sm"
                             variant="danger"
+                            disabled={isReadOnly}
                             onClick={() => handleDelete(e)}
                           >
                             削除

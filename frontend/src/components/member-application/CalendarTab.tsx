@@ -11,6 +11,7 @@ import type {
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { WeekCalendarPicker } from "../WeekCalendarPicker";
+import { useIsReadOnly } from "../../hooks/usePublicMode";
 import { colors } from "../../styles/tokens";
 
 // 005-calendar-tab:
@@ -49,6 +50,7 @@ const WEEKDAYS = ["月", "火", "水", "木", "金", "土", "日"];
 
 export function CalendarTab({ eventId, action }: Props) {
   const toast = useToast();
+  const isReadOnly = useIsReadOnly();
   const [data, setData] = useState<CalendarData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -168,7 +170,11 @@ export function CalendarTab({ eventId, action }: Props) {
           }
         />
         <div style={editActionsStyle}>
-          <Button onClick={handleSaveEdit} isLoading={edit.saving}>
+          <Button
+            onClick={handleSaveEdit}
+            isLoading={edit.saving}
+            disabled={isReadOnly}
+          >
             保存
           </Button>
           <Button
@@ -250,7 +256,11 @@ export function CalendarTab({ eventId, action }: Props) {
       )}
 
       <div style={{ marginTop: "1rem" }}>
-        <Button variant="secondary" onClick={handleStartEdit}>
+        <Button
+          variant="secondary"
+          onClick={handleStartEdit}
+          disabled={isReadOnly}
+        >
           + 管理者として slot を追加
         </Button>
       </div>

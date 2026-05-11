@@ -10,6 +10,7 @@ import type {
 import { api, APIError } from "../../api";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { useIsReadOnly } from "../../hooks/usePublicMode";
 import { colors } from "../../styles/tokens";
 
 // Sprint 24 / role_management:
@@ -47,6 +48,7 @@ type ChannelOps = { invite: boolean; kick: boolean };
 export function RoleSyncTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isReadOnly = useIsReadOnly();
   const cfg = parseConfig(action.config);
   const workspaceId = cfg.workspaceId;
   const [diff, setDiff] = useState<SyncDiffResponse | null>(null);
@@ -292,7 +294,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
         <div style={s.actionRow}>
           <button
             onClick={runBulkInviteBot}
-            disabled={bulkInviting}
+            disabled={isReadOnly || bulkInviting}
             style={s.primaryBtn}
           >
             {bulkInviting ? "招待中..." : "bot を一括招待"}
@@ -358,7 +360,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       <div style={s.actionRow}>
         <button
           onClick={fetchDiff}
-          disabled={diffLoading || syncing}
+          disabled={isReadOnly || diffLoading || syncing}
           style={s.secondaryBtn}
         >
           {diffLoading ? "計算中..." : "diff を計算"}
@@ -436,7 +438,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
               <div style={{ ...s.actionRow, marginTop: "1rem" }}>
                 <button
                   onClick={runSync}
-                  disabled={syncing || diffLoading}
+                  disabled={isReadOnly || syncing || diffLoading}
                   style={s.primaryBtn}
                 >
                   {syncing

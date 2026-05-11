@@ -4,6 +4,7 @@ import type { PRReview } from "../types";
 import { api } from "../api";
 import { PRReviewCard, type PRReviewWithLgtm } from "./pr-review/PRReviewCard";
 import { PRReviewForm } from "./pr-review/PRReviewForm";
+import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
 // ADR-0008 / Sprint 12 PR2:
@@ -45,6 +46,7 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
   const [editing, setEditing] = useState<PRReview | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showClosed, setShowClosed] = useState(false);
+  const isReadOnly = useIsReadOnly();
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +100,13 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
         <button
           type="button"
           onClick={() => setShowCreate(true)}
-          style={{ ...styles.primaryBtn, marginLeft: "auto" }}
+          disabled={isReadOnly}
+          style={{
+            ...styles.primaryBtn,
+            marginLeft: "auto",
+            opacity: isReadOnly ? 0.5 : 1,
+            cursor: isReadOnly ? "not-allowed" : "pointer",
+          }}
         >
           + 新規レビュー依頼
         </button>
