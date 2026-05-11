@@ -108,6 +108,32 @@ export function InterviewersTab({ eventId, action }: Props) {
     }
   };
 
+  // 005-interviewer-enabled: enabled トグル
+  // 楽観的に local state を更新し、失敗時は loadAll でロールバックする。
+  const handleToggleEnabled = async (
+    entry: InterviewerSummary,
+    next: 0 | 1,
+  ) => {
+    setEntries((prev) =>
+      prev
+        ? prev.map((p) => (p.id === entry.id ? { ...p, enabled: next } : p))
+        : prev,
+    );
+    try {
+      await api.interviewers.setEnabled(
+        eventId,
+        action.id,
+        entry.id,
+        next === 1,
+      );
+      toast.success(next === 1 ? "有効にしました" : "無効にしました");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "更新に失敗しました");
+      // 失敗時は最新値を再取得して整合性を保つ
+      setRefreshKey((k) => k + 1);
+    }
+  };
+
   // 詳細表示: 1 entry の slots 閲覧
   if (viewingId) {
     return (
@@ -180,6 +206,7 @@ export function InterviewersTab({ eventId, action }: Props) {
             <table style={tableStyle}>
               <thead>
                 <tr>
+                  <th style={thStyle}>有効</th>
                   <th style={thStyle}>名前</th>
                   <th style={thStyle}>登録 slot 数</th>
                   <th style={thStyle}>最終更新</th>
@@ -187,35 +214,57 @@ export function InterviewersTab({ eventId, action }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
-                  <tr key={e.id}>
-                    <td style={tdStyle}>{e.name}</td>
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      {e.slotsCount}
-                    </td>
-                    <td style={tdStyle}>
-                      {new Date(e.updatedAt).toLocaleString("ja-JP")}
-                    </td>
-                    <td style={tdStyle}>
-                      <div style={{ display: "flex", gap: "0.25rem" }}>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => setViewingId(e.id)}
-                        >
-                          詳細
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => handleDelete(e)}
-                        >
-                          削除
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {entries.map((e) => {
+                  const isEnabled = e.enabled === 1;
+                  // 無効エントリーは行を薄く表示
+                  const rowTdStyle: CSSProperties = isEnabled
+                    ? tdStyle
+                    : { ...tdStyle, opacity: 0.5 };
+                  return (
+                    <tr key={e.id}>
+                      <td style={tdStyle}>
+                        <label style={toggleLabelStyle}>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={() =>
+                              handleToggleEnabled(e, isEnabled ? 0 : 1)
+                            }
+                            aria-label={`${e.name} の有効/無効を切り替え`}
+                          />
+                          <span style={toggleTextStyle}>
+                            {isEnabled ? "有効" : "無効"}
+                          </span>
+                        </label>
+                      </td>
+                      <td style={rowTdStyle}>{e.name}</td>
+                      <td style={{ ...rowTdStyle, textAlign: "right" }}>
+                        {e.slotsCount}
+                      </td>
+                      <td style={rowTdStyle}>
+                        {new Date(e.updatedAt).toLocaleString("ja-JP")}
+                      </td>
+                      <td style={tdStyle}>
+                        <div style={{ display: "flex", gap: "0.25rem" }}>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setViewingId(e.id)}
+                          >
+                            詳細
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => handleDelete(e)}
+                          >
+                            削除
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -303,4 +352,17 @@ const errorStyle: CSSProperties = {
   borderRadius: "0.375rem",
   fontSize: "0.875rem",
   marginBottom: "0.75rem",
+};
+
+const toggleLabelStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.375rem",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const toggleTextStyle: CSSProperties = {
+  fontSize: "0.8rem",
+  color: colors.textSecondary,
 };

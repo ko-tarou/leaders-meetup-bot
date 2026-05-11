@@ -625,6 +625,23 @@ export const api = {
         `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}/slots`,
         { method: "PUT", body: JSON.stringify({ slots }) },
       ),
+    /**
+     * interviewer の有効/無効を切り替える。
+     * 無効化された interviewer の slots は応募候補とカレンダーから除外される。
+     */
+    setEnabled: (
+      eventId: string,
+      actionId: string,
+      interviewerId: string,
+      enabled: boolean,
+    ) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/interviewers/${interviewerId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: enabled ? 1 : 0 }),
+        },
+      ),
   },
 
   // ロール管理 (Sprint 24 / role_management action)

@@ -170,6 +170,8 @@ export const interviewers = sqliteTable(
       .notNull()
       .references(() => eventActions.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // 0 = disabled (応募候補から除外), 1 = enabled (デフォルト)。migration 0036 で追加。
+    enabled: integer("enabled").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

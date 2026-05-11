@@ -346,6 +346,8 @@ export type InterviewerSummary = {
   id: string;
   name: string;
   slotsCount: number;
+  /** 0 = 無効 (応募候補から除外) / 1 = 有効 (デフォルト)。migration 0036 で追加。 */
+  enabled: number;
   /** entry が初めて作成された日時 (ISO 8601 UTC)。BE は同梱で返すが UI では
    *  最終更新を優先表示するため optional 扱い。 */
   createdAt?: string;
