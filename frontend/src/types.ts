@@ -305,10 +305,32 @@ export const INTERVIEW_LOCATION_LABEL: Record<InterviewLocation, string> = {
 // event_actions.config.emailTemplates に保存される。
 // body 内のプレースホルダ {name} / {email} / {studentId} / {interviewAt} を
 // 応募データで置換した文字列を、kota が手動でコピーしてメーラーで送信する。
+//
+// Sprint 26 で subject を追加。自動送信 (Gmail) でメール件名にも placeholder を
+// 反映するため。未設定なら BE 側のデフォルト件名が使われる。
 export type EmailTemplate = {
   id: string;
   name: string;
+  subject?: string;
   body: string;
+};
+
+// Sprint 26: Gmail OAuth で連携した送信元アカウント。
+// access_token / refresh_token は BE が返さないため型にも含めない。
+export type GmailAccount = {
+  id: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Sprint 26: 応募成功時の Gmail 自動送信設定。
+// event_actions.config.autoSendEmail に保存される。
+export type AutoSendEmailConfig = {
+  enabled?: boolean;
+  gmailAccountId?: string;
+  templateId?: string;
+  replyToEmail?: string;
 };
 
 export type Application = {
