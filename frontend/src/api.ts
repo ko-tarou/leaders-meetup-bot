@@ -765,6 +765,36 @@ export const api = {
       ),
   },
 
+  // 公開管理 (public-management): action 単位で公開 URL を発行する。
+  // パスワード 'hackit' を入力すれば誰でも admin UI にアクセス可能 (POC)。
+  publicTokens: {
+    get: (eventId: string, actionId: string) =>
+      request<{
+        viewToken: string | null;
+        editToken: string | null;
+        viewUrl: string | null;
+        editUrl: string | null;
+      }>(`/orgs/${eventId}/actions/${actionId}/public-tokens`),
+    generate: (
+      eventId: string,
+      actionId: string,
+      permission: "view" | "edit",
+    ) =>
+      request<{ token: string; url: string }>(
+        `/orgs/${eventId}/actions/${actionId}/public-tokens/generate`,
+        { method: "POST", body: JSON.stringify({ permission }) },
+      ),
+    delete: (
+      eventId: string,
+      actionId: string,
+      permission: "view" | "edit",
+    ) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/actions/${actionId}/public-tokens/${permission}`,
+        { method: "DELETE" },
+      ),
+  },
+
   // Slack Workspaces (ADR-0006)
   workspaces: {
     list: () => request<Workspace[]>("/workspaces"),
