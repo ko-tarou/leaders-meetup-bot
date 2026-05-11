@@ -1,4 +1,13 @@
-import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import { clearAdminToken } from "./api";
 import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
 import { EventSwitcher } from "./components/EventSwitcher";
@@ -8,6 +17,8 @@ import { EventProvider, useEvents } from "./contexts/EventContext";
 import {
   clearPublicGranted,
   clearPublicMode,
+  type PublicGranted,
+  usePublicGranted,
   usePublicMode,
 } from "./hooks/usePublicMode";
 import { ActionDetailPage } from "./pages/ActionDetailPage";
@@ -78,6 +89,7 @@ export function App() {
 function AppShell() {
   const { tokenInvalid, fetchError } = useEvents();
   const publicMode = usePublicMode();
+  const granted = usePublicGranted();
   const isPublic = publicMode !== null;
   if (tokenInvalid) {
     return <AdminTokenPrompt message={fetchError ?? undefined} />;
@@ -146,27 +158,72 @@ function AppShell() {
         </div>
         <BackLink />
       </header>
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/events/:eventId" element={<EventIndexRedirect />} />
-        {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
-            より具体的なルートを上に置いてマッチを優先させる。 */}
-        <Route
-          path="/events/:eventId/actions/weekly_reminder/:reminderId"
-          element={<WeeklyReminderDetailPage />}
-        />
-        {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
-        <Route
-          path="/events/:eventId/actions/:actionType"
-          element={<ActionDetailPage />}
-        />
-        <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
-        <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
-        <Route path="/workspaces" element={<WorkspacesPage />} />
-        <Route path="/public-management" element={<PublicManagementPage />} />
-      </Routes>
+      {isPublic && granted ? (
+        // 公開モード: granted の action のみアクセス可。
+        // それ以外の URL に来た場合は granted action に redirect する。
+        <Routes>
+          <Route
+            path="/events/:eventId/actions/:actionType"
+            element={
+              <PublicGuard granted={granted}>
+                <ActionDetailPage />
+              </PublicGuard>
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to={`/events/${granted.eventId}/actions/${granted.actionType}`}
+                replace
+              />
+            }
+          />
+        </Routes>
+      ) : (
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+          {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
+              より具体的なルートを上に置いてマッチを優先させる。 */}
+          <Route
+            path="/events/:eventId/actions/weekly_reminder/:reminderId"
+            element={<WeeklyReminderDetailPage />}
+          />
+          {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
+          <Route
+            path="/events/:eventId/actions/:actionType"
+            element={<ActionDetailPage />}
+          />
+          <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
+          <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/public-management" element={<PublicManagementPage />} />
+        </Routes>
+      )}
     </div>
   );
+}
+
+// 公開モード時の route ガード。
+// URL の eventId / actionType が granted と一致しなければ granted action へ redirect。
+function PublicGuard({
+  granted,
+  children,
+}: {
+  granted: PublicGranted;
+  children: ReactNode;
+}) {
+  const { eventId, actionType } = useParams();
+  if (eventId !== granted.eventId || actionType !== granted.actionType) {
+    return (
+      <Navigate
+        to={`/events/${granted.eventId}/actions/${granted.actionType}`}
+        replace
+      />
+    );
+  }
+  return <>{children}</>;
 }
 
 // 公開モードからのログアウトボタン。
