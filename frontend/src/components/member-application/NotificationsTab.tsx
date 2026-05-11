@@ -120,6 +120,27 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
     };
   }, []);
 
+  // channelName fallback: 既存設定で channelId はあるが channelName が無いケース
+  // (PR #160 以前に保存された config) は Slack API から name を resolve する。
+  // 失敗は無視 (display は channelId にフォールバック)。
+  useEffect(() => {
+    if (!channelId) return;
+    if (channelName) return;
+    let cancelled = false;
+    api
+      .getChannelName(channelId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.name) setChannelName(res.name);
+      })
+      .catch(() => {
+        // ignore: display falls back to channelId
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId, channelName]);
+
   // active workspace のメンバー一覧
   useEffect(() => {
     if (!activeWorkspaceId) {
