@@ -13,6 +13,7 @@ import { applicationsRouter } from "./api/applications";
 import { interviewersRouter } from "./api/interviewers";
 import { rolesRouter } from "./api/roles";
 import { publicTokensRouter } from "./api/public-tokens";
+import { gmailAccountsRouter } from "./api/gmail-accounts";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -58,7 +59,10 @@ api.use("/*", async (c, next) => {
     sub === "/health" ||
     sub.startsWith("/apply/") ||
     sub.startsWith("/interviewer-form/") ||
-    sub === "/public-auth"
+    sub === "/public-auth" ||
+    // Sprint 26: Google OAuth callback は Google からのリダイレクトで届くため
+    // x-admin-token を持たない。state (oauth_states) で CSRF を防止する。
+    sub === "/google-oauth/callback"
   ) {
     return next();
   }
@@ -80,5 +84,6 @@ api.route("/", applicationsRouter);
 api.route("/", interviewersRouter);
 api.route("/", rolesRouter);
 api.route("/", publicTokensRouter);
+api.route("/", gmailAccountsRouter);
 
 export { api };
