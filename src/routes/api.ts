@@ -12,6 +12,7 @@ import { meetingsRouter } from "./api/meetings";
 import { applicationsRouter } from "./api/applications";
 import { interviewersRouter } from "./api/interviewers";
 import { rolesRouter } from "./api/roles";
+import { publicTokensRouter } from "./api/public-tokens";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -45,6 +46,7 @@ api.use(
 //   - /health: ヘルスチェック
 //   - /apply/:eventId (POST), /apply/:eventId/availability (GET): 応募者向け公開フォーム
 //   - /interviewer-form/:token (GET / POST): 面接官向け共有フォーム (PR #139 単一フォーム URL 方式)
+//   - /public-auth (POST): 公開ページからパスワード + token で adminToken を取得する公開フロー
 //
 // 注意: /slack/oauth, /slack/events 等の Slack 連携は app.route("/slack", ...) の
 //       別ルートにマウントされており、本ミドルウェアの管轄外。
@@ -55,7 +57,8 @@ api.use("/*", async (c, next) => {
   if (
     sub === "/health" ||
     sub.startsWith("/apply/") ||
-    sub.startsWith("/interviewer-form/")
+    sub.startsWith("/interviewer-form/") ||
+    sub === "/public-auth"
   ) {
     return next();
   }
@@ -76,5 +79,6 @@ api.route("/", meetingsRouter);
 api.route("/", applicationsRouter);
 api.route("/", interviewersRouter);
 api.route("/", rolesRouter);
+api.route("/", publicTokensRouter);
 
 export { api };

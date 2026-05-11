@@ -13,6 +13,7 @@ import {
 import { RemindersPanel, withLocalIds } from "./schedule/RemindersPanel";
 import { InstantSendPanel } from "./schedule/InstantSendPanel";
 import { useToast } from "./ui/Toast";
+import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
 // Sprint 005-tabs: schedule_polling を 5 sub-tab に再編する際の panel 切替。
@@ -78,6 +79,7 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
   // 保存対象を含む panel が表示されているときだけ「設定を保存」ボタンを出す
   const showSave = showConfig || showReminders;
   const toast = useToast();
+  const isReadOnly = useIsReadOnly();
   const [schedule, setSchedule] = useState<AutoSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasOpenPoll, setHasOpenPoll] = useState(false);
@@ -246,7 +248,7 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
         <div style={{ marginBottom: 24 }}>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={isReadOnly || saving}
             style={{
               padding: "10px 24px",
               background: colors.primary,

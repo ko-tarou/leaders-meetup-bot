@@ -15,6 +15,8 @@ import {
   PublicThanksPage,
 } from "./pages/PublicApplyPage";
 import { InterviewerFormPage } from "./pages/InterviewerFormPage";
+import { PublicEntryPage } from "./pages/PublicEntryPage";
+import { PublicManagementPage } from "./pages/PublicManagementPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
 import { colors } from "./styles/tokens";
 
@@ -28,7 +30,8 @@ export function App() {
   const { pathname } = useLocation();
   if (
     pathname.startsWith("/apply") ||
-    pathname.startsWith("/interviewer-form")
+    pathname.startsWith("/interviewer-form") ||
+    pathname.startsWith("/public/")
   ) {
     return (
       <ToastProvider>
@@ -43,6 +46,7 @@ export function App() {
               path="/interviewer-form/:token"
               element={<InterviewerFormPage />}
             />
+            <Route path="/public/:token" element={<PublicEntryPage />} />
           </Routes>
         </ConfirmProvider>
       </ToastProvider>
@@ -110,6 +114,9 @@ function AppShell() {
             <Link to="/workspaces" style={workspacesLinkStyle}>
               Workspace管理
             </Link>
+            <Link to="/public-management" style={workspacesLinkStyle}>
+              公開管理
+            </Link>
           </div>
         </div>
         <BackLink />
@@ -131,6 +138,7 @@ function AppShell() {
         <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
         <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
         <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/public-management" element={<PublicManagementPage />} />
       </Routes>
     </div>
   );
