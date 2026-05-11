@@ -10,6 +10,7 @@ import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
+import { GmailWatcherEditor } from "../components/GmailWatcherEditor";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
@@ -384,31 +385,33 @@ export function WorkspacesPage() {
                 borderRadius: "0.375rem",
                 padding: "0.75rem",
                 marginBottom: "0.5rem",
-                display: "flex",
-                alignItems: "center",
               }}
             >
-              <div style={{ flex: 1 }}>
-                <strong>{acc.email}</strong>
-                <div
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <strong>{acc.email}</strong>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      color: colors.textSecondary,
+                    }}
+                  >
+                    連携日: {new Date(acc.createdAt).toLocaleString("ja-JP")}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleGmailDelete(acc)}
+                  disabled={isReadOnly}
                   style={{
-                    fontSize: "0.75rem",
-                    color: colors.textSecondary,
+                    background: colors.danger,
+                    color: colors.textInverse,
                   }}
                 >
-                  連携日: {new Date(acc.createdAt).toLocaleString("ja-JP")}
-                </div>
+                  解除
+                </button>
               </div>
-              <button
-                onClick={() => handleGmailDelete(acc)}
-                disabled={isReadOnly}
-                style={{
-                  background: colors.danger,
-                  color: colors.textInverse,
-                }}
-              >
-                解除
-              </button>
+              {/* 005-gmail-watcher: メール監視設定 (展開式) */}
+              <GmailWatcherEditor account={acc} />
             </div>
           ))
         )}
