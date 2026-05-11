@@ -2,6 +2,8 @@ import type {
   Application,
   ApplicationStatus,
   AutoSchedule,
+  AutoScheduleCandidateRule,
+  AutoScheduleFrequency,
   BotBulkInviteResult,
   CalendarData,
   Event,
@@ -249,11 +251,16 @@ export const api = {
   createAutoSchedule: (
     meetingId: string,
     data: {
-      candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
-      pollStartDay: number;
+      frequency?: AutoScheduleFrequency;
+      candidateRule: AutoScheduleCandidateRule;
+      pollStartDay?: number;
       pollStartTime?: string;
-      pollCloseDay: number;
+      pollCloseDay?: number;
       pollCloseTime?: string;
+      pollStartWeekday?: number | null;
+      pollCloseWeekday?: number | null;
+      pollStartMonth?: number | null;
+      pollCloseMonth?: number | null;
       reminders: ReminderItem[];
       messageTemplate?: string | null;
       reminderTime?: string;
@@ -269,11 +276,16 @@ export const api = {
   updateAutoSchedule: (
     id: string,
     data: Partial<{
-      candidateRule: { type: string; weekday: number; weeks: number[]; monthOffset?: number };
+      frequency: AutoScheduleFrequency;
+      candidateRule: AutoScheduleCandidateRule;
       pollStartDay: number;
       pollStartTime: string;
       pollCloseDay: number;
       pollCloseTime: string;
+      pollStartWeekday: number | null;
+      pollCloseWeekday: number | null;
+      pollStartMonth: number | null;
+      pollCloseMonth: number | null;
       reminders: ReminderItem[];
       reminderTime: string;
       messageTemplate: string | null;
