@@ -15,6 +15,10 @@ import {
   getUserNames,
 } from "../../services/slack-names";
 import { getDecryptedWorkspace } from "../../services/workspace";
+import {
+  executeBotBulkInvite,
+  BotBulkInviteError,
+} from "../../services/bot-bulk-invite";
 
 export const workspacesRouter = new Hono<{ Bindings: Env }>();
 
@@ -272,6 +276,43 @@ workspacesRouter.delete("/workspaces/:id", async (c) => {
   await db.delete(workspaces).where(eq(workspaces.id, id));
   return c.json({ ok: true });
 });
+
+// --- Bot bulk invite (005-user-oauth) ---
+//
+// 旧 endpoint /orgs/:eventId/actions/:actionId/bot-bulk-invite を廃止し、
+// workspace 単位で実行できるよう Workspace 管理に移動した。
+// admin user の user_access_token が必要 (bot を private channel に投入する用途)。
+//
+// レスポンスは BotBulkInviteResult (frontend/src/types.ts)。
+// user OAuth 未認証 / 鍵不整合の場合は 400 + { error: "user_oauth_required" }。
+workspacesRouter.post(
+  "/workspaces/:workspaceId/bot-bulk-invite",
+  async (c) => {
+    const workspaceId = c.req.param("workspaceId");
+    try {
+      const result = await executeBotBulkInvite(c.env, workspaceId);
+      return c.json(result);
+    } catch (e) {
+      if (e instanceof BotBulkInviteError) {
+        if (e.message === "user_oauth_required") {
+          // FE 側で APIError.body に "user_oauth_required" が含まれるか判定して
+          // 再認証ガイドを出す既存挙動と互換性を保つ。
+          return c.json(
+            {
+              error: "user_oauth_required",
+              message:
+                "user OAuth 認証が必要です。Workspaces から再インストールしてください。",
+            },
+            400,
+          );
+        }
+        // 4xx / 5xx を BotBulkInviteError.status で分岐させる。
+        return c.json({ error: e.message }, e.status as 400 | 404 | 500 | 502);
+      }
+      throw e;
+    }
+  },
+);
 
 // --- Slack Names (resolve IDs to display names) ---
 

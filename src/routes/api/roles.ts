@@ -41,10 +41,7 @@ import {
   slackRoleMembers,
   slackRoleChannels,
 } from "../../db/schema";
-import {
-  createSlackClientForWorkspace,
-  createUserSlackClientForWorkspace,
-} from "../../services/workspace";
+import { createSlackClientForWorkspace } from "../../services/workspace";
 import {
   computeSyncDiff,
   executeSync,
@@ -623,130 +620,9 @@ rolesRouter.post(
 // ----------------------------------------------------------------------------
 // Bot bulk invite (005-user-oauth)
 // ----------------------------------------------------------------------------
-
-/**
- * POST /orgs/:eventId/actions/:actionId/bot-bulk-invite
- *
- * admin user (= OAuth した kota) の user_access_token で全 channel 一覧を取得し、
- * bot を一括 invite する。bot は自身を private channel に join できないため、
- * private channel に bot を投入する用途で使う。
- *
- * 動作:
- *   1. action.config.workspaceId を取得
- *   2. user_access_token を持つ workspace か確認 (なければ user_oauth_required)
- *   3. user token で conversations.list (public + private, pagination) を全取得
- *   4. bot user_id を bot token の auth.test で取得
- *   5. 各 channel に対し user token で conversations.invite を試行
- *      - ok=true: invited++
- *      - error='already_in_channel': alreadyMember++
- *      - その他: failed++ (errors[] に詳細を積む)
- *
- * レスポンスは BotBulkInviteResult 型 (frontend/src/types.ts)。
- */
-rolesRouter.post(
-  "/orgs/:eventId/actions/:actionId/bot-bulk-invite",
-  async (c) => {
-    const db = drizzle(c.env.DB);
-    const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
-
-    const found = await findRoleManagementAction(db, eventId, actionId);
-    if ("error" in found) return c.json({ error: found.error }, found.status);
-
-    const workspaceId = readWorkspaceId(found.action);
-    if (!workspaceId) {
-      return c.json(
-        { error: "action.config.workspaceId is missing" },
-        400,
-      );
-    }
-
-    // user token client (admin user 権限)
-    const userClient = await createUserSlackClientForWorkspace(
-      c.env,
-      workspaceId,
-    );
-    if (!userClient) {
-      // 既存 workspace で user OAuth 未認証 / 鍵不整合等。FE で「再認証してください」
-      // メッセージを出すための識別子として error code を返す。
-      return c.json(
-        {
-          error: "user_oauth_required",
-          message:
-            "user OAuth 認証が必要です。Workspaces から再インストールしてください。",
-        },
-        400,
-      );
-    }
-
-    // bot client (user_id 取得用)
-    const botClient = await createSlackClientForWorkspace(c.env, workspaceId);
-    if (!botClient) {
-      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
-    }
-    const auth = await botClient.authTest();
-    const botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
-    if (!botUserId) {
-      return c.json(
-        { error: `bot auth.test failed: ${JSON.stringify(auth)}` },
-        502,
-      );
-    }
-
-    // user token で全 channel を取得 (admin user が見える範囲)
-    const list = await userClient.getChannelList();
-    if (!list.ok) {
-      return c.json(
-        { error: `user conversations.list failed: ${list.error ?? "unknown"}` },
-        502,
-      );
-    }
-    const channels = (list.channels as Array<{
-      id: string;
-      name?: string;
-      is_archived?: boolean;
-    }>) ?? [];
-
-    // 各 channel に bot を invite。
-    // Slack の conversations.invite は user token で実行すると、自分 (admin user)
-    // が member の channel について bot を invite できる。
-    // - already_in_channel: 既に bot が member (= スキップ扱い)
-    // - cant_invite_self: invite 対象が自身の場合 (今回は bot user_id なので発生しない想定)
-    // - その他: scope 不足 / channel 削除済み等。errors[] に詳細を積む。
-    let invited = 0;
-    let alreadyMember = 0;
-    let failed = 0;
-    const errors: Array<{
-      channelId: string;
-      channelName?: string;
-      error: string;
-    }> = [];
-
-    for (const ch of channels) {
-      if (ch.is_archived) {
-        // archived channel は invite 対象外。サイレントスキップ。
-        continue;
-      }
-      const res = await userClient.inviteToChannel(ch.id, botUserId);
-      if (res.ok) {
-        invited++;
-        continue;
-      }
-      const errStr = typeof res.error === "string" ? res.error : "unknown";
-      if (errStr === "already_in_channel") {
-        alreadyMember++;
-        continue;
-      }
-      failed++;
-      errors.push({ channelId: ch.id, channelName: ch.name, error: errStr });
-    }
-
-    return c.json({
-      totalChannels: channels.length,
-      alreadyMember,
-      invited,
-      failed,
-      errors,
-    });
-  },
-);
+//
+// 旧 endpoint POST /orgs/:eventId/actions/:actionId/bot-bulk-invite は廃止し、
+// Workspace 管理ページから直接呼べる workspace-scoped endpoint に移行した:
+//   POST /workspaces/:workspaceId/bot-bulk-invite (src/routes/api/workspaces.ts)
+//
+// 実装本体は src/services/bot-bulk-invite.ts に共通化済み。

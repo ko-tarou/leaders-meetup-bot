@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Workspace } from "../types";
-import { api } from "../api";
+import { api, APIError } from "../api";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
@@ -12,6 +13,7 @@ import { colors } from "../styles/tokens";
 export function WorkspacesPage() {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isReadOnly = useIsReadOnly();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,11 @@ export function WorkspacesPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  // workspace ごとの「bot 一括招待中」フラグ。複数 workspace を同時実行できないよう、
+  // 実行中の workspace id を保持して該当 workspace のボタンだけ disabled にする。
+  const [bulkInviteLoading, setBulkInviteLoading] = useState<string | null>(
+    null,
+  );
 
   // OAuth callback redirect (?installed=<team_name>) を検出して成功メッセージを表示
   useEffect(() => {
@@ -53,6 +60,44 @@ export function WorkspacesPage() {
       cancelled = true;
     };
   }, [refreshKey]);
+
+  // bot を全 channel に一括招待する。private channel への bot 投入が主用途。
+  // user OAuth 未認証 workspace は backend が { error: "user_oauth_required" }
+  // を 400 で返すため、APIError.body の文字列で識別して再認証ガイドを出す。
+  const handleBulkInvite = async (ws: Workspace) => {
+    const ok = await confirm({
+      title: "bot を一括招待",
+      message: `「${ws.name}」の全チャンネルに bot を一括招待します。\nadmin (= OAuth 認証した人) が member の channel のみが対象です。`,
+      variant: "danger",
+      confirmLabel: "実行",
+    });
+    if (!ok) return;
+    setBulkInviteLoading(ws.id);
+    try {
+      const res = await api.workspaces.bulkInviteBot(ws.id);
+      if (res.failed === 0) {
+        toast.success(
+          `招待完了: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 合計 ${res.totalChannels}`,
+        );
+      } else {
+        toast.warning(
+          `一部失敗: 新規 ${res.invited} / 既存 ${res.alreadyMember} / 失敗 ${res.failed}`,
+        );
+      }
+    } catch (e) {
+      if (e instanceof APIError && e.body.includes("user_oauth_required")) {
+        toast.error(
+          "user OAuth 認証が必要です。「+ Slack でインストール」から再認証してください",
+        );
+      } else {
+        toast.error(
+          e instanceof Error ? e.message : "bot 一括招待に失敗しました",
+        );
+      }
+    } finally {
+      setBulkInviteLoading(null);
+    }
+  };
 
   const handleDelete = async (ws: Workspace) => {
     const ok = await confirm({
@@ -144,18 +189,39 @@ export function WorkspacesPage() {
               team_id: {ws.slackTeamId} / 登録日: {ws.createdAt.slice(0, 10)}
             </div>
           </div>
-          <button
-            onClick={() => handleDelete(ws)}
-            style={{ background: colors.danger, color: colors.textInverse }}
-            disabled={ws.id === "ws_default"}
-            title={
-              ws.id === "ws_default"
-                ? "default workspace は削除できません"
-                : ""
-            }
-          >
-            削除
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              onClick={() => handleBulkInvite(ws)}
+              disabled={isReadOnly || bulkInviteLoading === ws.id}
+              style={{
+                background: colors.primary,
+                color: colors.textInverse,
+                border: "none",
+                padding: "0.375rem 0.75rem",
+                borderRadius: "0.25rem",
+                cursor:
+                  isReadOnly || bulkInviteLoading === ws.id
+                    ? "not-allowed"
+                    : "pointer",
+                fontSize: "0.875rem",
+              }}
+              title="このワークスペースの全 channel に bot を一括招待します"
+            >
+              {bulkInviteLoading === ws.id ? "招待中..." : "bot を一括招待"}
+            </button>
+            <button
+              onClick={() => handleDelete(ws)}
+              style={{ background: colors.danger, color: colors.textInverse }}
+              disabled={ws.id === "ws_default"}
+              title={
+                ws.id === "ws_default"
+                  ? "default workspace は削除できません"
+                  : ""
+              }
+            >
+              削除
+            </button>
+          </div>
         </div>
       ))}
 
