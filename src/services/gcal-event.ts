@@ -39,12 +39,29 @@ export type CreateCalendarEventParams = {
   endIso: string;
   /** 招待する email アドレス配列。空配列なら attendees を付けない。 */
   attendees: string[];
+  /**
+   * Calendar event の物理的な場所。例: "KIT 11号館 lab206"。
+   * 未指定なら event.location は付けない (オンライン面接想定)。
+   */
+  location?: string;
+  /**
+   * Google Meet link を発行するかどうか。
+   *   - true  : conferenceData.createRequest を付けて Meet URL を生成
+   *   - false : conferenceData を付けず、Calendar event のみ作成 (meetLink は null)
+   * 既定は true (後方互換)。
+   */
+  includeMeet?: boolean;
 };
 
 export type CreateCalendarEventResult = {
   eventId: string;
-  /** Google Meet URL。conferenceData から抽出。生成失敗時は空文字。 */
-  meetLink: string;
+  /**
+   * Google Meet URL。conferenceData から抽出。
+   *   - includeMeet=false   → null (Meet 発行なし)
+   *   - includeMeet=true で発行失敗 → 空文字 (従来挙動)
+   *   - 成功 → URL 文字列
+   */
+  meetLink: string | null;
 };
 
 export type CalendarEventErrorReason =
@@ -163,14 +180,18 @@ async function refreshAccessToken(
 }
 
 /**
- * Google Calendar に Meet link 付きの event を作成する。
+ * Google Calendar に event を作成する (汎用)。
  *
- * 返り値の meetLink は conferenceData.entryPoints から entryPointType="video"
- * を抽出。Meet 発行に失敗した場合 (Workspace 設定で Meet 無効等) は空文字を返す。
+ * - `includeMeet` が true (既定) → conferenceData.createRequest を含めて
+ *   Google Meet link を生成。meetLink は entryPoints から entryPointType="video"
+ *   を抽出する。Meet 発行に失敗した場合 (Workspace 設定で Meet 無効等) は空文字。
+ * - `includeMeet` が false → conferenceData を付けず、Calendar event のみ作成。
+ *   返り値の meetLink は null。
+ * - `location` が指定されていれば event.location に設定 (例: "KIT 11号館 lab206")。
  *
  * 失敗時は CalendarEventError を throw する。呼び出し側で握り潰すかどうか判断する。
  */
-export async function createCalendarEventWithMeet(
+export async function createCalendarEvent(
   env: Env,
   gmailAccountId: string,
   params: CreateCalendarEventParams,
@@ -232,11 +253,36 @@ export async function createCalendarEventWithMeet(
       "api_error",
     );
   }
+  // includeMeet=false (既定 false 扱い: undefined は true 互換) のときは
+  // conferenceData を要求していないので meetLink は常に null を返す。
+  const includeMeet = params.includeMeet !== false;
+  if (!includeMeet) {
+    return { eventId: json.id, meetLink: null };
+  }
   const videoEntry = json.conferenceData?.entryPoints?.find(
     (e) => e.entryPointType === "video",
   );
   const meetLink = videoEntry?.uri ?? "";
   return { eventId: json.id, meetLink };
+}
+
+/**
+ * 後方互換 wrapper。既存呼出側 (もしあれば) のため残置。
+ * 内部で createCalendarEvent({ ..., includeMeet: true }) を呼ぶ。
+ * 返り値 meetLink は必ず string (空文字 fallback)。
+ *
+ * @deprecated 新規呼出は createCalendarEvent を使うこと。
+ */
+export async function createCalendarEventWithMeet(
+  env: Env,
+  gmailAccountId: string,
+  params: Omit<CreateCalendarEventParams, "includeMeet">,
+): Promise<{ eventId: string; meetLink: string }> {
+  const result = await createCalendarEvent(env, gmailAccountId, {
+    ...params,
+    includeMeet: true,
+  });
+  return { eventId: result.eventId, meetLink: result.meetLink ?? "" };
 }
 
 function postCalendarInsert(
@@ -257,8 +303,10 @@ function postCalendarInsert(
  * Calendar API events.insert の request body を組み立てる。
  *
  * - timeZone は Asia/Tokyo 固定 (アプリ全体が JST 表示のため)
- * - conferenceData.createRequest.requestId は冪等性確保のための UUID
- *   (Google の docs 上は client が一意性を担保するべき)
+ * - includeMeet (既定 true) のとき conferenceData.createRequest.requestId は
+ *   冪等性確保のための UUID (Google の docs 上は client が一意性を担保するべき)
+ * - includeMeet=false のときは conferenceData を付けない (Calendar event のみ)
+ * - location が指定されていれば event.location に設定する
  * - attendees が空なら field 自体を省略 (Calendar API は空配列を許容するが
  *   送信側からの notification 抑制のため省く)
  */
@@ -269,14 +317,20 @@ export function buildEventBody(
     summary: params.summary,
     start: { dateTime: params.startIso, timeZone: "Asia/Tokyo" },
     end: { dateTime: params.endIso, timeZone: "Asia/Tokyo" },
-    conferenceData: {
+  };
+  // includeMeet が明示的に false でない限り Meet を付ける (後方互換)。
+  if (params.includeMeet !== false) {
+    body.conferenceData = {
       createRequest: {
         requestId: crypto.randomUUID(),
         conferenceSolutionKey: { type: "hangoutsMeet" },
       },
-    },
-  };
+    };
+  }
   if (params.description) body.description = params.description;
+  if (params.location && params.location.trim().length > 0) {
+    body.location = params.location;
+  }
   if (params.attendees && params.attendees.length > 0) {
     body.attendees = params.attendees.map((email) => ({ email }));
   }

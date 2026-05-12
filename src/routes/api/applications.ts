@@ -17,9 +17,20 @@ import {
   resolveTemplateIdForTrigger,
 } from "../../services/application-email";
 import {
-  createCalendarEventWithMeet,
+  createCalendarEvent,
   CalendarEventError,
 } from "../../services/gcal-event";
+
+// 005-meet: interviewLocation ごとの Calendar event 設定。
+//   - online → Meet 生成あり、location は付けない
+//   - lab206 → Meet 生成なし、location に物理的な場所を埋める
+const INTERVIEW_LOCATION_CONFIG: Record<
+  string,
+  { includeMeet: boolean; location?: string }
+> = {
+  online: { includeMeet: true },
+  lab206: { includeMeet: false, location: "KIT 11号館 lab206" },
+};
 
 export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
@@ -478,7 +489,12 @@ async function handleScheduledTransition(
       const endIso = new Date(
         new Date(startIso).getTime() + 60 * 60 * 1000,
       ).toISOString();
-      const result = await createCalendarEventWithMeet(
+      // 005-meet: interviewLocation で Meet 発行 / location を切替。
+      // 未知の値 (将来追加されたケース等) は安全側で online と同じ扱い (Meet あり)。
+      const locCfg =
+        INTERVIEW_LOCATION_CONFIG[app.interviewLocation ?? ""] ??
+        INTERVIEW_LOCATION_CONFIG.online;
+      const result = await createCalendarEvent(
         env,
         cfg.gmailAccountId,
         {
@@ -487,10 +503,14 @@ async function handleScheduledTransition(
           startIso,
           endIso,
           attendees: [app.email],
+          includeMeet: locCfg.includeMeet,
+          location: locCfg.location,
         },
       );
       calendarEventId = result.eventId;
-      meetLink = result.meetLink;
+      // includeMeet=false の場合 meetLink は null。DB は string 型なので
+      // 空文字に正規化して書き戻す (既存挙動と互換)。
+      meetLink = result.meetLink ?? "";
       // 書き戻し (失敗しても以降の email 送信は試みる)
       await db
         .update(applications)

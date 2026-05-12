@@ -238,6 +238,17 @@ export function readSlackInviteUrl(
 }
 
 /**
+ * 005-meet: interviewLocation の生値 → 人間可読ラベル変換。
+ *   - online → "オンライン (Google Meet)"
+ *   - lab206 → "11号館 lab206"
+ * 未知の値は生値をそのまま返す (fallback)。
+ */
+const INTERVIEW_LOCATION_LABELS: Record<string, string> = {
+  online: "オンライン (Google Meet)",
+  lab206: "11号館 lab206",
+};
+
+/**
  * テンプレ vars を生成する。BE 内の通知 / メール送信共通フォーマット。
  * 未設定 field は空文字に置換される (= placeholder が消える)。
  */
@@ -245,18 +256,35 @@ function buildTemplateVars(
   application: ApplicationLike,
   slackInviteLink: string,
 ): Record<string, string> {
+  // 005-meet: interviewLocation を人間可読ラベルに変換。
+  // ラベル未定義のときは生値をそのまま fallback (空文字なら空文字)。
+  const rawLocation = application.interviewLocation ?? "";
+  const interviewLocationLabel =
+    INTERVIEW_LOCATION_LABELS[rawLocation] ?? rawLocation;
+
+  // 005-meet: Meet 有無で表示行を出し分けるための placeholder。
+  // online (Meet あり) → "Meet リンク: <URL>"
+  // lab206 (Meet なし) → 空文字 (テンプレ側で行ごと消える想定)
+  const meetLink = application.meetLink ?? "";
+  const meetLinkLine = meetLink ? `Meet リンク: ${meetLink}` : "";
+
   return {
     name: application.name,
     email: application.email,
     appliedAt: utcToJstFormat(application.appliedAt),
     studentId: application.studentId ?? "",
     howFound: application.howFound ?? "",
-    interviewLocation: application.interviewLocation ?? "",
+    interviewLocation: rawLocation,
+    // 005-meet: 人間可読な面接場所ラベル (例: "オンライン (Google Meet)")
+    interviewLocationLabel,
     interviewAt: application.interviewAt
       ? utcToJstFormat(application.interviewAt)
       : "",
     // 005-meet: Calendar event 作成後に埋め込まれる Meet URL。
-    meetLink: application.meetLink ?? "",
+    meetLink,
+    // 005-meet: Meet リンク行 (空 or "Meet リンク: <URL>")。
+    // テンプレで {meetLink} 単体ではなく行単位で出し分けたい時に使う。
+    meetLinkLine,
     // 005-slack-invite-monitor: event_actions.config.slackInvites[].url を改行区切りで render したテキスト。
     // 合格メール等で Slack 招待リンクを案内するために使う。
     // 旧仕様 (slackInvite 単数) も自動 fallback。未設定は空文字。
