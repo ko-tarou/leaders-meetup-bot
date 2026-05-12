@@ -60,6 +60,16 @@ type GmailAccountRow = typeof gmailAccounts.$inferSelect;
 
 // === 設定型 ===
 
+// Sprint 27: rule ごとの自動返信設定。
+// enabled=true なら Slack 通知に「自動返信を送る / スキップ」ボタンが付き、
+// クリックされた瞬間に Gmail API 経由で original message に返信する。
+// subject / body は placeholder ({senderName} 等) を含められる。
+export type WatcherAutoReply = {
+  enabled: boolean;
+  subject: string;
+  body: string;
+};
+
 export type WatcherRule = {
   id: string;
   name: string;
@@ -69,6 +79,7 @@ export type WatcherRule = {
   channelName?: string;
   mentionUserIds: string[];
   messageTemplate?: string;
+  autoReply?: WatcherAutoReply;
 };
 
 export type WatcherConfig = {
@@ -86,6 +97,7 @@ type LegacyWatcherConfig = {
   channelName?: unknown;
   mentionUserIds?: unknown;
   messageTemplate?: unknown;
+  autoReply?: unknown;
 };
 
 // 新形式 (rules) JSON shape。
@@ -507,6 +519,7 @@ export function normalizeWatcherConfig(raw: unknown): WatcherConfig | null {
       channelName: obj.channelName,
       mentionUserIds: obj.mentionUserIds,
       messageTemplate: obj.messageTemplate,
+      autoReply: obj.autoReply,
     });
     if (legacyRule) {
       return { enabled, rules: [legacyRule], elseRule: undefined };
@@ -542,5 +555,20 @@ function normalizeRule(raw: unknown): WatcherRule | null {
     mentionUserIds,
     messageTemplate:
       typeof r.messageTemplate === "string" ? r.messageTemplate : undefined,
+    autoReply: normalizeAutoReply(r.autoReply),
+  };
+}
+
+// Sprint 27: autoReply の JSON shape を検証して正規化する。
+// 不正値 / 未設定なら undefined を返す (= 自動返信ボタン無し)。
+// enabled / subject / body が揃っていなくても、enabled は読み取って後段の
+// 「ボタン出す/出さない」判定に使うため、subject / body が空文字でも残す。
+function normalizeAutoReply(raw: unknown): WatcherAutoReply | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  return {
+    enabled: Boolean(r.enabled),
+    subject: typeof r.subject === "string" ? r.subject : "",
+    body: typeof r.body === "string" ? r.body : "",
   };
 }
