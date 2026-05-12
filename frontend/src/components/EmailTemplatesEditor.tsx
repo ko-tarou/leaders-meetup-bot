@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   AutoSendEmailConfig,
+  AutoSendEmailLogConfig,
   EmailTemplate,
   EventAction,
   GmailAccount,
@@ -131,6 +132,26 @@ function parseInitialAutoSend(
           ? triggersRaw.onPassed
           : undefined,
     };
+    // logToSlack (任意): 自動メール送信成功時の Slack ログ通知。
+    const logRaw = (raw as { logToSlack?: unknown }).logToSlack;
+    let logToSlack: AutoSendEmailLogConfig | undefined;
+    if (logRaw && typeof logRaw === "object") {
+      const l = logRaw as Partial<AutoSendEmailLogConfig>;
+      logToSlack = {
+        enabled: !!l.enabled,
+        workspaceId: typeof l.workspaceId === "string" ? l.workspaceId : "",
+        channelId: typeof l.channelId === "string" ? l.channelId : "",
+        channelName:
+          typeof l.channelName === "string" ? l.channelName : undefined,
+        mentionUserIds: Array.isArray(l.mentionUserIds)
+          ? (l.mentionUserIds.filter(
+              (u): u is string => typeof u === "string" && u.length > 0,
+            ) as string[])
+          : [],
+        messageTemplate:
+          typeof l.messageTemplate === "string" ? l.messageTemplate : undefined,
+      };
+    }
     return {
       enabled: !!raw.enabled,
       gmailAccountId:
@@ -138,10 +159,51 @@ function parseInitialAutoSend(
       replyToEmail:
         typeof raw.replyToEmail === "string" ? raw.replyToEmail : undefined,
       triggers,
+      logToSlack,
     };
   } catch {
     return {};
   }
+}
+
+// BE: src/services/application-email.ts:DEFAULT_LOG_TEMPLATE と同期。
+// 空文字 / 未設定保存時はこの文面でログが送られる。
+const DEFAULT_LOG_TEMPLATE = `{mentions} 📧 自動メール送信ログ
+トリガー: {triggerLabel}
+宛先: {recipientName} <{to}>
+件名: {subject}
+テンプレート: {templateName}`;
+
+// プレビュー用サンプルデータ。BE の placeholder 仕様と一対一対応。
+const LOG_SAMPLE_VARS: Record<string, string> = {
+  mentions: "<@U1>",
+  triggerLabel: "面接予定時",
+  to: "suzuki@example.com",
+  recipientName: "鈴木 太郎",
+  subject: "【DevelopersHub】面談日時のご連絡",
+  templateName: "面談確定の連絡",
+};
+
+const LOG_PLACEHOLDERS: { key: string; desc: string }[] = [
+  { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+  { key: "triggerLabel", desc: "トリガー名 (応募完了時 / 面接予定時 / 合格時)" },
+  { key: "to", desc: "送信先メールアドレス" },
+  { key: "recipientName", desc: "応募者名" },
+  { key: "subject", desc: "送信したメール件名 (placeholder 置換済み)" },
+  { key: "templateName", desc: "使用テンプレート名" },
+];
+
+/**
+ * `{key}` を vars[key] で置換。未定義 key は元の `{key}` を残す。
+ * BE: src/services/application-notification.ts:renderTemplate と同等。
+ */
+function renderLogTemplate(
+  template: string,
+  vars: Record<string, string>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (m, key: string) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : m,
+  );
 }
 
 // 005-slack-invite-monitor: event_actions.config.slackInvites を取り出す。
@@ -251,6 +313,527 @@ function genId(): string {
   }
   // フォールバック (古い WebView / SSR 環境)
   return `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// AutoSendEmailLogConfig の空テンプレ。enabled=true 化したときの初期値として使う。
+function emptyLogConfig(): AutoSendEmailLogConfig {
+  return {
+    enabled: true,
+    workspaceId: "",
+    channelId: "",
+    channelName: "",
+    mentionUserIds: [],
+    messageTemplate: undefined,
+  };
+}
+
+/**
+ * 自動メール送信成功時の Slack ログ通知設定セクション。
+ *
+ * UI 構成 (NotificationsTab と揃えた display + edit パターン):
+ *   1. 「☑ 有効化」 toggle (即座に親の autoSend.logToSlack へ反映)
+ *   2. チャンネル / メンション / メッセージテンプレ の 3 サブセクションを Display ⇄ Edit
+ *
+ * 親 (EmailTemplatesEditor) の「保存」ボタンで一括永続化されるため、
+ * このセクション自体は親 state を更新するだけで通信はしない。
+ */
+function LogToSlackSection({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: AutoSendEmailLogConfig | undefined;
+  onChange: (next: AutoSendEmailLogConfig | undefined) => void;
+  disabled: boolean;
+}) {
+  const enabled = !!value?.enabled;
+  const cfg = value ?? emptyLogConfig();
+
+  const [editingChannel, setEditingChannel] = useState(false);
+  const [editingMentions, setEditingMentions] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(false);
+
+  // edit draft
+  const [draftWorkspaceId, setDraftWorkspaceId] = useState(cfg.workspaceId);
+  const [draftChannelId, setDraftChannelId] = useState(cfg.channelId);
+  const [draftChannelName, setDraftChannelName] = useState(
+    cfg.channelName ?? "",
+  );
+  const [draftMentionUserIds, setDraftMentionUserIds] = useState<string[]>(
+    cfg.mentionUserIds,
+  );
+  const [draftTemplate, setDraftTemplate] = useState<string>(
+    cfg.messageTemplate ?? "",
+  );
+
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
+  const [members, setMembers] = useState<SlackUser[] | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [resolvedChannelName, setResolvedChannelName] = useState<string>(
+    cfg.channelName ?? "",
+  );
+
+  // workspaces 一覧 (enabled になったら遅延 fetch)
+  useEffect(() => {
+    if (!enabled) return;
+    if (workspaces !== null) return;
+    let cancelled = false;
+    api.workspaces
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        setWorkspaces(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, workspaces]);
+
+  // channelName fallback (旧データ用): channelId だけあって name 不明 → API resolve
+  useEffect(() => {
+    if (!cfg.channelId) return;
+    if (cfg.channelName) {
+      setResolvedChannelName(cfg.channelName);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getChannelName(cfg.channelId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res?.name) setResolvedChannelName(res.name);
+      })
+      .catch(() => {
+        // ignore
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg.channelId, cfg.channelName]);
+
+  // メンション編集用 members fetch (active workspace)
+  const activeWsForMembers = editingChannel
+    ? draftWorkspaceId
+    : cfg.workspaceId;
+  useEffect(() => {
+    if (!enabled) return;
+    if (!activeWsForMembers) {
+      setMembers(null);
+      return;
+    }
+    let cancelled = false;
+    setMembers(null);
+    api.workspaces
+      .members(activeWsForMembers)
+      .then((list) => {
+        if (cancelled) return;
+        setMembers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, activeWsForMembers]);
+
+  const memberMap = useMemo(() => {
+    const m = new Map<string, string>();
+    (members ?? []).forEach((u) => {
+      m.set(u.id, u.displayName || u.realName || u.name);
+    });
+    return m;
+  }, [members]);
+
+  const filteredMembers = useMemo(() => {
+    if (!members) return [];
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        (u.realName?.toLowerCase().includes(q) ?? false) ||
+        (u.displayName?.toLowerCase().includes(q) ?? false) ||
+        u.id.toLowerCase().includes(q),
+    );
+  }, [members, memberSearch]);
+
+  const workspaceName = useMemo(() => {
+    if (!cfg.workspaceId) return "";
+    return (
+      (workspaces ?? []).find((w) => w.id === cfg.workspaceId)?.name ??
+      cfg.workspaceId
+    );
+  }, [workspaces, cfg.workspaceId]);
+
+  // === 親 state 更新ヘルパー ===
+  const patch = (p: Partial<AutoSendEmailLogConfig>) => {
+    onChange({ ...cfg, ...p });
+  };
+
+  const toggleEnabled = (next: boolean) => {
+    if (next) {
+      // 初回有効化: 空テンプレで初期化
+      onChange(value ? { ...value, enabled: true } : emptyLogConfig());
+    } else {
+      // 設定は保持して enabled だけ false に
+      onChange(value ? { ...value, enabled: false } : undefined);
+    }
+  };
+
+  // === チャンネル編集 ===
+  const startEditChannel = () => {
+    setDraftWorkspaceId(cfg.workspaceId);
+    setDraftChannelId(cfg.channelId);
+    setDraftChannelName(cfg.channelName ?? "");
+    setEditingChannel(true);
+  };
+  const saveChannel = () => {
+    patch({
+      workspaceId: draftWorkspaceId,
+      channelId: draftChannelId,
+      channelName: draftChannelName || undefined,
+    });
+    setResolvedChannelName(draftChannelName);
+    setEditingChannel(false);
+  };
+
+  // === メンション編集 ===
+  const startEditMentions = () => {
+    setDraftMentionUserIds(cfg.mentionUserIds);
+    setMemberSearch("");
+    setEditingMentions(true);
+  };
+  const toggleDraftMention = (id: string) => {
+    setDraftMentionUserIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+  const saveMentions = () => {
+    patch({ mentionUserIds: draftMentionUserIds });
+    setEditingMentions(false);
+  };
+
+  // === テンプレ編集 ===
+  const startEditTemplate = () => {
+    setDraftTemplate(cfg.messageTemplate || DEFAULT_LOG_TEMPLATE);
+    setEditingTemplate(true);
+  };
+  const saveTemplate = () => {
+    const trimmed = draftTemplate.trim();
+    const next =
+      trimmed === "" || trimmed === DEFAULT_LOG_TEMPLATE.trim()
+        ? undefined
+        : draftTemplate;
+    patch({ messageTemplate: next });
+    setEditingTemplate(false);
+  };
+
+  const displayTemplate = cfg.messageTemplate || DEFAULT_LOG_TEMPLATE;
+  const isDefaultTemplate = !cfg.messageTemplate;
+  const previewText = useMemo(
+    () => renderLogTemplate(draftTemplate, LOG_SAMPLE_VARS).trim(),
+    [draftTemplate],
+  );
+  const mentionNames = useMemo(
+    () => cfg.mentionUserIds.map((id) => memberMap.get(id) ?? `<@${id}>`),
+    [cfg.mentionUserIds, memberMap],
+  );
+
+  return (
+    <div style={styles.autoSendBox}>
+      <div style={styles.autoSendHeader}>
+        <strong>Slack ログ通知</strong>
+        <label style={styles.toggleLabel}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => toggleEnabled(e.target.checked)}
+            disabled={disabled}
+          />
+          <span>有効化</span>
+        </label>
+      </div>
+      <p style={styles.helpHint}>
+        自動メール送信が成功した時に、指定 Slack チャンネルへログを post します。
+        ログ送信が失敗してもメール送信は成功扱いのままです (fail-soft)。
+      </p>
+
+      {enabled && (
+        <>
+          {/* チャンネル */}
+          <div style={styles.logRow}>
+            {!editingChannel ? (
+              <div style={styles.summaryRow}>
+                <div style={styles.summaryBody}>
+                  <div style={styles.summaryLabel}>通知先</div>
+                  <div style={styles.summaryValue}>
+                    {cfg.channelId ? (
+                      <>
+                        <code>
+                          #{resolvedChannelName || cfg.channelName || cfg.channelId}
+                        </code>
+                        {workspaceName && (
+                          <span style={styles.helpHint}>
+                            {" "}
+                            ({workspaceName})
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={styles.helpHint}>未設定</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={startEditChannel}
+                  disabled={disabled}
+                  style={styles.secondaryBtn}
+                >
+                  編集
+                </button>
+              </div>
+            ) : (
+              <div style={styles.editBox}>
+                <div style={styles.editTitle}>通知先</div>
+                <div style={styles.autoSendRow}>
+                  <label style={styles.autoSendLabel}>ワークスペース</label>
+                  {workspaces === null ? (
+                    <span style={styles.helpHint}>取得中...</span>
+                  ) : (
+                    <select
+                      value={draftWorkspaceId}
+                      onChange={(e) => {
+                        setDraftWorkspaceId(e.target.value);
+                        setDraftChannelId("");
+                        setDraftChannelName("");
+                      }}
+                      disabled={disabled}
+                      style={styles.select}
+                    >
+                      <option value="">（選択してください）</option>
+                      {workspaces.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {draftWorkspaceId && (
+                  <div style={styles.autoSendRow}>
+                    <label style={styles.autoSendLabel}>チャンネル</label>
+                    <div style={{ flex: 1 }}>
+                      <SingleChannelPicker
+                        value={draftChannelId}
+                        channelName={draftChannelName}
+                        workspaceId={draftWorkspaceId}
+                        onChange={(id, name) => {
+                          setDraftChannelId(id);
+                          setDraftChannelName(name);
+                        }}
+                        disabled={disabled}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div style={styles.editActions}>
+                  <button
+                    type="button"
+                    onClick={saveChannel}
+                    disabled={disabled || !draftWorkspaceId || !draftChannelId}
+                    style={styles.primaryBtn}
+                  >
+                    確定
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingChannel(false)}
+                    disabled={disabled}
+                    style={styles.secondaryBtn}
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* メンション */}
+          <div style={styles.logRow}>
+            {!editingMentions ? (
+              <div style={styles.summaryRow}>
+                <div style={styles.summaryBody}>
+                  <div style={styles.summaryLabel}>メンション</div>
+                  <div style={styles.summaryValue}>
+                    {cfg.mentionUserIds.length === 0 ? (
+                      <span style={styles.helpHint}>なし</span>
+                    ) : (
+                      mentionNames.join(", ")
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={startEditMentions}
+                  disabled={disabled || !cfg.workspaceId}
+                  title={
+                    !cfg.workspaceId
+                      ? "先に通知先 (ワークスペース) を設定してください"
+                      : undefined
+                  }
+                  style={styles.secondaryBtn}
+                >
+                  編集
+                </button>
+              </div>
+            ) : (
+              <div style={styles.editBox}>
+                <div style={styles.editTitle}>メンション</div>
+                {!cfg.workspaceId ? (
+                  <div style={styles.helpHint}>
+                    先に通知先 (ワークスペース) を設定してください。
+                  </div>
+                ) : members === null ? (
+                  <span style={styles.helpHint}>メンバー取得中...</span>
+                ) : members.length === 0 ? (
+                  <span style={styles.helpHint}>
+                    ワークスペースのメンバーが取得できません。
+                  </span>
+                ) : (
+                  <>
+                    <input
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="名前 / @handle で検索..."
+                      style={{ ...styles.select, marginBottom: "0.5rem" }}
+                      disabled={disabled}
+                    />
+                    <div style={styles.mentionList}>
+                      {filteredMembers.map((u) => {
+                        const checked = draftMentionUserIds.includes(u.id);
+                        return (
+                          <label key={u.id} style={styles.mentionRow}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => toggleDraftMention(u.id)}
+                            />
+                            <span style={{ fontWeight: 500 }}>
+                              {u.displayName || u.realName || u.name}
+                            </span>
+                            <span style={styles.helpHint}>@{u.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={styles.helpHint}>
+                      選択中: {draftMentionUserIds.length} 人
+                    </div>
+                  </>
+                )}
+                <div style={styles.editActions}>
+                  <button
+                    type="button"
+                    onClick={saveMentions}
+                    disabled={disabled || !cfg.workspaceId}
+                    style={styles.primaryBtn}
+                  >
+                    確定
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingMentions(false)}
+                    disabled={disabled}
+                    style={styles.secondaryBtn}
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* テンプレ */}
+          <div style={styles.logRow}>
+            {!editingTemplate ? (
+              <div style={styles.summaryRow}>
+                <div style={styles.summaryBody}>
+                  <div style={styles.summaryLabel}>
+                    メッセージ{isDefaultTemplate ? " (デフォルト)" : ""}
+                  </div>
+                  <pre style={styles.templatePreview}>{displayTemplate}</pre>
+                </div>
+                <button
+                  type="button"
+                  onClick={startEditTemplate}
+                  disabled={disabled}
+                  style={styles.secondaryBtn}
+                >
+                  編集
+                </button>
+              </div>
+            ) : (
+              <div style={styles.editBox}>
+                <div style={styles.editTitle}>メッセージ</div>
+                <textarea
+                  value={draftTemplate}
+                  onChange={(e) => setDraftTemplate(e.target.value)}
+                  rows={6}
+                  disabled={disabled}
+                  style={styles.bodyArea}
+                  placeholder={DEFAULT_LOG_TEMPLATE}
+                />
+                <div style={styles.placeholderList}>
+                  {LOG_PLACEHOLDERS.map((p) => (
+                    <div key={p.key} style={styles.placeholderRow}>
+                      <code style={styles.placeholderKey}>{`{${p.key}}`}</code>
+                      <span style={styles.placeholderDesc}>{p.desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={styles.summaryLabel}>プレビュー</div>
+                <pre style={styles.templatePreview}>{previewText}</pre>
+                <div style={styles.editActions}>
+                  <button
+                    type="button"
+                    onClick={saveTemplate}
+                    disabled={disabled}
+                    style={styles.primaryBtn}
+                  >
+                    確定
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingTemplate(false)}
+                    disabled={disabled}
+                    style={styles.secondaryBtn}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDraftTemplate(DEFAULT_LOG_TEMPLATE)}
+                    disabled={disabled}
+                    style={styles.secondaryBtn}
+                  >
+                    デフォルトに戻す
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
@@ -521,6 +1104,19 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
       }
     }
 
+    // Slack ログ通知 (任意): 有効化されているなら workspace / channel 必須。
+    const logCfg = autoSend.logToSlack;
+    if (logCfg?.enabled) {
+      if (!logCfg.workspaceId) {
+        setError("Slack ログ通知が有効ですが、ワークスペースが未選択です。");
+        return;
+      }
+      if (!logCfg.channelId) {
+        setError("Slack ログ通知が有効ですが、通知先チャンネルが未選択です。");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       // 既存 config の他フィールド (leaderAvailableSlots 等) を保持してマージ
@@ -545,6 +1141,9 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         const v = autoSend.triggers?.[def.key];
         if (v) triggersOut[def.key] = v;
       }
+      // logToSlack: enabled=false でも設定値は維持する (UI 再表示用)。
+      // 未設定 (undefined) なら保存しない。
+      const logOut = autoSend.logToSlack;
       cfg.autoSendEmail = {
         enabled: !!autoSend.enabled,
         gmailAccountId: autoSend.gmailAccountId,
@@ -552,6 +1151,7 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         ...(autoSend.replyToEmail && autoSend.replyToEmail.trim()
           ? { replyToEmail: autoSend.replyToEmail.trim() }
           : {}),
+        ...(logOut ? { logToSlack: logOut } : {}),
       };
 
       // 005-slack-invite-monitor: slackInvites (配列) を merge 保存。
@@ -725,6 +1325,15 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
           />
         </div>
       </div>
+
+      {/* 自動送信成功時の Slack ログ通知 (任意セクション) */}
+      <LogToSlackSection
+        value={autoSend.logToSlack}
+        onChange={(next) =>
+          setAutoSend((prev) => ({ ...prev, logToSlack: next }))
+        }
+        disabled={submitting}
+      />
 
       {/* 005-slack-invite-monitor: Slack 招待リンク (複数登録対応) + 1 日 1 回の有効性監視 */}
       <div style={styles.autoSendBox}>
@@ -1390,5 +1999,84 @@ const styles = {
     gap: "0.5rem",
     alignItems: "center",
     marginBottom: "0.5rem",
+  } as CSSProperties,
+  // === LogToSlackSection 用スタイル ===
+  logRow: {
+    marginTop: "0.5rem",
+  } as CSSProperties,
+  summaryRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "0.75rem",
+    padding: "0.5rem 0.75rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: "0.25rem",
+    background: colors.background,
+  } as CSSProperties,
+  summaryBody: {
+    flex: 1,
+    minWidth: 0,
+  } as CSSProperties,
+  summaryLabel: {
+    fontSize: "0.75rem",
+    color: colors.textSecondary,
+    marginBottom: "0.125rem",
+  } as CSSProperties,
+  summaryValue: {
+    fontSize: "0.875rem",
+    color: colors.text,
+    wordBreak: "break-word",
+  } as CSSProperties,
+  editBox: {
+    padding: "0.75rem",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.25rem",
+    background: colors.background,
+  } as CSSProperties,
+  editTitle: {
+    fontSize: "0.875rem",
+    fontWeight: 600,
+    marginBottom: "0.5rem",
+  } as CSSProperties,
+  editActions: {
+    display: "flex",
+    gap: "0.5rem",
+    marginTop: "0.5rem",
+    flexWrap: "wrap",
+  } as CSSProperties,
+  templatePreview: {
+    margin: 0,
+    padding: "0.5rem 0.75rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: "0.25rem",
+    background: colors.surface,
+    fontSize: "0.8125rem",
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  } as CSSProperties,
+  placeholderList: {
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    columnGap: "0.5rem",
+    rowGap: "0.125rem",
+    padding: "0.5rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: "0.25rem",
+    background: colors.surface,
+    fontSize: "0.75rem",
+    margin: "0.5rem 0",
+  } as CSSProperties,
+  placeholderRow: {
+    display: "contents",
+  } as CSSProperties,
+  placeholderKey: {
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  } as CSSProperties,
+  placeholderDesc: {
+    color: colors.textSecondary,
   } as CSSProperties,
 };
