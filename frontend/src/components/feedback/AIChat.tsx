@@ -7,13 +7,15 @@
  *   - 過去 N 件の履歴を毎回 API に送る (BE 側で 20 件まで trim)。
  *   - 送信中は input を disable、応答を待つ。
  *   - エラー時はチャット内に "エラー" メッセージを差し込んで UX を壊さない。
+ *   - enabled = false (= app_settings.aiChatEnabled が false) のときは
+ *     チャット UI を描画せず「設定でオフになっています」案内を表示する。
  */
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { colors } from "../../styles/tokens";
 import type { AIChatMessage } from "../../types";
 
-export function AIChat() {
+export function AIChat({ enabled = true }: { enabled?: boolean }) {
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -25,6 +27,10 @@ export function AIChat() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
+
+  if (!enabled) {
+    return <DisabledNotice label="AI チャット機能" icon="🤖" />;
+  }
 
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -151,6 +157,30 @@ export function AIChat() {
           送信
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 機能が app_settings で無効化されている時に表示する案内。
+ * エラー toast ではなくタブ内に静かに表示することで UX を壊さない。
+ */
+function DisabledNotice({ label, icon }: { label: string; icon: string }) {
+  return (
+    <div
+      style={{
+        padding: 24,
+        textAlign: "center",
+        color: colors.textSecondary,
+        fontSize: 13,
+        lineHeight: 1.6,
+      }}
+    >
+      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontWeight: 600, marginBottom: 4, color: colors.text }}>
+        {label}は設定でオフになっています
+      </div>
+      <div>管理者にお問い合わせください。</div>
     </div>
   );
 }

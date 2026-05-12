@@ -6,26 +6,57 @@
  *     1. 💡 改善要望・バグ報告 → Slack 通知
  *     2. 💬 使い方を聞く (AI) → Gemini で応答
  * - 右下 floating ボタンをクリックでモーダル開閉。
- * - AI チャットは app_settings.aiChatEnabled = true のときのみ表示する。
- *   設定取得失敗時は AI タブを隠す (admin token 不要の public エンドポイントは
- *   別途必要だが、PoC では aiChatEnabled = false でも UI を見せる方針)。
+ * - widget を open した時に GET /api/feedback/status を fetch して
+ *   feedbackEnabled / aiChatEnabled を取得し、無効化されているタブには
+ *   「設定でオフになっています」の案内を表示する (送信ボタンは出さない)。
  *
  * 設計判断:
- *   - aiChatEnabled は admin が trigger するため、公開 API 化しなくても
- *     FE 側で fetch を試行 → 失敗 (401) なら AI タブをデフォルトで表示する。
- *   - 簡略化のため、aiChatEnabled は admin がログイン中のときだけ厳密判定、
- *     公開モードでは AI タブを常に表示し、disable 時は 403 で「無効化中」と表示。
+ *   - status fetch は 1 度開いたら cache する (open 時に未取得なら fetch)。
+ *   - fetch 失敗時は両方 true として扱う (= 従来挙動)。送信時に BE が
+ *     no-op or 403 を返すので、fail-soft で UX を壊さない。
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "../../api";
 import { colors } from "../../styles/tokens";
 import { AIChat } from "./AIChat";
 import { FeedbackForm } from "./FeedbackForm";
 
 type Tab = "feedback" | "ai";
 
+type Status = { feedbackEnabled: boolean; aiChatEnabled: boolean };
+
 export function FeedbackWidget() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("feedback");
+  // status: null = まだ未取得 (open するまで fetch しない)。
+  // 取得済みなら以降は再 fetch しない (widget 1 セッション 1 fetch)。
+  const [status, setStatus] = useState<Status | null>(null);
+
+  useEffect(() => {
+    if (!open || status !== null) return;
+    let cancelled = false;
+    api.feedback
+      .getStatus()
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch(() => {
+        // fail-safe: 取得失敗時は両方 true として従来挙動を維持する。
+        if (!cancelled) {
+          setStatus({ feedbackEnabled: true, aiChatEnabled: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, status]);
+
+  // status 未取得時 (= 初回 open 直後の極短時間) は両方 true として描画する。
+  // BE が返す前に「オフです」と一瞬出るのを避ける。
+  const effective: Status = status ?? {
+    feedbackEnabled: true,
+    aiChatEnabled: true,
+  };
 
   return (
     <>
@@ -78,7 +109,11 @@ export function FeedbackWidget() {
             </div>
 
             <div style={contentStyle}>
-              {tab === "feedback" ? <FeedbackForm /> : <AIChat />}
+              {tab === "feedback" ? (
+                <FeedbackForm enabled={effective.feedbackEnabled} />
+              ) : (
+                <AIChat enabled={effective.aiChatEnabled} />
+              )}
             </div>
           </div>
         </>
