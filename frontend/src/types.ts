@@ -363,6 +363,25 @@ export type AutoSendEmailConfig = {
   triggers?: AutoSendTriggers;
 };
 
+// 005-slack-invite-monitor: 応募完了メール等に埋め込む Slack 招待リンク + 有効性監視設定。
+// event_actions.config.slackInvite に保存される。
+//
+// - url: 招待リンク本体。メール template の {slackInviteLink} placeholder で置換される。
+// - monitor* : 1 日 1 回 BE cron でリンクを GET し、無効化遷移時に Slack 通知する設定。
+// - lastCheckedAt / lastStatus / lastNotifiedAt: BE が cron で書き換える運用フィールド。
+//   FE では参照のみ (read-only)、保存時に渡しても BE で上書きされる前提。
+export type SlackInviteConfig = {
+  url?: string;
+  monitorEnabled?: boolean;
+  monitorWorkspaceId?: string;
+  monitorChannelId?: string;
+  monitorChannelName?: string;
+  monitorMentionUserIds?: string[];
+  lastCheckedAt?: string;
+  lastStatus?: "valid" | "invalid";
+  lastNotifiedAt?: string;
+};
+
 export type Application = {
   id: string;
   eventId: string;
