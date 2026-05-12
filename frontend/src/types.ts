@@ -341,11 +341,26 @@ export type GmailWatcherConfig = {
 
 // Sprint 26: 応募成功時の Gmail 自動送信設定。
 // event_actions.config.autoSendEmail に保存される。
+//
+// 005-meet: trigger 拡張。status 遷移ごとに異なるテンプレを送れるようにする。
+//   - templateId は旧形式 (後方互換: triggers.onSubmit へ fallback される)
+//   - triggers.onSubmit:    応募完了時
+//   - triggers.onScheduled: pending → scheduled (面接日時確定、Meet link 自動付与)
+//   - triggers.onPassed:    scheduled → passed (合格通知)
+export type AutoSendTriggers = {
+  onSubmit?: string;
+  onScheduled?: string;
+  onPassed?: string;
+};
+
 export type AutoSendEmailConfig = {
   enabled?: boolean;
   gmailAccountId?: string;
-  templateId?: string;
   replyToEmail?: string;
+  /** 旧形式 (後方互換)。triggers.onSubmit へ fallback される。 */
+  templateId?: string;
+  /** 005-meet: 新形式。trigger 別に template id を指定する。 */
+  triggers?: AutoSendTriggers;
 };
 
 export type Application = {
