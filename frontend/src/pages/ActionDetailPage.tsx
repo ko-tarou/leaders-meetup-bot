@@ -462,7 +462,7 @@ function ActionMainContent({
     case "pr_review_list":
       return <PRReviewListTab eventId={eventId} />;
     case "member_application":
-      return <MemberApplicationListTab eventId={eventId} action={action} />;
+      return <MemberApplicationListTab eventId={eventId} />;
     case "schedule_polling":
       // Sprint 005-tabs: schedule_polling は ActionDetailPage 直下の
       // SchedulePollingArea に置き換わったため、ここでは render しない
