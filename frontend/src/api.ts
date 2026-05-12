@@ -1,4 +1,6 @@
 import type {
+  AIChatMessage,
+  AppSettings,
   Application,
   ApplicationStatus,
   AutoSchedule,
@@ -9,6 +11,7 @@ import type {
   Event,
   EventAction,
   EventActionType,
+  FeedbackCategory,
   GmailAccount,
   GmailWatcherConfig,
   HowFound,
@@ -861,5 +864,40 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(config),
       }),
+  },
+
+  // 005-feedback: アプリ全体のフィードバック / AI チャット設定 (singleton)。
+  // admin の WorkspacesPage から編集する。
+  appSettings: {
+    get: () => request<AppSettings>("/app-settings"),
+    update: (patch: Partial<Omit<AppSettings, "updatedAt">>) =>
+      request<AppSettings>("/app-settings", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+  },
+
+  // 005-feedback: フィードバック送信 / AI チャット (公開 API, admin token 不要)。
+  // FE は FeedbackWidget から呼び出す。
+  feedback: {
+    submit: (data: {
+      category: FeedbackCategory;
+      message: string;
+      name?: string;
+      pageUrl?: string;
+      publicMode?: "view" | "edit" | null;
+    }) =>
+      request<{ ok: boolean; error?: string }>("/feedback", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    aiChat: (message: string, history: AIChatMessage[]) =>
+      request<{ ok: boolean; response: string; error?: string }>(
+        "/feedback/ai-chat",
+        {
+          method: "POST",
+          body: JSON.stringify({ message, history }),
+        },
+      ),
   },
 };

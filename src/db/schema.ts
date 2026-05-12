@@ -583,6 +583,31 @@ export const gmailProcessedMessages = sqliteTable("gmail_processed_messages", {
   matched: integer("matched").notNull().default(0),
 });
 
+// 005-feedback: アプリ全体のフィードバック / AI チャット設定 (singleton)
+//
+// 右下フィードバックウィジェットの設定をアプリ全体で 1 行だけ保持する。
+// migration 0040 で id=1 の初期 row を INSERT 済 + CHECK (id = 1) で
+// 物理的に singleton を強制している。読み込みは常に id=1 を select、
+// 書き込みは常に id=1 を update。新規行を作る必要は無い。
+//
+// feedbackMentionUserIds は ["U1","U2"] 形式の JSON 文字列。null = 未設定。
+export const appSettings = sqliteTable("app_settings", {
+  id: integer("id").primaryKey().default(1),
+  // 0 = フィードバック (改善要望/バグ報告) の Slack 通知を送らない
+  // 1 = 設定済の channel / mention で通知する
+  feedbackEnabled: integer("feedback_enabled").notNull().default(0),
+  feedbackWorkspaceId: text("feedback_workspace_id"),
+  feedbackChannelId: text("feedback_channel_id"),
+  // FE 表示用に channel 名を保持 (Slack API での再解決を省略)。
+  feedbackChannelName: text("feedback_channel_name"),
+  // JSON 配列: ["U12345", "U67890"]。null or "[]" = mention なし。
+  feedbackMentionUserIds: text("feedback_mention_user_ids"),
+  // 0 = AI チャットを公開しない (FE で送信ボタンを disable)
+  // 1 = Gemini API 経由でヘルプ応答を返す
+  aiChatEnabled: integer("ai_chat_enabled").notNull().default(0),
+  updatedAt: text("updated_at").notNull(),
+});
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",

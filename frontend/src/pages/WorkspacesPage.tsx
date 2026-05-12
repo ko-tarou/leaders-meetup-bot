@@ -11,6 +11,7 @@ import { useConfirm } from "../components/ui/ConfirmDialog";
 import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 import { GmailWatcherEditor } from "../components/GmailWatcherEditor";
+import { FeedbackSettingsSection } from "../components/feedback/FeedbackSettingsSection";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
@@ -416,6 +417,12 @@ export function WorkspacesPage() {
           ))
         )}
       </section>
+
+      {/* 005-feedback: フィードバックウィジェットの通知先と AI 有効化を設定 */}
+      <FeedbackSettingsSection
+        workspaces={workspaces}
+        disabled={isReadOnly}
+      />
 
       {/* 手動登録は fallback として温存 (ADR-0007) — ページ下部に小さく配置 */}
       <div

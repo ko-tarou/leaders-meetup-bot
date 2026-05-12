@@ -14,6 +14,7 @@ import { interviewersRouter } from "./api/interviewers";
 import { rolesRouter } from "./api/roles";
 import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
+import { feedbackRouter } from "./api/feedback";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -62,7 +63,12 @@ api.use("/*", async (c, next) => {
     sub === "/public-auth" ||
     // Sprint 26: Google OAuth callback は Google からのリダイレクトで届くため
     // x-admin-token を持たない。state (oauth_states) で CSRF を防止する。
-    sub === "/google-oauth/callback"
+    sub === "/google-oauth/callback" ||
+    // 005-feedback: 公開モード / admin 両方の UI から呼ばれる。
+    // 公開モードでは admin token が無いケースもあるため bypass する。
+    // /app-settings (admin GET/PUT) は bypass しない (保護)。
+    sub === "/feedback" ||
+    sub === "/feedback/ai-chat"
   ) {
     return next();
   }
@@ -85,5 +91,6 @@ api.route("/", interviewersRouter);
 api.route("/", rolesRouter);
 api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
+api.route("/", feedbackRouter);
 
 export { api };

@@ -11,6 +11,7 @@ import {
 import { clearAdminToken } from "./api";
 import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
 import { EventSwitcher } from "./components/EventSwitcher";
+import { FeedbackWidget } from "./components/feedback/FeedbackWidget";
 import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import { ToastProvider } from "./components/ui/Toast";
 import { EventProvider, useEvents } from "./contexts/EventContext";
@@ -65,6 +66,9 @@ export function App() {
             />
             <Route path="/public/:token" element={<PublicEntryPage />} />
           </Routes>
+          {/* 005-feedback: 公開ページ (apply / interviewer-form / public)
+              でも右下フィードバックウィジェットを表示する。 */}
+          <FeedbackWidget />
         </ConfirmProvider>
       </ToastProvider>
     );
@@ -79,6 +83,10 @@ export function App() {
         <EventProvider>
           <AppShell />
         </EventProvider>
+        {/* 005-feedback: admin / 公開モード双方の通常 UI でも表示する。
+            EventProvider の外側に置くことで AdminTokenPrompt が出ているときも
+            ウィジェットからフィードバックを送れる。 */}
+        <FeedbackWidget />
       </ConfirmProvider>
     </ToastProvider>
   );
