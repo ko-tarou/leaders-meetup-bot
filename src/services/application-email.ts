@@ -2,8 +2,16 @@
  * Sprint 26: 応募作成成功時に Gmail で自動送信するフック。
  *
  * action.config.autoSendEmail に保存された設定 (enabled / gmailAccountId /
- * templateId / replyToEmail) を参照し、emailTemplates から該当テンプレを取り出して
+ * triggers / replyToEmail) を参照し、emailTemplates から該当テンプレを取り出して
  * 応募者の email へ送信する。
+ *
+ * 005-meet: trigger 拡張。status 遷移ごとに異なるテンプレを送れるようにする:
+ *   - onSubmit     : 応募完了時 (旧: templateId)
+ *   - onScheduled  : pending → scheduled (面接日時確定)
+ *   - onPassed     : scheduled → passed (合格通知)
+ *
+ * 後方互換:
+ *   - 旧形式 (templateId のみ設定) は triggers.onSubmit として読み込む。
  *
  * 設計:
  *   - 通知 (Slack) と同様に fail-soft。送信失敗で応募 API は失敗させない。
@@ -17,12 +25,26 @@ import { utcToJstFormat } from "./time-utils";
 import type { Env } from "../types/env";
 import type { ApplicationLike } from "./application-notification";
 
+export type AutoSendTrigger = "onSubmit" | "onScheduled" | "onPassed";
+
+export type AutoSendTriggers = {
+  /** 応募完了時に送るテンプレ id */
+  onSubmit?: string;
+  /** pending → scheduled (面接日時確定) 時に送るテンプレ id */
+  onScheduled?: string;
+  /** scheduled → passed (合格通知) 時に送るテンプレ id */
+  onPassed?: string;
+};
+
 export type AutoSendEmailConfig = {
   enabled?: boolean;
   gmailAccountId?: string;
-  templateId?: string;
   /** 任意。Reply-To ヘッダに使う。空文字は付けない。 */
   replyToEmail?: string;
+  /** 旧形式 (後方互換)。triggers.onSubmit へ fallback される。 */
+  templateId?: string;
+  /** 005-meet: 新形式。trigger 別に template id を指定する。 */
+  triggers?: AutoSendTriggers;
 };
 
 export type EmailTemplate = {
@@ -51,6 +73,21 @@ export function readAutoSendConfig(
   } catch {
     return undefined;
   }
+}
+
+/**
+ * 005-meet: trigger 名から template id を解決する。
+ * triggers が無い場合は旧 templateId フィールドを onSubmit へ fallback する。
+ * (後方互換: 旧設定は応募完了時のみ送るのが従来挙動)
+ */
+export function resolveTemplateIdForTrigger(
+  cfg: AutoSendEmailConfig,
+  trigger: AutoSendTrigger,
+): string | undefined {
+  const direct = cfg.triggers?.[trigger];
+  if (direct) return direct;
+  if (trigger === "onSubmit" && cfg.templateId) return cfg.templateId;
+  return undefined;
 }
 
 /**
@@ -85,30 +122,13 @@ export function readEmailTemplates(
 }
 
 /**
- * 応募作成成功後に呼ばれる Gmail 自動送信処理。
- * 送信失敗時もログ出力のみで例外は throw しない (fail-soft)。
+ * テンプレ vars を生成する。BE 内の通知 / メール送信共通フォーマット。
+ * 未設定 field は空文字に置換される (= placeholder が消える)。
  */
-export async function sendApplicationAutoEmail(
-  env: Env,
-  actionConfig: string | null | undefined,
+function buildTemplateVars(
   application: ApplicationLike,
-): Promise<void> {
-  const cfg = readAutoSendConfig(actionConfig);
-  if (!cfg?.enabled) return;
-  if (!cfg.gmailAccountId || !cfg.templateId) return;
-  if (!application.email) return;
-
-  const templates = readEmailTemplates(actionConfig);
-  const template = templates.find((t) => t.id === cfg.templateId);
-  if (!template) {
-    console.warn(
-      "[application-email] template not found:",
-      cfg.templateId,
-    );
-    return;
-  }
-
-  const vars: Record<string, string> = {
+): Record<string, string> {
+  return {
     name: application.name,
     email: application.email,
     appliedAt: utcToJstFormat(application.appliedAt),
@@ -118,8 +138,40 @@ export async function sendApplicationAutoEmail(
     interviewAt: application.interviewAt
       ? utcToJstFormat(application.interviewAt)
       : "",
+    // 005-meet: Calendar event 作成後に埋め込まれる Meet URL。
+    meetLink: application.meetLink ?? "",
   };
+}
 
+/**
+ * 共通 trigger 処理。指定 trigger に対応する template を解決して送信する。
+ * 失敗は fail-soft (例外を throw しない)。
+ */
+export async function sendApplicationEmailForTrigger(
+  env: Env,
+  actionConfig: string | null | undefined,
+  application: ApplicationLike,
+  trigger: AutoSendTrigger,
+): Promise<void> {
+  const cfg = readAutoSendConfig(actionConfig);
+  if (!cfg?.enabled) return;
+  if (!cfg.gmailAccountId) return;
+  if (!application.email) return;
+
+  const templateId = resolveTemplateIdForTrigger(cfg, trigger);
+  if (!templateId) return;
+
+  const templates = readEmailTemplates(actionConfig);
+  const template = templates.find((t) => t.id === templateId);
+  if (!template) {
+    console.warn(
+      `[application-email] template not found for ${trigger}:`,
+      templateId,
+    );
+    return;
+  }
+
+  const vars = buildTemplateVars(application);
   const subjectRaw =
     template.subject && template.subject.trim()
       ? template.subject
@@ -127,7 +179,9 @@ export async function sendApplicationAutoEmail(
   const subject = renderTemplate(subjectRaw, vars);
   const body = renderTemplate(template.body, vars);
   const replyTo =
-    cfg.replyToEmail && cfg.replyToEmail.trim() ? cfg.replyToEmail.trim() : undefined;
+    cfg.replyToEmail && cfg.replyToEmail.trim()
+      ? cfg.replyToEmail.trim()
+      : undefined;
 
   try {
     await sendGmailEmail(env, cfg.gmailAccountId, {
@@ -137,7 +191,24 @@ export async function sendApplicationAutoEmail(
       replyTo,
     });
   } catch (e) {
-    console.error("[application-email] send failed:", e);
-    // fail-soft: 応募自体は失敗させない
+    console.error(`[application-email] send failed for ${trigger}:`, e);
+    // fail-soft: 応募/status 更新自体は失敗させない
   }
+}
+
+/**
+ * 応募作成成功後に呼ばれる Gmail 自動送信処理 (応募完了時 = onSubmit)。
+ * 既存 API の互換を維持するため別エクスポートで残す。
+ */
+export async function sendApplicationAutoEmail(
+  env: Env,
+  actionConfig: string | null | undefined,
+  application: ApplicationLike,
+): Promise<void> {
+  await sendApplicationEmailForTrigger(
+    env,
+    actionConfig,
+    application,
+    "onSubmit",
+  );
 }

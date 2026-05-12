@@ -39,6 +39,9 @@ export type ApplicationLike = {
   howFound?: string | null;
   interviewLocation?: string | null;
   interviewAt?: string | null;
+  // 005-meet: Calendar event 作成後に埋め込まれる Google Meet URL。
+  // 未設定 (calendar event 未生成 or 失敗) は空文字に置換される。
+  meetLink?: string | null;
 };
 
 /**
