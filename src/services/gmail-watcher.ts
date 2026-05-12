@@ -311,8 +311,11 @@ async function refreshAccessToken(
 // === Gmail API ===
 
 async function fetchGmailList(accessToken: string): Promise<Response> {
+  // Hotfix: `-from:me -in:sent` で自分が送ったメール (応募者への自動返信等) を除外。
+  // 旧クエリ `newer_than:1d` だけだと Sent ラベル付きメール (= 自分発信) にも
+  // match してしまい、自動返信メール自体に対して通知/再返信が走る恐れがあった。
   const url =
-    `${GMAIL_LIST_URL}?q=${encodeURIComponent("newer_than:1d")}` +
+    `${GMAIL_LIST_URL}?q=${encodeURIComponent("newer_than:1d -from:me -in:sent")}` +
     `&maxResults=${LIST_MAX_RESULTS}`;
   return fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
