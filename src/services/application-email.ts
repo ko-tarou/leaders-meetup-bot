@@ -122,11 +122,36 @@ export function readEmailTemplates(
 }
 
 /**
+ * action.config を parse して slackInvite 設定を取り出す。
+ * slackInvite.url のみ placeholder 用に使う。
+ * 不正な JSON / 欠損は空文字を返す ({slackInviteLink} は空文字に置換される)。
+ *
+ * 005-slack-invite-monitor: slackInvite はメール placeholder 埋め込みと、
+ * cron での有効性監視 (src/services/slack-invite-monitor.ts) の 2 用途で参照される。
+ * ここではメール送信用に url のみ抜き出す。
+ */
+export function readSlackInviteUrl(
+  rawConfig: string | null | undefined,
+): string {
+  if (!rawConfig) return "";
+  try {
+    const parsed = JSON.parse(rawConfig) as {
+      slackInvite?: { url?: unknown };
+    };
+    const url = parsed.slackInvite?.url;
+    return typeof url === "string" ? url : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * テンプレ vars を生成する。BE 内の通知 / メール送信共通フォーマット。
  * 未設定 field は空文字に置換される (= placeholder が消える)。
  */
 function buildTemplateVars(
   application: ApplicationLike,
+  slackInviteLink: string,
 ): Record<string, string> {
   return {
     name: application.name,
@@ -140,6 +165,9 @@ function buildTemplateVars(
       : "",
     // 005-meet: Calendar event 作成後に埋め込まれる Meet URL。
     meetLink: application.meetLink ?? "",
+    // 005-slack-invite-monitor: event_actions.config.slackInvite.url。
+    // 合格メール等で Slack 招待リンクを案内するために使う。未設定は空文字。
+    slackInviteLink,
   };
 }
 
@@ -171,7 +199,8 @@ export async function sendApplicationEmailForTrigger(
     return;
   }
 
-  const vars = buildTemplateVars(application);
+  const slackInviteLink = readSlackInviteUrl(actionConfig);
+  const vars = buildTemplateVars(application, slackInviteLink);
   const subjectRaw =
     template.subject && template.subject.trim()
       ? template.subject
