@@ -260,6 +260,13 @@
       "when": 1785043200000,
       "tag": "0039_applications_meet",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1785648000000,
+      "tag": "0040_app_settings",
+      "breakpoints": true
     }
   ]
 }
