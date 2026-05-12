@@ -1,12 +1,12 @@
 /**
- * 005-feedback: Gemini 1.5 Flash でユーザーの「使い方の質問」に答えるサービス。
+ * 005-feedback: Gemini 2.5 Flash でユーザーの「使い方の質問」に答えるサービス。
  *
  * - DevHub Ops の機能概要を system_instruction に詰め込み、毎回のリクエストで送る。
  * - 過去 N 件の会話履歴は呼び出し側 (FE) が state として保持し、ここに渡す。
  * - 失敗時 (api key 未設定 / Gemini 4xx,5xx) は throw する → endpoint 側で
  *   500 を返し、FE は「エラーが発生しました」を表示する。
  *
- * モデル: gemini-1.5-flash (最も安価で高速、ヘルプ用途には十分)。
+ * モデル: gemini-2.5-flash (最も安価で高速、ヘルプ用途には十分)。
  */
 import type { Env } from "../types/env";
 
@@ -16,7 +16,7 @@ export type ChatHistoryItem = {
 };
 
 const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 // マスタープロンプト。DevHub Ops の機能を網羅的に列挙し、AI がドメイン知識
 // 無しでも質問に答えられるようにする。
