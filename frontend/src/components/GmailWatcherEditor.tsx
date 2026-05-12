@@ -47,6 +47,23 @@ const PLACEHOLDERS: { key: string; desc: string }[] = [
   { key: "snippet", desc: "本文プレビュー (Gmail snippet)" },
 ];
 
+// Sprint 27: 自動返信 subject / body で使える placeholder。
+// BE: src/routes/slack/interactions.ts:handleGmailWatcherReply と同期。
+const REPLY_PLACEHOLDERS: { key: string; desc: string }[] = [
+  { key: "senderName", desc: "差出人の表示名 (From の <> 前の部分)" },
+  { key: "senderEmail", desc: "差出人のメールアドレス" },
+  { key: "originalSubject", desc: "元メールの件名" },
+  { key: "receivedAt", desc: "ボタン押下時刻 (JST)" },
+];
+
+const DEFAULT_REPLY_SUBJECT = "ご連絡ありがとうございます";
+const DEFAULT_REPLY_BODY = `{senderName} 様
+
+ご連絡ありがとうございます。
+内容を確認の上、改めてご返信いたします。
+
+DevelopersHub 運営`;
+
 // 新規 rule の初期値。
 function emptyRule(name = ""): GmailWatcherRule {
   return {
@@ -775,7 +792,127 @@ function RuleCard(props: RuleCardProps) {
               ))}
             </div>
           </div>
+
+          <AutoReplySection
+            rule={rule}
+            disabled={disabled}
+            onChange={onChange}
+          />
         </div>
+      )}
+    </div>
+  );
+}
+
+// === Sprint 27: AutoReply UI section ===
+//
+// rule.autoReply の編集 UI。
+//   - 「自動返信を有効化」チェック (toggle)
+//   - 件名 (input) / 本文 (textarea) + placeholder ヘルプ
+// チェック OFF にした瞬間に subject/body を消したくないので、enabled だけ
+// false にして subject/body は draft に残す (再 ON で復帰)。
+
+type AutoReplySectionProps = {
+  rule: GmailWatcherRule;
+  disabled: boolean;
+  onChange: (patch: Partial<GmailWatcherRule>) => void;
+};
+
+function AutoReplySection({
+  rule,
+  disabled,
+  onChange,
+}: AutoReplySectionProps) {
+  const autoReply = rule.autoReply ?? {
+    enabled: false,
+    subject: "",
+    body: "",
+  };
+
+  const toggleEnabled = (on: boolean) => {
+    if (on) {
+      // 初回 ON 時にデフォルト雛形を入れる (subject/body 両方空のときのみ)。
+      const subject = autoReply.subject.trim()
+        ? autoReply.subject
+        : DEFAULT_REPLY_SUBJECT;
+      const body = autoReply.body.trim()
+        ? autoReply.body
+        : DEFAULT_REPLY_BODY;
+      onChange({ autoReply: { enabled: true, subject, body } });
+    } else {
+      onChange({
+        autoReply: {
+          enabled: false,
+          subject: autoReply.subject,
+          body: autoReply.body,
+        },
+      });
+    }
+  };
+
+  return (
+    <div style={styles.autoReplySection}>
+      <div style={styles.sectionHeader}>
+        <span style={styles.label}>自動返信</span>
+        <span style={styles.metaSmall}>
+          有効化すると、通知に「自動返信を送る」ボタンが付きます。ボタン押下時に
+          Gmail から元メールへ返信します。
+        </span>
+      </div>
+      <label style={styles.toggleRow}>
+        <input
+          type="checkbox"
+          checked={autoReply.enabled}
+          disabled={disabled}
+          onChange={(e) => toggleEnabled(e.target.checked)}
+        />
+        <span>自動返信を有効化</span>
+      </label>
+
+      {autoReply.enabled && (
+        <>
+          <div style={{ ...styles.field, marginTop: "0.5rem" }}>
+            <label style={styles.label}>件名</label>
+            <input
+              value={autoReply.subject}
+              onChange={(e) =>
+                onChange({
+                  autoReply: { ...autoReply, subject: e.target.value },
+                })
+              }
+              disabled={disabled}
+              placeholder={DEFAULT_REPLY_SUBJECT}
+              style={styles.input}
+            />
+            <div style={styles.metaSmall}>
+              「Re: 」は送信時に自動で前置されます。
+            </div>
+          </div>
+
+          <div style={styles.field}>
+            <label style={styles.label}>本文</label>
+            <textarea
+              value={autoReply.body}
+              onChange={(e) =>
+                onChange({
+                  autoReply: { ...autoReply, body: e.target.value },
+                })
+              }
+              rows={8}
+              disabled={disabled}
+              placeholder={DEFAULT_REPLY_BODY}
+              style={styles.textarea}
+            />
+            <div style={styles.placeholderList}>
+              {REPLY_PLACEHOLDERS.map((p) => (
+                <div key={p.key} style={styles.placeholderRow}>
+                  <code style={styles.placeholderKey}>{`{${p.key}}`}</code>
+                  <span style={styles.placeholderDesc}>{p.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -942,6 +1079,13 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "0.8125rem",
     color: colors.text,
     lineHeight: 1.5,
+  },
+  // Sprint 27: 自動返信セクション。messageTemplate との視覚的境界をつけるため
+  // 上方向に余白 + 上 border。
+  autoReplySection: {
+    marginTop: "1rem",
+    paddingTop: "0.75rem",
+    borderTop: `1px dashed ${colors.border}`,
   },
 };
 

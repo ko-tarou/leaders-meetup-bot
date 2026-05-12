@@ -27,6 +27,18 @@ import {
 } from "../../services/sticky-pr-review-board";
 import { createSlackClientForWorkspace } from "../../services/workspace";
 import { getSlackClient, type SlackVariables } from "./utils";
+import { gmailAccounts } from "../../db/schema";
+import {
+  parseWatcherConfig,
+  type WatcherRule,
+} from "../../services/gmail-watcher";
+import {
+  fetchOriginalMessage,
+  parseFromHeader,
+  sendGmailReply,
+} from "../../services/gmail-reply";
+import { renderTemplate } from "../../services/application-notification";
+import { utcToJstFormat } from "../../services/time-utils";
 
 export const interactionsRouter = new Hono<{
   Bindings: Env;
@@ -582,6 +594,55 @@ interactionsRouter.post("/interactions", async (c) => {
 
       return c.json({ ok: true });
     }
+
+    // === Sprint 27: Gmail watcher 自動返信ボタン ===
+    // gmail_watcher_reply: Gmail API で original message に返信し、
+    //   Slack メッセージを「✅ 返信送信済」表示に更新する (ボタン削除)。
+    // gmail_watcher_skip:  Slack メッセージを「❌ スキップ済」表示に更新する。
+    //
+    // 通知時点で rule.autoReply.enabled=true だった rule のみ呼ばれる。
+    // value JSON:
+    //   reply: {gmailAccountId, messageId, ruleId, workspaceId, channelId}
+    //   skip:  {messageId}
+    if (
+      action.action_id === "gmail_watcher_reply" ||
+      action.action_id === "gmail_watcher_skip"
+    ) {
+      const responseUrl: string | null = payload.response_url ?? null;
+      const userId: string | undefined = payload.user?.id;
+      const valueStr: string | undefined = action.value;
+      const isReply = action.action_id === "gmail_watcher_reply";
+
+      // skip は即時 update して終了。
+      if (!isReply) {
+        c.executionCtx.waitUntil(
+          updateOriginalMessage(responseUrl, `❌ <@${userId ?? ""}> がスキップしました`),
+        );
+        return c.json({ ok: true });
+      }
+
+      if (!valueStr || !userId) return c.json({ ok: true });
+      let payloadValue: GmailReplyButtonValue | null = null;
+      try {
+        payloadValue = JSON.parse(valueStr) as GmailReplyButtonValue;
+      } catch {
+        payloadValue = null;
+      }
+      if (
+        !payloadValue ||
+        !payloadValue.gmailAccountId ||
+        !payloadValue.messageId ||
+        !payloadValue.ruleId
+      ) {
+        return c.json({ ok: true });
+      }
+
+      c.executionCtx.waitUntil(
+        handleGmailWatcherReply(c.env, payloadValue, userId, responseUrl),
+      );
+
+      return c.json({ ok: true });
+    }
   }
 
   if (payload.type === "view_submission") {
@@ -695,3 +756,178 @@ interactionsRouter.post("/interactions", async (c) => {
 
   return c.json({ ok: true });
 });
+
+// =============================================================================
+// Sprint 27: Gmail watcher 自動返信ハンドラ
+// =============================================================================
+
+type GmailReplyButtonValue = {
+  gmailAccountId: string;
+  messageId: string;
+  ruleId: string;
+  workspaceId?: string;
+  channelId?: string;
+};
+
+/**
+ * 「自動返信を送る」ボタン押下時の本体処理。waitUntil 配下で呼ばれる。
+ *
+ * フロー:
+ *   1. gmail_accounts.watcher_config を読み、ruleId に対応する rule を探す
+ *   2. rule.autoReply が無い / enabled=false なら 「無効化済み」と表示
+ *   3. Gmail API で original message を取得 (From / Subject / Message-ID / threadId)
+ *   4. Reply 構築 + Gmail send (threadId 指定で同一スレッド)
+ *   5. Slack メッセージを「✅ 返信送信済」表示に update (ボタン削除)
+ *
+ * fail-soft: 各段階で失敗したら Slack メッセージにエラー文を反映し、log を出す。
+ * Gmail 送信失敗で notification 自体は壊さない (= 既に届いた通知メッセージは
+ * 「❌ 送信失敗」表示に書き換わるだけで Slack 全体は止めない)。
+ */
+async function handleGmailWatcherReply(
+  env: Env,
+  v: GmailReplyButtonValue,
+  actorUserId: string,
+  responseUrl: string | null,
+): Promise<void> {
+  try {
+    // 1) rule を find
+    const d1 = drizzle(env.DB);
+    const account = await d1
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, v.gmailAccountId))
+      .get();
+    if (!account) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ Gmail アカウントが見つかりませんでした",
+      );
+      return;
+    }
+    const cfg = parseWatcherConfig(account.watcherConfig);
+    const rule = findRuleById(cfg, v.ruleId);
+    if (!rule) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ ルールが見つかりませんでした (設定が変更された可能性があります)",
+      );
+      return;
+    }
+    if (!rule.autoReply || !rule.autoReply.enabled) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ 自動返信が無効化されています",
+      );
+      return;
+    }
+
+    // 2) original message 取得
+    const original = await fetchOriginalMessage(
+      env,
+      v.gmailAccountId,
+      v.messageId,
+    );
+    if (!original.threadId) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ 元メールの threadId を取得できませんでした",
+      );
+      return;
+    }
+    const sender = parseFromHeader(original.fromHeader);
+    if (!sender.email) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ 元メールの差出人アドレスを解析できませんでした",
+      );
+      return;
+    }
+
+    // 3) placeholder 展開
+    const vars: Record<string, string> = {
+      senderName: sender.name || sender.email,
+      senderEmail: sender.email,
+      originalSubject: original.subjectHeader,
+      receivedAt: utcToJstFormat(new Date().toISOString()),
+    };
+    const renderedSubject = renderTemplate(
+      rule.autoReply.subject || "",
+      vars,
+    ).trim();
+    const renderedBody = renderTemplate(rule.autoReply.body || "", vars);
+    if (!renderedSubject || !renderedBody.trim()) {
+      await updateOriginalMessage(
+        responseUrl,
+        "⚠️ 自動返信の件名または本文が空のため送信できませんでした",
+      );
+      return;
+    }
+    // Re: 前置 (二重 Re: を避けるため、すでに先頭にあるなら付けない)
+    const subject = /^(re:|RE:|Re:)/.test(renderedSubject)
+      ? renderedSubject
+      : `Re: ${renderedSubject}`;
+
+    // 4) 送信
+    await sendGmailReply(env, v.gmailAccountId, {
+      threadId: original.threadId,
+      toAddress: original.fromHeader || sender.email,
+      fromAddress: account.email,
+      inReplyToMessageId: original.messageIdHeader,
+      subject,
+      body: renderedBody,
+    });
+
+    // 5) Slack message を「送信済」表示に更新
+    await updateOriginalMessage(
+      responseUrl,
+      `✅ <@${actorUserId}> が自動返信を送信しました\n宛先: ${sender.email}\n件名: ${subject}`,
+    );
+  } catch (e) {
+    console.error("[gmail-watcher-reply] failed:", e);
+    const msg = e instanceof Error ? e.message : String(e);
+    await updateOriginalMessage(
+      responseUrl,
+      `❌ 自動返信の送信に失敗しました: ${msg.slice(0, 200)}`,
+    );
+  }
+}
+
+/** rules + elseRule から ruleId に一致する rule を返す。 */
+function findRuleById(
+  cfg: ReturnType<typeof parseWatcherConfig>,
+  ruleId: string,
+): WatcherRule | null {
+  if (!cfg) return null;
+  for (const r of cfg.rules) {
+    if (r.id === ruleId) return r;
+  }
+  if (cfg.elseRule && cfg.elseRule.id === ruleId) return cfg.elseRule;
+  return null;
+}
+
+/**
+ * response_url に POST して original message を text-only に更新する。
+ * replace_original=true で「ボタンも消えた状態」にする。
+ * response_url は 30 分有効。失敗しても fail-soft (log のみ)。
+ */
+async function updateOriginalMessage(
+  responseUrl: string | null,
+  text: string,
+): Promise<void> {
+  if (!responseUrl) return;
+  try {
+    await fetch(responseUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        replace_original: true,
+        text,
+        // blocks を空配列にせず、明示的に section block 1 つにすることで
+        // Slack 側で「テキストだけ・ボタン無し」のレイアウトになる。
+        blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+      }),
+    });
+  } catch (e) {
+    console.error("[gmail-watcher-reply] response_url update failed:", e);
+  }
+}

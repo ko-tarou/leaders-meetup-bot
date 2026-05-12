@@ -337,6 +337,16 @@ export type GmailAccount = {
 //   後方互換のため field は型に残すが、新規保存時は使用しない。
 //
 // messageTemplate 未設定 / 空文字なら BE のデフォルト文面が使われる。
+// Sprint 27: rule ごとの「自動返信」設定。
+// enabled=true なら Slack 通知に「自動返信を送る / スキップ」ボタンが付き、
+// クリックされた瞬間に Gmail API 経由で original message に返信する。
+// subject / body は placeholder ({senderName} 等) を含められる。
+export type GmailWatcherAutoReply = {
+  enabled: boolean;
+  subject: string;
+  body: string;
+};
+
 export type GmailWatcherRule = {
   id: string;
   name: string;
@@ -346,6 +356,7 @@ export type GmailWatcherRule = {
   channelName?: string;
   mentionUserIds: string[];
   messageTemplate?: string;
+  autoReply?: GmailWatcherAutoReply;
 };
 
 export type GmailWatcherConfig = {
