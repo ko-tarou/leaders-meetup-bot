@@ -5,7 +5,7 @@ import type {
   EmailTemplate,
   EventAction,
   GmailAccount,
-  SlackInviteConfig,
+  SlackInvite,
   SlackUser,
   Workspace,
 } from "../types";
@@ -144,52 +144,76 @@ function parseInitialAutoSend(
   }
 }
 
-// 005-slack-invite-monitor: event_actions.config.slackInvite を取り出す。
-// 不正な JSON や欠損は空オブジェクトを返す。
+// 005-slack-invite-monitor: event_actions.config.slackInvites を取り出す。
+// 不正な JSON や欠損は空配列を返す。
 //   - url: メールテンプレ {slackInviteLink} placeholder で置換される。
 //   - monitor*: BE cron が 1 日 1 回 GET し無効化遷移時に Slack 通知する設定。
 //   - lastCheckedAt / lastStatus / lastNotifiedAt: BE が cron で書き換える運用フィールド。
 //     FE 側で保存 payload に乗せても BE が上書きする前提で、編集 UI からは触らない。
-function parseInitialSlackInvite(
+//
+// 後方互換: 旧 config.slackInvite (単数) があれば [old] に変換して読み込む
+// (id auto-gen, name="Slack")。次回保存で正規形 slackInvites に統一される。
+function normalizeOneInvite(raw: unknown, fallbackName: string): SlackInvite {
+  const r = (raw ?? {}) as Partial<SlackInvite>;
+  return {
+    id:
+      typeof r.id === "string" && r.id.length > 0
+        ? r.id
+        : genId(),
+    name: typeof r.name === "string" ? r.name : fallbackName,
+    url: typeof r.url === "string" ? r.url : undefined,
+    monitorEnabled: !!r.monitorEnabled,
+    monitorWorkspaceId:
+      typeof r.monitorWorkspaceId === "string"
+        ? r.monitorWorkspaceId
+        : undefined,
+    monitorChannelId:
+      typeof r.monitorChannelId === "string"
+        ? r.monitorChannelId
+        : undefined,
+    monitorChannelName:
+      typeof r.monitorChannelName === "string"
+        ? r.monitorChannelName
+        : undefined,
+    monitorMentionUserIds: Array.isArray(r.monitorMentionUserIds)
+      ? r.monitorMentionUserIds.filter(
+          (u): u is string => typeof u === "string" && u.length > 0,
+        )
+      : [],
+    lastCheckedAt:
+      typeof r.lastCheckedAt === "string" ? r.lastCheckedAt : undefined,
+    lastStatus:
+      r.lastStatus === "valid" || r.lastStatus === "invalid"
+        ? r.lastStatus
+        : undefined,
+    lastNotifiedAt:
+      typeof r.lastNotifiedAt === "string" ? r.lastNotifiedAt : undefined,
+  };
+}
+
+function parseInitialSlackInvites(
   configRaw: string | null | undefined,
-): SlackInviteConfig {
+): SlackInvite[] {
   try {
     const cfg = JSON.parse(configRaw || "{}");
-    const raw = (cfg as { slackInvite?: SlackInviteConfig }).slackInvite;
-    if (!raw || typeof raw !== "object") return {};
-    return {
-      url: typeof raw.url === "string" ? raw.url : undefined,
-      monitorEnabled: !!raw.monitorEnabled,
-      monitorWorkspaceId:
-        typeof raw.monitorWorkspaceId === "string"
-          ? raw.monitorWorkspaceId
-          : undefined,
-      monitorChannelId:
-        typeof raw.monitorChannelId === "string"
-          ? raw.monitorChannelId
-          : undefined,
-      monitorChannelName:
-        typeof raw.monitorChannelName === "string"
-          ? raw.monitorChannelName
-          : undefined,
-      monitorMentionUserIds: Array.isArray(raw.monitorMentionUserIds)
-        ? raw.monitorMentionUserIds.filter(
-            (u): u is string => typeof u === "string" && u.length > 0,
-          )
-        : [],
-      lastCheckedAt:
-        typeof raw.lastCheckedAt === "string" ? raw.lastCheckedAt : undefined,
-      lastStatus:
-        raw.lastStatus === "valid" || raw.lastStatus === "invalid"
-          ? raw.lastStatus
-          : undefined,
-      lastNotifiedAt:
-        typeof raw.lastNotifiedAt === "string"
-          ? raw.lastNotifiedAt
-          : undefined,
-    };
+    if (cfg && typeof cfg === "object" && !Array.isArray(cfg)) {
+      const arr = (cfg as { slackInvites?: unknown }).slackInvites;
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((i): i is object => i !== null && typeof i === "object")
+          .map((i, idx) =>
+            normalizeOneInvite(i, idx === 0 ? "Slack" : `Slack #${idx + 1}`),
+          );
+      }
+      // 後方互換: 旧 slackInvite (単数)
+      const legacy = (cfg as { slackInvite?: unknown }).slackInvite;
+      if (legacy && typeof legacy === "object") {
+        return [normalizeOneInvite(legacy, "Slack")];
+      }
+    }
+    return [];
   } catch {
-    return {};
+    return [];
   }
 }
 
@@ -239,15 +263,19 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
   );
   const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
   const [gmailAccountsLoaded, setGmailAccountsLoaded] = useState(false);
-  // 005-slack-invite-monitor: Slack 招待リンク設定。templates と同じ「保存」ボタンで永続化する。
-  const [slackInvite, setSlackInvite] = useState<SlackInviteConfig>(() =>
-    parseInitialSlackInvite(action.config),
+  // 005-slack-invite-monitor: Slack 招待リンク (複数登録対応)。
+  // 配列で保持し、templates と同じ「保存」ボタンで永続化する。
+  const [slackInvites, setSlackInvites] = useState<SlackInvite[]>(() =>
+    parseInitialSlackInvites(action.config),
   );
-  const [slackInviteExpanded, setSlackInviteExpanded] = useState(false);
+  const [slackInvitesExpanded, setSlackInvitesExpanded] = useState(false);
+  // 編集中の invite (workspace member 取得用)。 null なら member 取得しない。
+  const [activeInviteId, setActiveInviteId] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
-  const [workspaceMembers, setWorkspaceMembers] = useState<SlackUser[] | null>(
-    null,
-  );
+  // invite ごとに members を cache する: workspaceId → list
+  const [workspaceMembers, setWorkspaceMembers] = useState<
+    Record<string, SlackUser[]>
+  >({});
   const [memberSearch, setMemberSearch] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,10 +300,10 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
     };
   }, []);
 
-  // 005-slack-invite-monitor: 監視設定編集を開いたタイミングで workspace 一覧を取得。
-  // expand 前は通信しない (display モードでは workspace 名表示も config の値そのまま使う)。
+  // 005-slack-invite-monitor: 編集 expand 時に workspace 一覧を取得。
+  // expand 前は通信しない (display モードでは workspace 名は config 値そのまま表示)。
   useEffect(() => {
-    if (!slackInviteExpanded) return;
+    if (!slackInvitesExpanded) return;
     if (workspaces !== null) return;
     let cancelled = false;
     api.workspaces
@@ -291,73 +319,100 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [slackInviteExpanded, workspaces]);
+  }, [slackInvitesExpanded, workspaces]);
 
-  // workspace が選ばれたらメンバー一覧を取得 (メンション選択用)
+  // activeInvite の workspace が選ばれたらメンバー一覧を取得 (workspace 単位で cache)。
+  const activeInvite = useMemo(
+    () => slackInvites.find((i) => i.id === activeInviteId) ?? null,
+    [slackInvites, activeInviteId],
+  );
+
   useEffect(() => {
-    const wsId = slackInvite.monitorWorkspaceId;
-    if (!slackInviteExpanded) return;
-    if (!wsId) {
-      setWorkspaceMembers(null);
-      return;
-    }
+    if (!slackInvitesExpanded) return;
+    const wsId = activeInvite?.monitorWorkspaceId;
+    if (!wsId) return;
+    if (workspaceMembers[wsId]) return; // 取得済
     let cancelled = false;
-    setWorkspaceMembers(null);
     api.workspaces
       .members(wsId)
       .then((list) => {
         if (cancelled) return;
-        setWorkspaceMembers(Array.isArray(list) ? list : []);
+        setWorkspaceMembers((prev) => ({
+          ...prev,
+          [wsId]: Array.isArray(list) ? list : [],
+        }));
       })
       .catch(() => {
         if (cancelled) return;
-        setWorkspaceMembers([]);
+        setWorkspaceMembers((prev) => ({ ...prev, [wsId]: [] }));
       });
     return () => {
       cancelled = true;
     };
-  }, [slackInviteExpanded, slackInvite.monitorWorkspaceId]);
+  }, [slackInvitesExpanded, activeInvite?.monitorWorkspaceId, workspaceMembers]);
+
+  const activeWsMembers = useMemo<SlackUser[] | null>(() => {
+    const wsId = activeInvite?.monitorWorkspaceId;
+    if (!wsId) return null;
+    return workspaceMembers[wsId] ?? null;
+  }, [activeInvite, workspaceMembers]);
 
   const filteredMembers = useMemo(() => {
-    if (!workspaceMembers) return [];
+    if (!activeWsMembers) return [];
     const q = memberSearch.trim().toLowerCase();
-    if (!q) return workspaceMembers;
-    return workspaceMembers.filter(
+    if (!q) return activeWsMembers;
+    return activeWsMembers.filter(
       (u) =>
         u.name.toLowerCase().includes(q) ||
         (u.realName?.toLowerCase().includes(q) ?? false) ||
         (u.displayName?.toLowerCase().includes(q) ?? false) ||
         u.id.toLowerCase().includes(q),
     );
-  }, [workspaceMembers, memberSearch]);
+  }, [activeWsMembers, memberSearch]);
 
-  const mentionDisplayNames = useMemo(() => {
-    const ids = slackInvite.monitorMentionUserIds ?? [];
-    if (!workspaceMembers) return ids.map((id) => id);
-    const byId = new Map(workspaceMembers.map((u) => [u.id, u] as const));
-    return ids.map((id) => {
-      const u = byId.get(id);
-      return u ? u.displayName || u.realName || u.name : id;
-    });
-  }, [slackInvite.monitorMentionUserIds, workspaceMembers]);
-
-  const workspaceName = useMemo(() => {
-    const wsId = slackInvite.monitorWorkspaceId;
+  const lookupWorkspaceName = (wsId: string | undefined): string => {
     if (!wsId) return "";
     const w = (workspaces ?? []).find((x) => x.id === wsId);
     return w?.name ?? wsId;
-  }, [workspaces, slackInvite.monitorWorkspaceId]);
+  };
 
-  const toggleMention = (id: string) => {
-    setSlackInvite((prev) => {
-      const cur = prev.monitorMentionUserIds ?? [];
-      return {
-        ...prev,
-        monitorMentionUserIds: cur.includes(id)
-          ? cur.filter((x) => x !== id)
-          : [...cur, id],
-      };
-    });
+  // 1 invite を patch する汎用 setter
+  const updateInvite = (id: string, patch: Partial<SlackInvite>) => {
+    setSlackInvites((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+    );
+  };
+
+  const toggleInviteMention = (inviteId: string, userId: string) => {
+    setSlackInvites((prev) =>
+      prev.map((i) => {
+        if (i.id !== inviteId) return i;
+        const cur = i.monitorMentionUserIds ?? [];
+        return {
+          ...i,
+          monitorMentionUserIds: cur.includes(userId)
+            ? cur.filter((x) => x !== userId)
+            : [...cur, userId],
+        };
+      }),
+    );
+  };
+
+  const addInvite = () => {
+    const newInvite: SlackInvite = {
+      id: genId(),
+      name: "",
+      url: "",
+      monitorEnabled: false,
+      monitorMentionUserIds: [],
+    };
+    setSlackInvites((prev) => [...prev, newInvite]);
+    setActiveInviteId(newInvite.id);
+  };
+
+  const removeInvite = (id: string) => {
+    setSlackInvites((prev) => prev.filter((i) => i.id !== id));
+    setActiveInviteId((cur) => (cur === id ? null : cur));
   };
 
   const updateAt = (idx: number, patch: Partial<EmailTemplate>) => {
@@ -417,20 +472,21 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
       return;
     }
 
-    // 005-slack-invite-monitor: 監視 enabled なら workspace / channel 必須。
-    if (slackInvite.monitorEnabled) {
-      if (!slackInvite.url || !slackInvite.url.trim()) {
-        setError(
-          "Slack 招待リンク監視が有効ですが、招待リンク URL が未入力です。",
-        );
+    // 005-slack-invite-monitor: 各 invite 単位で監視 enabled なら必須項目チェック。
+    for (let i = 0; i < slackInvites.length; i++) {
+      const inv = slackInvites[i];
+      if (!inv.monitorEnabled) continue;
+      const label = inv.name?.trim() || `招待リンク #${i + 1}`;
+      if (!inv.url || !inv.url.trim()) {
+        setError(`「${label}」: 監視が有効ですが、招待リンク URL が未入力です。`);
         return;
       }
-      if (!slackInvite.monitorWorkspaceId) {
-        setError("Slack 招待リンク監視: 通知先ワークスペースが未選択です。");
+      if (!inv.monitorWorkspaceId) {
+        setError(`「${label}」: 監視: 通知先ワークスペースが未選択です。`);
         return;
       }
-      if (!slackInvite.monitorChannelId) {
-        setError("Slack 招待リンク監視: 通知先チャンネルが未選択です。");
+      if (!inv.monitorChannelId) {
+        setError(`「${label}」: 監視: 通知先チャンネルが未選択です。`);
         return;
       }
     }
@@ -498,38 +554,38 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
           : {}),
       };
 
-      // 005-slack-invite-monitor: slackInvite を merge 保存。
+      // 005-slack-invite-monitor: slackInvites (配列) を merge 保存。
       // BE が cron で書き換える運用フィールド (lastCheckedAt / lastStatus / lastNotifiedAt) は
-      // FE で触らず保持する。「既存値を捨てて payload で上書き」だと cron 状態が消える。
-      const existingSl =
-        typeof cfg.slackInvite === "object" && cfg.slackInvite !== null
-          ? (cfg.slackInvite as Record<string, unknown>)
-          : {};
-      const trimmedUrl = (slackInvite.url ?? "").trim();
-      const slackInviteOut: Record<string, unknown> = {
-        // 既存の運用フィールド (lastCheckedAt / lastStatus / lastNotifiedAt) を保持
-        ...existingSl,
-        url: trimmedUrl || undefined,
-        monitorEnabled: !!slackInvite.monitorEnabled,
-      };
-      if (slackInvite.monitorEnabled) {
-        slackInviteOut.monitorWorkspaceId = slackInvite.monitorWorkspaceId;
-        slackInviteOut.monitorChannelId = slackInvite.monitorChannelId;
-        if (slackInvite.monitorChannelName) {
-          slackInviteOut.monitorChannelName = slackInvite.monitorChannelName;
-        } else {
-          delete slackInviteOut.monitorChannelName;
+      // FE で触らず保持する。state 自体が「初期 parse 値 + ユーザー編集」なので、
+      // 編集 UI に出ていない運用フィールドはそのまま残る。
+      //
+      // 旧 slackInvite (単数) キーは parse 時に slackInvites へ統合済み。保存時は削除する。
+      const cleanedInvites = slackInvites.map((inv) => {
+        const out: Record<string, unknown> = {
+          id: inv.id,
+          name: (inv.name ?? "").trim(),
+          url: (inv.url ?? "").trim() || undefined,
+          monitorEnabled: !!inv.monitorEnabled,
+        };
+        // 運用フィールドは保持 (BE cron が書き込んだ値)
+        if (inv.lastCheckedAt) out.lastCheckedAt = inv.lastCheckedAt;
+        if (inv.lastStatus) out.lastStatus = inv.lastStatus;
+        if (inv.lastNotifiedAt) out.lastNotifiedAt = inv.lastNotifiedAt;
+        if (inv.monitorEnabled) {
+          out.monitorWorkspaceId = inv.monitorWorkspaceId;
+          out.monitorChannelId = inv.monitorChannelId;
+          if (inv.monitorChannelName) {
+            out.monitorChannelName = inv.monitorChannelName;
+          }
+          out.monitorMentionUserIds = inv.monitorMentionUserIds ?? [];
         }
-        slackInviteOut.monitorMentionUserIds =
-          slackInvite.monitorMentionUserIds ?? [];
-      } else {
-        // 監視 disable 時は通知先フィールドは保持しない (UI 上 hidden)
-        delete slackInviteOut.monitorWorkspaceId;
-        delete slackInviteOut.monitorChannelId;
-        delete slackInviteOut.monitorChannelName;
-        delete slackInviteOut.monitorMentionUserIds;
+        return out;
+      });
+      cfg.slackInvites = cleanedInvites;
+      // 旧 single key は削除 (正規形のみ保持)
+      if ("slackInvite" in cfg) {
+        delete cfg.slackInvite;
       }
-      cfg.slackInvite = slackInviteOut;
 
       await api.events.actions.update(eventId, action.id, {
         config: JSON.stringify(cfg),
@@ -670,194 +726,284 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         </div>
       </div>
 
-      {/* 005-slack-invite-monitor: Slack 招待リンク設定 + 1 日 1 回の有効性監視 */}
+      {/* 005-slack-invite-monitor: Slack 招待リンク (複数登録対応) + 1 日 1 回の有効性監視 */}
       <div style={styles.autoSendBox}>
         <button
           type="button"
-          onClick={() => setSlackInviteExpanded((v) => !v)}
+          onClick={() => setSlackInvitesExpanded((v) => !v)}
           style={styles.slackInviteToggle}
-          aria-expanded={slackInviteExpanded}
+          aria-expanded={slackInvitesExpanded}
         >
           <span style={styles.slackInviteToggleArrow}>
-            {slackInviteExpanded ? "▾" : "▸"}
+            {slackInvitesExpanded ? "▾" : "▸"}
           </span>
           <strong>Slack 招待リンク</strong>
           <span style={styles.slackInviteSummary}>
-            {slackInvite.url
-              ? `登録済${slackInvite.monitorEnabled ? " / 監視ON" : ""}`
-              : "未設定"}
-            {slackInvite.lastStatus &&
-              ` / ${slackInvite.lastStatus === "valid" ? "有効" : "無効"}`}
+            {slackInvites.length === 0
+              ? "未設定"
+              : `${slackInvites.length} 件登録`}
+            {slackInvites.some((i) => i.monitorEnabled) && " / 監視ON あり"}
           </span>
         </button>
         <p style={styles.helpHint}>
           応募完了メールや合格通知メールの本文に <code>{"{slackInviteLink}"}</code>{" "}
-          と書くと、ここに登録した URL に置換されます。「監視を有効化」すると、
-          1 日に 1 回 リンクが有効か自動チェックし、無効化されていたら通知先チャンネルに知らせます。
+          と書くと、登録した全 URL が「- 表示名: URL」形式で改行区切りで挿入されます
+          (1 件のみのときは URL 単独)。「監視を有効化」した招待リンクは、
+          1 日に 1 回 有効性を自動チェックし、無効化されていたら通知先チャンネルに知らせます。
         </p>
 
-        {slackInviteExpanded && (
+        {/* display モード: 概要のみ */}
+        {!slackInvitesExpanded && slackInvites.length > 0 && (
+          <ol style={styles.summaryList}>
+            {slackInvites.map((inv, idx) => (
+              <li key={inv.id} style={styles.summaryItem}>
+                <span style={{ fontWeight: 500 }}>
+                  {inv.name?.trim() || `招待リンク #${idx + 1}`}
+                </span>
+                {": "}
+                <span style={styles.summaryUrl}>
+                  {inv.url || "(URL 未設定)"}
+                </span>
+                <span style={styles.helpHint}>
+                  {" "}
+                  ({inv.monitorEnabled ? "監視ON" : "監視OFF"}
+                  {inv.lastStatus
+                    ? ` / ${inv.lastStatus === "valid" ? "有効" : "無効"}`
+                    : ""}
+                  )
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {slackInvitesExpanded && (
           <>
-            <div style={styles.autoSendRow}>
-              <label style={styles.autoSendLabel}>招待リンク URL</label>
-              <input
-                type="url"
-                value={slackInvite.url ?? ""}
-                onChange={(e) =>
-                  setSlackInvite((prev) => ({ ...prev, url: e.target.value }))
-                }
-                placeholder="https://join.slack.com/t/.../zt-xxxx"
-                disabled={submitting}
-                style={styles.select}
-              />
-            </div>
+            {slackInvites.length === 0 && (
+              <div style={styles.empty}>招待リンクが登録されていません</div>
+            )}
 
-            <div style={styles.autoSendRow}>
-              <label style={{ ...styles.toggleLabel, marginLeft: 0 }}>
-                <input
-                  type="checkbox"
-                  checked={!!slackInvite.monitorEnabled}
-                  onChange={(e) =>
-                    setSlackInvite((prev) => ({
-                      ...prev,
-                      monitorEnabled: e.target.checked,
-                    }))
-                  }
-                  disabled={submitting}
-                />
-                <span>監視を有効化 (1 日 1 回の有効性チェック)</span>
-              </label>
-            </div>
-
-            {slackInvite.monitorEnabled && (
-              <>
-                <div style={styles.autoSendRow}>
-                  <label style={styles.autoSendLabel}>通知先 Workspace</label>
-                  {workspaces === null ? (
-                    <span style={styles.helpHint}>取得中...</span>
-                  ) : (
-                    <select
-                      value={slackInvite.monitorWorkspaceId ?? ""}
+            {slackInvites.map((inv, idx) => {
+              const isActive = activeInviteId === inv.id;
+              return (
+                <div key={inv.id} style={styles.inviteCard}>
+                  <div style={styles.inviteCardHeader}>
+                    <input
+                      type="text"
+                      value={inv.name ?? ""}
                       onChange={(e) =>
-                        setSlackInvite((prev) => ({
-                          ...prev,
-                          monitorWorkspaceId: e.target.value || undefined,
-                          // workspace を切り替えたら channel / mention reset
-                          monitorChannelId: undefined,
-                          monitorChannelName: undefined,
-                          monitorMentionUserIds: [],
-                        }))
+                        updateInvite(inv.id, { name: e.target.value })
                       }
+                      placeholder={`表示名（例: DevelopersHub）`}
+                      disabled={submitting}
+                      style={styles.nameInput}
+                      onFocus={() => setActiveInviteId(inv.id)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeInvite(inv.id)}
+                      disabled={submitting}
+                      style={{ ...styles.iconBtn, ...styles.deleteIconBtn }}
+                      title="削除"
+                      aria-label={`「${inv.name || `#${idx + 1}`}」を削除`}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div style={styles.autoSendRow}>
+                    <label style={styles.autoSendLabel}>招待リンク URL</label>
+                    <input
+                      type="url"
+                      value={inv.url ?? ""}
+                      onChange={(e) =>
+                        updateInvite(inv.id, { url: e.target.value })
+                      }
+                      placeholder="https://join.slack.com/t/.../zt-xxxx"
                       disabled={submitting}
                       style={styles.select}
-                    >
-                      <option value="">（選択してください）</option>
-                      {workspaces.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                      onFocus={() => setActiveInviteId(inv.id)}
+                    />
+                  </div>
 
-                {slackInvite.monitorWorkspaceId && (
                   <div style={styles.autoSendRow}>
-                    <label style={styles.autoSendLabel}>通知先チャンネル</label>
-                    <div style={{ flex: 1 }}>
-                      <SingleChannelPicker
-                        value={slackInvite.monitorChannelId ?? ""}
-                        channelName={slackInvite.monitorChannelName ?? ""}
-                        workspaceId={slackInvite.monitorWorkspaceId}
-                        onChange={(id, name) =>
-                          setSlackInvite((prev) => ({
-                            ...prev,
-                            monitorChannelId: id,
-                            monitorChannelName: name,
-                          }))
-                        }
+                    <label style={{ ...styles.toggleLabel, marginLeft: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!inv.monitorEnabled}
+                        onChange={(e) => {
+                          updateInvite(inv.id, {
+                            monitorEnabled: e.target.checked,
+                          });
+                          if (e.target.checked) setActiveInviteId(inv.id);
+                        }}
                         disabled={submitting}
                       />
-                    </div>
+                      <span>監視を有効化 (1 日 1 回の有効性チェック)</span>
+                    </label>
                   </div>
-                )}
 
-                {slackInvite.monitorWorkspaceId && (
-                  <div style={styles.autoSendRow}>
-                    <label style={styles.autoSendLabel}>メンション</label>
-                    <div style={{ flex: 1 }}>
-                      {workspaceMembers === null ? (
-                        <span style={styles.helpHint}>メンバー取得中...</span>
-                      ) : workspaceMembers.length === 0 ? (
-                        <span style={styles.helpHint}>
-                          メンバーが取得できません
-                        </span>
-                      ) : (
-                        <>
-                          <input
-                            value={memberSearch}
-                            onChange={(e) => setMemberSearch(e.target.value)}
-                            placeholder="名前 / @handle で検索..."
-                            style={{
-                              ...styles.select,
-                              marginBottom: "0.5rem",
+                  {inv.monitorEnabled && (
+                    <>
+                      <div style={styles.autoSendRow}>
+                        <label style={styles.autoSendLabel}>
+                          通知先 Workspace
+                        </label>
+                        {workspaces === null ? (
+                          <span style={styles.helpHint}>取得中...</span>
+                        ) : (
+                          <select
+                            value={inv.monitorWorkspaceId ?? ""}
+                            onChange={(e) => {
+                              setActiveInviteId(inv.id);
+                              updateInvite(inv.id, {
+                                monitorWorkspaceId: e.target.value || undefined,
+                                // workspace を切り替えたら channel / mention reset
+                                monitorChannelId: undefined,
+                                monitorChannelName: undefined,
+                                monitorMentionUserIds: [],
+                              });
                             }}
                             disabled={submitting}
-                          />
-                          <div style={styles.mentionList}>
-                            {filteredMembers.map((u) => {
-                              const checked = (
-                                slackInvite.monitorMentionUserIds ?? []
-                              ).includes(u.id);
-                              return (
-                                <label key={u.id} style={styles.mentionRow}>
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    disabled={submitting}
-                                    onChange={() => toggleMention(u.id)}
-                                  />
-                                  <span style={{ fontWeight: 500 }}>
-                                    {u.displayName ||
-                                      u.realName ||
-                                      u.name}
-                                  </span>
-                                  <span style={styles.helpHint}>
-                                    @{u.name}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                          <div style={styles.helpHint}>
-                            選択中:{" "}
-                            {(slackInvite.monitorMentionUserIds ?? []).length}{" "}
-                            人
-                            {mentionDisplayNames.length > 0
-                              ? ` (${mentionDisplayNames.join(", ")})`
-                              : ""}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
+                            style={styles.select}
+                          >
+                            <option value="">（選択してください）</option>
+                            {workspaces.map((w) => (
+                              <option key={w.id} value={w.id}>
+                                {w.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
 
-                <div style={styles.helpHint}>
-                  最終チェック:{" "}
-                  {slackInvite.lastCheckedAt
-                    ? `${slackInvite.lastCheckedAt} (${
-                        slackInvite.lastStatus === "valid"
-                          ? "有効"
-                          : slackInvite.lastStatus === "invalid"
-                            ? "無効"
-                            : "未取得"
-                      })`
-                    : "（まだチェックされていません）"}
-                  {workspaceName ? ` / ws: ${workspaceName}` : ""}
+                      {inv.monitorWorkspaceId && (
+                        <div style={styles.autoSendRow}>
+                          <label style={styles.autoSendLabel}>
+                            通知先チャンネル
+                          </label>
+                          <div style={{ flex: 1 }}>
+                            <SingleChannelPicker
+                              value={inv.monitorChannelId ?? ""}
+                              channelName={inv.monitorChannelName ?? ""}
+                              workspaceId={inv.monitorWorkspaceId}
+                              onChange={(id, name) =>
+                                updateInvite(inv.id, {
+                                  monitorChannelId: id,
+                                  monitorChannelName: name,
+                                })
+                              }
+                              disabled={submitting}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {inv.monitorWorkspaceId && (
+                        <div style={styles.autoSendRow}>
+                          <label style={styles.autoSendLabel}>メンション</label>
+                          <div style={{ flex: 1 }}>
+                            {!isActive ? (
+                              <button
+                                type="button"
+                                onClick={() => setActiveInviteId(inv.id)}
+                                style={styles.secondaryBtn}
+                                disabled={submitting}
+                              >
+                                メンション編集を開く (
+                                {(inv.monitorMentionUserIds ?? []).length} 人選択中)
+                              </button>
+                            ) : activeWsMembers === null ? (
+                              <span style={styles.helpHint}>メンバー取得中...</span>
+                            ) : activeWsMembers.length === 0 ? (
+                              <span style={styles.helpHint}>
+                                メンバーが取得できません
+                              </span>
+                            ) : (
+                              <>
+                                <input
+                                  value={memberSearch}
+                                  onChange={(e) =>
+                                    setMemberSearch(e.target.value)
+                                  }
+                                  placeholder="名前 / @handle で検索..."
+                                  style={{
+                                    ...styles.select,
+                                    marginBottom: "0.5rem",
+                                  }}
+                                  disabled={submitting}
+                                />
+                                <div style={styles.mentionList}>
+                                  {filteredMembers.map((u) => {
+                                    const checked = (
+                                      inv.monitorMentionUserIds ?? []
+                                    ).includes(u.id);
+                                    return (
+                                      <label
+                                        key={u.id}
+                                        style={styles.mentionRow}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          disabled={submitting}
+                                          onChange={() =>
+                                            toggleInviteMention(inv.id, u.id)
+                                          }
+                                        />
+                                        <span style={{ fontWeight: 500 }}>
+                                          {u.displayName ||
+                                            u.realName ||
+                                            u.name}
+                                        </span>
+                                        <span style={styles.helpHint}>
+                                          @{u.name}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                                <div style={styles.helpHint}>
+                                  選択中:{" "}
+                                  {(inv.monitorMentionUserIds ?? []).length} 人
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={styles.helpHint}>
+                        最終チェック:{" "}
+                        {inv.lastCheckedAt
+                          ? `${inv.lastCheckedAt} (${
+                              inv.lastStatus === "valid"
+                                ? "有効"
+                                : inv.lastStatus === "invalid"
+                                  ? "無効"
+                                  : "未取得"
+                            })`
+                          : "（まだチェックされていません）"}
+                        {inv.monitorWorkspaceId
+                          ? ` / ws: ${lookupWorkspaceName(inv.monitorWorkspaceId)}`
+                          : ""}
+                      </div>
+                    </>
+                  )}
                 </div>
-              </>
-            )}
+              );
+            })}
+
+            <div style={styles.buttonRow}>
+              <button
+                type="button"
+                onClick={addInvite}
+                disabled={submitting}
+                style={styles.secondaryBtn}
+              >
+                + 招待リンクを追加
+              </button>
+            </div>
 
             <div style={styles.noticeBox}>
               注意: 有効性チェックは Slack の招待ページの HTML を文字列パターンで
@@ -1216,5 +1362,33 @@ const styles = {
     fontSize: "0.75rem",
     color: colors.text,
     lineHeight: 1.5,
+  } as CSSProperties,
+  summaryList: {
+    margin: "0.5rem 0 0",
+    paddingLeft: "1.25rem",
+    fontSize: "0.8125rem",
+  } as CSSProperties,
+  summaryItem: {
+    marginBottom: "0.25rem",
+    color: colors.text,
+  } as CSSProperties,
+  summaryUrl: {
+    color: colors.textSecondary,
+    wordBreak: "break-all",
+    fontFamily: "monospace",
+    fontSize: "0.75rem",
+  } as CSSProperties,
+  inviteCard: {
+    border: `1px solid ${colors.border}`,
+    borderRadius: "0.375rem",
+    padding: "0.75rem",
+    background: colors.background,
+    marginTop: "0.5rem",
+  } as CSSProperties,
+  inviteCardHeader: {
+    display: "flex",
+    gap: "0.5rem",
+    alignItems: "center",
+    marginBottom: "0.5rem",
   } as CSSProperties,
 };

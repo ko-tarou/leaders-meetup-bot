@@ -123,26 +123,69 @@ export function readEmailTemplates(
 
 /**
  * action.config を parse して slackInvite 設定を取り出す。
- * slackInvite.url のみ placeholder 用に使う。
+ * 旧仕様 (slackInvite 単数オブジェクト) と新仕様 (slackInvites 配列) の両方に対応する。
  * 不正な JSON / 欠損は空文字を返す ({slackInviteLink} は空文字に置換される)。
  *
  * 005-slack-invite-monitor: slackInvite はメール placeholder 埋め込みと、
  * cron での有効性監視 (src/services/slack-invite-monitor.ts) の 2 用途で参照される。
- * ここではメール送信用に url のみ抜き出す。
+ *
+ * 複数招待リンク対応: 全ての登録 URL を改行区切りで render する。
+ * フォーマット: "- {name}: {url}" (1 件のときは name を出さず "{url}" のみ)
+ */
+type SlackInviteRendered = {
+  name?: unknown;
+  url?: unknown;
+};
+
+export function renderSlackInviteLinks(
+  rawConfig: string | null | undefined,
+): string {
+  if (!rawConfig) return "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawConfig);
+  } catch {
+    return "";
+  }
+  if (!parsed || typeof parsed !== "object") return "";
+  const obj = parsed as {
+    slackInvites?: unknown;
+    slackInvite?: SlackInviteRendered;
+  };
+
+  // 新仕様: 配列から url のあるものだけ拾う
+  let invites: SlackInviteRendered[] = [];
+  if (Array.isArray(obj.slackInvites)) {
+    invites = obj.slackInvites.filter(
+      (i): i is SlackInviteRendered =>
+        i !== null && typeof i === "object",
+    );
+  } else if (obj.slackInvite && typeof obj.slackInvite === "object") {
+    // 旧仕様: slackInvite (単数) を配列扱い
+    invites = [obj.slackInvite];
+  }
+
+  const items = invites
+    .map((i) => ({
+      name: typeof i.name === "string" ? i.name : "",
+      url: typeof i.url === "string" ? i.url : "",
+    }))
+    .filter((i) => i.url.length > 0);
+
+  if (items.length === 0) return "";
+  // 1 件のみのときは name を省略 (旧テンプレ "{slackInviteLink}" → URL 単独 の互換)
+  if (items.length === 1) return items[0].url;
+  return items.map((i) => `- ${i.name || "Slack"}: ${i.url}`).join("\n");
+}
+
+/**
+ * @deprecated 旧名称 readSlackInviteUrl は renderSlackInviteLinks に置き換え。
+ * 既存呼出側互換のため残置。
  */
 export function readSlackInviteUrl(
   rawConfig: string | null | undefined,
 ): string {
-  if (!rawConfig) return "";
-  try {
-    const parsed = JSON.parse(rawConfig) as {
-      slackInvite?: { url?: unknown };
-    };
-    const url = parsed.slackInvite?.url;
-    return typeof url === "string" ? url : "";
-  } catch {
-    return "";
-  }
+  return renderSlackInviteLinks(rawConfig);
 }
 
 /**
@@ -165,8 +208,9 @@ function buildTemplateVars(
       : "",
     // 005-meet: Calendar event 作成後に埋め込まれる Meet URL。
     meetLink: application.meetLink ?? "",
-    // 005-slack-invite-monitor: event_actions.config.slackInvite.url。
-    // 合格メール等で Slack 招待リンクを案内するために使う。未設定は空文字。
+    // 005-slack-invite-monitor: event_actions.config.slackInvites[].url を改行区切りで render したテキスト。
+    // 合格メール等で Slack 招待リンクを案内するために使う。
+    // 旧仕様 (slackInvite 単数) も自動 fallback。未設定は空文字。
     slackInviteLink,
   };
 }
@@ -199,7 +243,7 @@ export async function sendApplicationEmailForTrigger(
     return;
   }
 
-  const slackInviteLink = readSlackInviteUrl(actionConfig);
+  const slackInviteLink = renderSlackInviteLinks(actionConfig);
   const vars = buildTemplateVars(application, slackInviteLink);
   const subjectRaw =
     template.subject && template.subject.trim()

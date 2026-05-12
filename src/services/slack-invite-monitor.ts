@@ -1,20 +1,24 @@
 /**
- * 005-slack-invite-monitor: event_actions.config.slackInvite.url の有効性を
+ * 005-slack-invite-monitor: event_actions.config.slackInvites[].url の有効性を
  * 1 日 1 回 fetch でチェックし、無効化遷移時に Slack に通知する cron handler。
  *
  * 動作概要 (5 分 cron 内で呼ばれる):
  *   1. member_application action を全件取得
- *   2. config.slackInvite.monitorEnabled === true のものに対して:
+ *   2. config.slackInvites 配列 (旧: 単数 slackInvite) の各 entry について:
+ *      - monitorEnabled === true のもののみ対象
  *      - 前回チェックから 24 時間以上経過していなければ skip
  *      - HTTP GET で招待ページの HTML を取得
  *      - HTML 中の「invalid 系」パターンと「valid 系」パターンを判定
- *      - 状態を config.slackInvite.lastCheckedAt / lastStatus に記録
+ *      - 状態を invite.lastCheckedAt / lastStatus に記録
  *      - valid → invalid の遷移、または invalid 継続中に 24h 経過 → Slack 通知
  *      - 通知後は lastNotifiedAt を更新 (連投防止)
  *
+ * 後方互換:
+ *   - 旧形式 config.slackInvite (単数) があれば配列化して読み込む
+ *   - 配列化後は config.slackInvites として保存 (旧 slackInvite キーは削除)
+ *
  * 設計判断:
- *   - fail-soft: 1 action の failure (fetch エラー等) で他 action を止めない。
- *     scheduled handler 側の Promise.allSettled も合わせて全 cron を止めない。
+ *   - fail-soft: 1 action / 1 invite の failure で他を止めない。
  *   - HTML パースは脆い: Slack 側 UI 変更で動作不能になり得る。
  *     その場合「全部 invalid 判定 → 大量誤通知」を避けるため、
  *     - fetch 自体が失敗 (network error / non-200) なら状態変更しない
@@ -32,6 +36,10 @@ import type { Env } from "../types/env";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type SlackInviteMonitorConfig = {
+  /** 配列化のため必須化。旧 single 形式 normalize 時に auto-gen される。 */
+  id?: string;
+  /** UI 表示名 (例: "DevelopersHub", "HackIt")。空なら "Slack" 扱い。 */
+  name?: string;
   url?: string;
   monitorEnabled?: boolean;
   monitorWorkspaceId?: string;
@@ -65,24 +73,81 @@ const VALID_PATTERNS: ReadonlyArray<RegExp> = [
   /create an account/i,
 ];
 
+function genId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+  return `inv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
- * config (JSON string) から slackInvite サブセクションを取り出す。
- * 不正 JSON / 欠損は undefined を返す。
+ * config (parsed) から slackInvites 配列を抽出する。
+ * - slackInvites (配列) があればそれを採用
+ * - 無ければ slackInvite (単数) を [old] に変換 (id auto-gen, name="Slack")
+ * - どちらも無ければ []
+ */
+export function normalizeSlackInvites(
+  cfgAll: Record<string, unknown>,
+): SlackInviteMonitorConfig[] {
+  const arrRaw = cfgAll.slackInvites;
+  if (Array.isArray(arrRaw)) {
+    return arrRaw
+      .filter(
+        (i): i is SlackInviteMonitorConfig =>
+          i !== null && typeof i === "object",
+      )
+      .map((i) => ({
+        ...i,
+        id: typeof i.id === "string" && i.id.length > 0 ? i.id : genId(),
+        name: typeof i.name === "string" ? i.name : "",
+      }));
+  }
+  const single = cfgAll.slackInvite;
+  if (single && typeof single === "object" && !Array.isArray(single)) {
+    const s = single as SlackInviteMonitorConfig;
+    return [
+      {
+        ...s,
+        id: typeof s.id === "string" && s.id.length > 0 ? s.id : genId(),
+        name: typeof s.name === "string" ? s.name : "Slack",
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * config (JSON string) から slackInvites 配列を取り出す。
+ * 不正 JSON / 欠損は [] を返す。
+ *
+ * 後方互換: 旧 slackInvite (単数) は配列化される。
+ */
+export function parseSlackInviteConfigs(
+  rawConfig: string | null | undefined,
+): SlackInviteMonitorConfig[] {
+  if (!rawConfig) return [];
+  try {
+    const parsed = JSON.parse(rawConfig);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return [];
+    }
+    return normalizeSlackInvites(parsed as Record<string, unknown>);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * @deprecated 旧 API。1 件目だけ返す互換 wrapper。
  */
 export function parseSlackInviteConfig(
   rawConfig: string | null | undefined,
 ): SlackInviteMonitorConfig | undefined {
-  if (!rawConfig) return undefined;
-  try {
-    const parsed = JSON.parse(rawConfig) as {
-      slackInvite?: SlackInviteMonitorConfig;
-    };
-    const sl = parsed.slackInvite;
-    if (!sl || typeof sl !== "object") return undefined;
-    return sl;
-  } catch {
-    return undefined;
-  }
+  const list = parseSlackInviteConfigs(rawConfig);
+  return list[0];
 }
 
 /**
@@ -95,7 +160,6 @@ export function classifyInviteHtml(html: string): "valid" | "invalid" {
     if (p.test(html)) return "invalid";
   }
   // VALID_PATTERNS は判定そのものに使わず参考扱い。
-  // 「invalid pattern なし → valid」で十分。VALID_PATTERNS は今後 logging などに使えるよう残す。
   return "valid";
 }
 
@@ -152,10 +216,9 @@ export async function processSlackInviteMonitors(env: Env): Promise<{
   for (const action of actions) {
     try {
       const result = await processOneAction(env, action, now, nowMs);
-      if (result === "skipped") continue;
-      checked++;
-      if (result.status === "invalid") invalid++;
-      if (result.notified) notified++;
+      checked += result.checked;
+      invalid += result.invalid;
+      notified += result.notified;
     } catch (e) {
       errors++;
       console.error(
@@ -170,12 +233,21 @@ export async function processSlackInviteMonitors(env: Env): Promise<{
 
 type ActionRow = typeof eventActions.$inferSelect;
 
+type InviteProcessOutcome =
+  | { kind: "skipped"; invite: SlackInviteMonitorConfig }
+  | {
+      kind: "processed";
+      invite: SlackInviteMonitorConfig;
+      status: "valid" | "invalid";
+      notified: boolean;
+    };
+
 async function processOneAction(
   env: Env,
   action: ActionRow,
   now: Date,
   nowMs: number,
-): Promise<"skipped" | { status: "valid" | "invalid"; notified: boolean }> {
+): Promise<{ checked: number; invalid: number; notified: number }> {
   // 既存 config の他フィールドを保持するため、parse はオブジェクト全体で行う。
   let cfgAll: Record<string, unknown> = {};
   try {
@@ -184,109 +256,166 @@ async function processOneAction(
       cfgAll = parsed as Record<string, unknown>;
     }
   } catch {
-    return "skipped";
+    return { checked: 0, invalid: 0, notified: 0 };
   }
 
-  const sl = cfgAll.slackInvite as SlackInviteMonitorConfig | undefined;
-  if (!sl || typeof sl !== "object") return "skipped";
-  if (!sl.monitorEnabled) return "skipped";
-  if (!sl.url || typeof sl.url !== "string") return "skipped";
-  if (!sl.monitorWorkspaceId || !sl.monitorChannelId) return "skipped";
+  const invites = normalizeSlackInvites(cfgAll);
+  if (invites.length === 0) {
+    return { checked: 0, invalid: 0, notified: 0 };
+  }
+
+  let checked = 0;
+  let invalidCount = 0;
+  let notifiedCount = 0;
+  let mutated = false;
+
+  // 旧 single key (slackInvite) が残っていれば normalize 後に削除する。
+  const hadLegacyKey = Object.prototype.hasOwnProperty.call(
+    cfgAll,
+    "slackInvite",
+  );
+
+  const updatedInvites: SlackInviteMonitorConfig[] = [];
+  for (const invite of invites) {
+    let outcome: InviteProcessOutcome;
+    try {
+      outcome = await processOneInvite(env, invite, now, nowMs);
+    } catch (e) {
+      console.error(
+        `[slack-invite-monitor] action=${action.id} invite=${invite.id} failed:`,
+        e,
+      );
+      // fail-soft: この invite はそのまま保持して次へ
+      updatedInvites.push(invite);
+      continue;
+    }
+    if (outcome.kind === "skipped") {
+      updatedInvites.push(outcome.invite);
+      continue;
+    }
+    checked++;
+    if (outcome.status === "invalid") invalidCount++;
+    if (outcome.notified) notifiedCount++;
+    updatedInvites.push(outcome.invite);
+    mutated = true;
+  }
+
+  if (mutated || hadLegacyKey) {
+    cfgAll.slackInvites = updatedInvites;
+    if (hadLegacyKey) {
+      // 旧 key は削除 (一度 normalize した後は正規形のみ保持)
+      delete cfgAll.slackInvite;
+    }
+    await drizzle(env.DB)
+      .update(eventActions)
+      .set({
+        config: JSON.stringify(cfgAll),
+        updatedAt: now.toISOString(),
+      })
+      .where(eq(eventActions.id, action.id));
+  }
+
+  return { checked, invalid: invalidCount, notified: notifiedCount };
+}
+
+async function processOneInvite(
+  env: Env,
+  invite: SlackInviteMonitorConfig,
+  now: Date,
+  nowMs: number,
+): Promise<InviteProcessOutcome> {
+  if (!invite.monitorEnabled) return { kind: "skipped", invite };
+  if (!invite.url || typeof invite.url !== "string") {
+    return { kind: "skipped", invite };
+  }
+  if (!invite.monitorWorkspaceId || !invite.monitorChannelId) {
+    return { kind: "skipped", invite };
+  }
 
   // 1 日 1 回チェック。最後のチェックから 24h 以内なら skip。
-  if (sl.lastCheckedAt) {
-    const lastMs = new Date(sl.lastCheckedAt).getTime();
-    if (Number.isFinite(lastMs) && nowMs - lastMs < DAY_MS) return "skipped";
+  if (invite.lastCheckedAt) {
+    const lastMs = new Date(invite.lastCheckedAt).getTime();
+    if (Number.isFinite(lastMs) && nowMs - lastMs < DAY_MS) {
+      return { kind: "skipped", invite };
+    }
   }
 
   // fetch して HTML を取得。fetch 失敗 (例外 / non-200) は状態変更しない。
   let html: string;
   try {
-    const res = await fetch(sl.url, {
+    const res = await fetch(invite.url, {
       method: "GET",
       redirect: "follow",
       headers: { "User-Agent": "DevHubOpsBot/1.0 (slack-invite-monitor)" },
     });
     if (!res.ok) {
-      // 一時障害扱い: 4xx/5xx は状態更新しない (誤通知を避ける)。
       console.warn(
-        `[slack-invite-monitor] action=${action.id} fetch non-ok: ${res.status}`,
+        `[slack-invite-monitor] invite=${invite.id} fetch non-ok: ${res.status}`,
       );
-      return "skipped";
+      return { kind: "skipped", invite };
     }
     html = await res.text();
   } catch (e) {
     console.warn(
-      `[slack-invite-monitor] action=${action.id} fetch threw:`,
+      `[slack-invite-monitor] invite=${invite.id} fetch threw:`,
       e,
     );
-    return "skipped";
+    return { kind: "skipped", invite };
   }
 
   const newStatus = classifyInviteHtml(html);
   const notify = shouldNotify(
     newStatus,
-    sl.lastStatus,
-    sl.lastNotifiedAt,
+    invite.lastStatus,
+    invite.lastNotifiedAt,
     nowMs,
   );
 
-  // 通知判定。invalid 遷移時 or 24h 以上の再通知タイミング。
   let notified = false;
   if (notify) {
-    notified = await postNotification(env, sl);
+    notified = await postNotification(env, invite);
   }
 
-  // config 更新 (他フィールドは保持)
-  const updatedSl: SlackInviteMonitorConfig = {
-    ...sl,
+  const updated: SlackInviteMonitorConfig = {
+    ...invite,
     lastCheckedAt: now.toISOString(),
     lastStatus: newStatus,
     ...(notified ? { lastNotifiedAt: now.toISOString() } : {}),
   };
-  cfgAll.slackInvite = updatedSl;
-
-  await drizzle(env.DB)
-    .update(eventActions)
-    .set({
-      config: JSON.stringify(cfgAll),
-      updatedAt: now.toISOString(),
-    })
-    .where(eq(eventActions.id, action.id));
-
-  return { status: newStatus, notified };
+  return { kind: "processed", invite: updated, status: newStatus, notified };
 }
 
 async function postNotification(
   env: Env,
-  sl: SlackInviteMonitorConfig,
+  invite: SlackInviteMonitorConfig,
 ): Promise<boolean> {
-  if (!sl.monitorWorkspaceId || !sl.monitorChannelId) return false;
+  if (!invite.monitorWorkspaceId || !invite.monitorChannelId) return false;
   try {
     const slack = await createSlackClientForWorkspace(
       env,
-      sl.monitorWorkspaceId,
+      invite.monitorWorkspaceId,
     );
     if (!slack) {
       console.warn(
         "[slack-invite-monitor] workspace not found:",
-        sl.monitorWorkspaceId,
+        invite.monitorWorkspaceId,
       );
       return false;
     }
-    const mentionIds = Array.isArray(sl.monitorMentionUserIds)
-      ? sl.monitorMentionUserIds.filter(
+    const mentionIds = Array.isArray(invite.monitorMentionUserIds)
+      ? invite.monitorMentionUserIds.filter(
           (u) => typeof u === "string" && u.length > 0,
         )
       : [];
     const mentionPrefix = mentionIds.map((u) => `<@${u}>`).join(" ");
+    const displayName = invite.name && invite.name.trim() ? invite.name : "Slack";
     const lines = [
-      `${mentionPrefix} :warning: Slack 招待リンクが無効になっています`.trim(),
-      `リンク: ${sl.url}`,
-      "管理画面で新しいリンクを発行して、event_actions.config.slackInvite.url を更新してください。",
+      `${mentionPrefix} :warning: Slack 招待リンク「${displayName}」が無効になっています`.trim(),
+      `リンク: ${invite.url}`,
+      "管理画面で新しいリンクを発行してください。",
     ];
     const text = lines.join("\n");
-    const res = await slack.postMessage(sl.monitorChannelId, text);
+    const res = await slack.postMessage(invite.monitorChannelId, text);
     if (!res.ok) {
       console.error("[slack-invite-monitor] postMessage failed:", res);
       return false;
