@@ -35,4 +35,10 @@ export type Env = {
   //   http://localhost:8787/api/google-oauth/callback   # ローカル開発時
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+
+  // 005-feedback: Gemini 1.5 Flash の API key。
+  // フィードバックウィジェットの「使い方を聞く (AI)」タブから呼び出す。
+  // 未設定の場合、/api/feedback/ai-chat は 500 を返す。
+  // `npx wrangler secret put GEMINI_API_KEY` で設定済。
+  GEMINI_API_KEY: string;
 };
