@@ -6,11 +6,12 @@
  *   - PUT    /app-settings           → AppSettings 更新
  *
  * Public endpoints (adminAuth 除外、誰でも叩ける):
+ *   - GET    /feedback/status        → { feedbackEnabled, aiChatEnabled }
  *   - POST   /feedback               → 改善要望/バグ報告 を Slack に通知
  *   - POST   /feedback/ai-chat       → Gemini で AI 応答
  *
  * 注意: adminAuth bypass は src/routes/api.ts 側で
- *   /feedback と /feedback/ai-chat を allowlist 追加する必要がある。
+ *   /feedback と /feedback/ai-chat と /feedback/status を allowlist 追加する必要がある。
  */
 import { Hono } from "hono";
 import type { Env } from "../../types/env";
@@ -78,6 +79,23 @@ feedbackRouter.put("/app-settings", async (c) => {
   } catch (e) {
     console.error("[app-settings] update failed", e);
     return c.json({ error: "update_failed" }, 500);
+  }
+});
+
+// === GET /feedback/status === (public)
+// FE Widget が tab 描画前に呼び、無効化されている機能には案内メッセージを表示する。
+// admin token 不要。app_settings から bool 2 つだけを露出 (Slack token などは返さない)。
+feedbackRouter.get("/feedback/status", async (c) => {
+  try {
+    const settings = await getAppSettings(c.env);
+    return c.json({
+      feedbackEnabled: settings.feedbackEnabled,
+      aiChatEnabled: settings.aiChatEnabled,
+    });
+  } catch (e) {
+    console.error("[feedback/status] failed", e);
+    // fail-safe: 取得に失敗しても widget を壊さないよう false で返す。
+    return c.json({ feedbackEnabled: false, aiChatEnabled: false });
   }
 });
 

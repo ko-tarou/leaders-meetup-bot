@@ -68,7 +68,8 @@ api.use("/*", async (c, next) => {
     // 公開モードでは admin token が無いケースもあるため bypass する。
     // /app-settings (admin GET/PUT) は bypass しない (保護)。
     sub === "/feedback" ||
-    sub === "/feedback/ai-chat"
+    sub === "/feedback/ai-chat" ||
+    sub === "/feedback/status"
   ) {
     return next();
   }
