@@ -150,6 +150,12 @@ export const applications = sqliteTable(
     decisionNote: text("decision_note"),
     appliedAt: text("applied_at").notNull(),
     decidedAt: text("decided_at"),
+    // 005-meet: pending → scheduled 遷移時に作成する Google Calendar event の id。
+    // 削除/更新で再利用する想定。
+    calendarEventId: text("calendar_event_id"),
+    // 005-meet: Calendar event に紐づく Google Meet URL。
+    // メールテンプレ {meetLink} placeholder で埋め込む。
+    meetLink: text("meet_link"),
   },
   (t) => [index("idx_applications_event_id").on(t.eventId)],
 );
