@@ -324,18 +324,41 @@ export type GmailAccount = {
   updatedAt: string;
 };
 
-// 005-gmail-watcher: gmail_accounts.watcher_config に保存される 1 件分の監視設定。
-// 1 gmail_account = 1 watcher のシンプル構成。
-// keywords は OR match (subject/snippet に 1 つでも含まれれば通知)。
-// 空配列なら「全件通知」扱い。
+// 005-gmail-watcher: gmail_accounts.watcher_config に保存される監視設定。
+//
+// 新形式 (rule 配列):
+//   rules を配列順に first-match で評価し、最初に keywords (OR) match した
+//   rule で Slack 通知する。どの rule も match しなかった場合は elseRule
+//   (省略可) で通知する。
+//
+// 旧形式 (単一 watcher):
+//   keywords / channelId 等の field が watcher_config 直下に書かれた古い
+//   レコード。BE / FE どちらも読み込み時に rules[0] に変換して扱う。
+//   後方互換のため field は型に残すが、新規保存時は使用しない。
+//
 // messageTemplate 未設定 / 空文字なら BE のデフォルト文面が使われる。
-export type GmailWatcherConfig = {
-  enabled: boolean;
+export type GmailWatcherRule = {
+  id: string;
+  name: string;
   keywords: string[];
   workspaceId: string;
   channelId: string;
   channelName?: string;
   mentionUserIds: string[];
+  messageTemplate?: string;
+};
+
+export type GmailWatcherConfig = {
+  enabled: boolean;
+  rules?: GmailWatcherRule[];
+  elseRule?: GmailWatcherRule;
+  // === 後方互換: 旧形式 (単一 watcher) ===
+  // 新規 save では使わないが、BE が legacy レコードを返してきたとき型で受け取れるよう残す。
+  keywords?: string[];
+  workspaceId?: string;
+  channelId?: string;
+  channelName?: string;
+  mentionUserIds?: string[];
   messageTemplate?: string;
 };
 
