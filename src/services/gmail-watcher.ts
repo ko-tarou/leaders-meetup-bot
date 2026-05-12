@@ -228,6 +228,7 @@ async function processOneAccount(
         matchedRule.rule,
         matchedRule.ruleName,
         meta,
+        row.id,
       );
       if (sent) notifiedLocal++;
     }
@@ -409,6 +410,7 @@ async function sendSlackNotification(
   rule: WatcherRule,
   ruleName: string,
   meta: MessageMeta,
+  gmailAccountId: string,
 ): Promise<boolean> {
   if (!rule.workspaceId || !rule.channelId) {
     console.warn(
@@ -439,7 +441,23 @@ async function sendSlackNotification(
       receivedAt: meta.receivedAt,
       snippet: meta.snippet,
     }).trim();
-    const res = await slack.postMessage(rule.channelId, text);
+
+    // Sprint 27: rule.autoReply.enabled なら「自動返信を送る / スキップ」
+    // ボタン付きの Block Kit メッセージとして post する。それ以外は従来通り
+    // text のみで post (= ボタン無し、既存挙動を維持)。
+    const blocks = rule.autoReply?.enabled
+      ? buildAutoReplyBlocks(text, {
+          gmailAccountId,
+          messageId: meta.id,
+          ruleId: rule.id,
+          workspaceId: rule.workspaceId,
+          channelId: rule.channelId,
+        })
+      : undefined;
+
+    const res = blocks
+      ? await slack.postMessage(rule.channelId, text, blocks)
+      : await slack.postMessage(rule.channelId, text);
     if (!res.ok) {
       console.error("[gmail-watcher] postMessage failed:", res);
       return false;
@@ -449,6 +467,47 @@ async function sendSlackNotification(
     console.error("[gmail-watcher] sendSlackNotification error:", e);
     return false;
   }
+}
+
+// Sprint 27: 自動返信ボタン用 Block Kit。
+// action_id:
+//   - gmail_watcher_reply: 「自動返信を送る」(primary)
+//   - gmail_watcher_skip:  「スキップ」(default)
+// value は JSON で payload を載せる。Slack の value 上限は 2000 chars。
+// ここでは id 群しか積まないので余裕で収まる。
+function buildAutoReplyBlocks(
+  text: string,
+  payload: {
+    gmailAccountId: string;
+    messageId: string;
+    ruleId: string;
+    workspaceId: string;
+    channelId: string;
+  },
+): unknown[] {
+  const valueJson = JSON.stringify(payload);
+  return [
+    { type: "section", text: { type: "mrkdwn", text } },
+    {
+      type: "actions",
+      block_id: "gmail_watcher_actions",
+      elements: [
+        {
+          type: "button",
+          style: "primary",
+          action_id: "gmail_watcher_reply",
+          text: { type: "plain_text", text: "自動返信を送る" },
+          value: valueJson,
+        },
+        {
+          type: "button",
+          action_id: "gmail_watcher_skip",
+          text: { type: "plain_text", text: "スキップ" },
+          value: JSON.stringify({ messageId: payload.messageId }),
+        },
+      ],
+    },
+  ];
 }
 
 // === 処理済記録 ===
