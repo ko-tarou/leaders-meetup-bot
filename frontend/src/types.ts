@@ -376,6 +376,19 @@ export type AutoSendTriggers = {
   onPassed?: string;
 };
 
+// 自動メール送信成功時に Slack へ送るログ通知の設定。
+// notifications (応募通知) と同じ schema 構造で、独立した workspace / channel /
+// mention / template を持つ。
+// placeholder: {mentions}, {triggerLabel}, {to}, {recipientName}, {subject}, {templateName}
+export type AutoSendEmailLogConfig = {
+  enabled: boolean;
+  workspaceId: string;
+  channelId: string;
+  channelName?: string;
+  mentionUserIds: string[];
+  messageTemplate?: string;
+};
+
 export type AutoSendEmailConfig = {
   enabled?: boolean;
   gmailAccountId?: string;
@@ -384,6 +397,8 @@ export type AutoSendEmailConfig = {
   templateId?: string;
   /** 005-meet: 新形式。trigger 別に template id を指定する。 */
   triggers?: AutoSendTriggers;
+  /** メール送信成功時に Slack にログを送る設定。未設定 / enabled=false なら no-op。 */
+  logToSlack?: AutoSendEmailLogConfig;
 };
 
 // 005-slack-invite-monitor: 応募完了メール等に埋め込む Slack 招待リンク + 有効性監視設定。
