@@ -22,6 +22,7 @@
 import { sendGmailEmail } from "./gmail-send";
 import { renderTemplate } from "./application-notification";
 import { utcToJstFormat } from "./time-utils";
+import { createSlackClientForWorkspace } from "./workspace";
 import type { Env } from "../types/env";
 import type { ApplicationLike } from "./application-notification";
 
@@ -36,6 +37,28 @@ export type AutoSendTriggers = {
   onPassed?: string;
 };
 
+/**
+ * 自動メール送信成功時に Slack へ送るログ通知の設定。
+ * notifications (応募通知) と同じ schema 構造で、独立した workspace / channel /
+ * mention / template を持つ。
+ *
+ * 設計:
+ *   - email 送信失敗時はそもそも呼ばれない (success path のみ)。
+ *   - Slack 通知が失敗しても email 送信成功扱いは変えない (fail-soft)。
+ *   - messageTemplate 未設定 / 空文字なら DEFAULT_LOG_TEMPLATE を使う。
+ *
+ * placeholder:
+ *   {mentions}, {triggerLabel}, {to}, {recipientName}, {subject}, {templateName}
+ */
+export type AutoSendEmailLogConfig = {
+  enabled: boolean;
+  workspaceId: string;
+  channelId: string;
+  channelName?: string;
+  mentionUserIds: string[];
+  messageTemplate?: string;
+};
+
 export type AutoSendEmailConfig = {
   enabled?: boolean;
   gmailAccountId?: string;
@@ -45,7 +68,33 @@ export type AutoSendEmailConfig = {
   templateId?: string;
   /** 005-meet: 新形式。trigger 別に template id を指定する。 */
   triggers?: AutoSendTriggers;
+  /** メール送信成功時に Slack にログを送る設定。未設定 / enabled=false なら no-op。 */
+  logToSlack?: AutoSendEmailLogConfig;
 };
+
+/**
+ * trigger key → 日本語ラベル変換。
+ * Slack ログ通知文の {triggerLabel} placeholder で使う。
+ */
+const TRIGGER_LABELS: Record<AutoSendTrigger, string> = {
+  onSubmit: "応募完了時",
+  onScheduled: "面接予定時",
+  onPassed: "合格時",
+};
+
+export function getTriggerLabel(trigger: AutoSendTrigger): string {
+  return TRIGGER_LABELS[trigger];
+}
+
+/**
+ * Slack ログ通知のデフォルト文面。
+ * messageTemplate 未設定 / 空文字のときに使う。
+ */
+export const DEFAULT_LOG_TEMPLATE = `{mentions} 📧 自動メール送信ログ
+トリガー: {triggerLabel}
+宛先: {recipientName} <{to}>
+件名: {subject}
+テンプレート: {templateName}`;
 
 export type EmailTemplate = {
   id: string;
@@ -216,6 +265,63 @@ function buildTemplateVars(
 }
 
 /**
+ * メール送信成功時に Slack ログ通知を送る。
+ *
+ * - logConfig.enabled !== true → no-op
+ * - workspace / channel 未設定 → no-op (config 不完全扱い)
+ * - 失敗は fail-soft (例外を throw しない)。メール送信成功という事実は変えない。
+ */
+async function sendSlackLog(
+  env: Env,
+  logConfig: AutoSendEmailLogConfig,
+  vars: {
+    triggerLabel: string;
+    to: string;
+    recipientName: string;
+    subject: string;
+    templateName: string;
+  },
+): Promise<void> {
+  if (!logConfig.enabled) return;
+  if (!logConfig.workspaceId || !logConfig.channelId) return;
+
+  try {
+    const slack = await createSlackClientForWorkspace(
+      env,
+      logConfig.workspaceId,
+    );
+    if (!slack) {
+      console.warn(
+        "[application-email] slack log workspace not found:",
+        logConfig.workspaceId,
+      );
+      return;
+    }
+
+    const mentionIds = Array.isArray(logConfig.mentionUserIds)
+      ? logConfig.mentionUserIds.filter(
+          (u) => typeof u === "string" && u.length > 0,
+        )
+      : [];
+    const mentions = mentionIds.map((u) => `<@${u}>`).join(" ");
+
+    const tmpl =
+      logConfig.messageTemplate && logConfig.messageTemplate.trim()
+        ? logConfig.messageTemplate
+        : DEFAULT_LOG_TEMPLATE;
+    const text = renderTemplate(tmpl, { mentions, ...vars }).trim();
+
+    const res = await slack.postMessage(logConfig.channelId, text);
+    if (!res.ok) {
+      console.error("[application-email] slack log postMessage failed:", res);
+    }
+  } catch (e) {
+    console.error("[application-email] slack log failed:", e);
+    // fail-soft: ログ失敗で email 送信を止めない
+  }
+}
+
+/**
  * 共通 trigger 処理。指定 trigger に対応する template を解決して送信する。
  * 失敗は fail-soft (例外を throw しない)。
  */
@@ -266,6 +372,18 @@ export async function sendApplicationEmailForTrigger(
   } catch (e) {
     console.error(`[application-email] send failed for ${trigger}:`, e);
     // fail-soft: 応募/status 更新自体は失敗させない
+    return;
+  }
+
+  // 送信成功時のみ Slack ログ通知を送る (fail-soft)。
+  if (cfg.logToSlack) {
+    await sendSlackLog(env, cfg.logToSlack, {
+      triggerLabel: getTriggerLabel(trigger),
+      to: application.email,
+      recipientName: application.name,
+      subject,
+      templateName: template.name,
+    });
   }
 }
 
