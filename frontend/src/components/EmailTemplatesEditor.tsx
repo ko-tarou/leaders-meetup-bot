@@ -96,6 +96,9 @@ function parseInitialTemplates(
 
 // Sprint 26: action.config.autoSendEmail を取り出す。
 // 不正な JSON や欠損は空オブジェクト ({} = 自動送信無効) を返す。
+//
+// 005-meet: triggers 形式に正規化する。旧 templateId のみの設定は
+//   triggers.onSubmit へ移行 (BE と同じ fallback ルール)。
 function parseInitialAutoSend(
   configRaw: string | null | undefined,
 ): AutoSendEmailConfig {
@@ -104,19 +107,63 @@ function parseInitialAutoSend(
     const raw = (cfg as { autoSendEmail?: AutoSendEmailConfig })
       .autoSendEmail;
     if (!raw || typeof raw !== "object") return {};
+    const triggersRaw = (raw.triggers && typeof raw.triggers === "object"
+      ? raw.triggers
+      : {}) as AutoSendEmailConfig["triggers"];
+    const legacyTemplateId =
+      typeof raw.templateId === "string" ? raw.templateId : undefined;
+    const triggers = {
+      // 旧 templateId は onSubmit に fallback (UI ロードのみ。保存時は新形式へ統一)。
+      onSubmit:
+        typeof triggersRaw?.onSubmit === "string"
+          ? triggersRaw.onSubmit
+          : legacyTemplateId,
+      onScheduled:
+        typeof triggersRaw?.onScheduled === "string"
+          ? triggersRaw.onScheduled
+          : undefined,
+      onPassed:
+        typeof triggersRaw?.onPassed === "string"
+          ? triggersRaw.onPassed
+          : undefined,
+    };
     return {
       enabled: !!raw.enabled,
       gmailAccountId:
         typeof raw.gmailAccountId === "string" ? raw.gmailAccountId : undefined,
-      templateId:
-        typeof raw.templateId === "string" ? raw.templateId : undefined,
       replyToEmail:
         typeof raw.replyToEmail === "string" ? raw.replyToEmail : undefined,
+      triggers,
     };
   } catch {
     return {};
   }
 }
+
+// 005-meet: trigger ラベル + UI 順序定義。
+// 編集 UI と「保存時のバリデーション」両方で参照する。
+const TRIGGER_DEFS: ReadonlyArray<{
+  key: "onSubmit" | "onScheduled" | "onPassed";
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "onSubmit",
+    label: "応募完了時",
+    description: "公開フォームからの応募作成が成功した直後に送信",
+  },
+  {
+    key: "onScheduled",
+    label: "面接予定時",
+    description:
+      "status: pending → scheduled で送信。Google Meet link を自動生成し {meetLink} に埋め込み",
+  },
+  {
+    key: "onPassed",
+    label: "合格時",
+    description: "status: → passed で送信",
+  },
+];
 
 function genId(): string {
   if (
@@ -219,19 +266,31 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
       return;
     }
 
-    // Sprint 26: 自動送信が enabled なら必須項目をチェック
+    // Sprint 26 + 005-meet: 自動送信が enabled なら必須項目をチェック。
+    // - Gmail アカウントは必須。
+    // - 少なくとも 1 trigger に template id が設定されていること。
+    // - 設定された template id は templates 中に存在すること。
     if (autoSend.enabled) {
       if (!autoSend.gmailAccountId) {
         setError("自動送信が有効ですが、Gmail アカウントが未選択です。");
         return;
       }
-      if (!autoSend.templateId) {
-        setError("自動送信が有効ですが、テンプレートが未選択です。");
+      const triggers = autoSend.triggers ?? {};
+      const selectedIds = TRIGGER_DEFS.map((d) => triggers[d.key]).filter(
+        (v): v is string => typeof v === "string" && v.length > 0,
+      );
+      if (selectedIds.length === 0) {
+        setError(
+          "自動送信が有効ですが、トリガーが 1 つも選択されていません。少なくとも 1 つ選択してください。",
+        );
         return;
       }
-      if (!templates.some((t) => t.id === autoSend.templateId)) {
+      const missing = selectedIds.find(
+        (id) => !templates.some((t) => t.id === id),
+      );
+      if (missing) {
         setError(
-          "自動送信のテンプレートが存在しません。再選択してから保存してください。",
+          "選択されたトリガーのテンプレートが存在しません。再選択してから保存してください。",
         );
         return;
       }
@@ -254,11 +313,17 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
         cfg = {};
       }
       cfg.emailTemplates = templates;
-      // Sprint 26: 自動送信設定。空文字の replyToEmail は保存時に省く。
+      // Sprint 26 + 005-meet: 自動送信設定。trigger 形式で保存し、旧 templateId は捨てる。
+      // 未選択 trigger は object から削除して JSON を小さく保つ。
+      const triggersOut: Record<string, string> = {};
+      for (const def of TRIGGER_DEFS) {
+        const v = autoSend.triggers?.[def.key];
+        if (v) triggersOut[def.key] = v;
+      }
       cfg.autoSendEmail = {
         enabled: !!autoSend.enabled,
         gmailAccountId: autoSend.gmailAccountId,
-        templateId: autoSend.templateId,
+        triggers: triggersOut,
         ...(autoSend.replyToEmail && autoSend.replyToEmail.trim()
           ? { replyToEmail: autoSend.replyToEmail.trim() }
           : {}),
@@ -285,10 +350,11 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
       <div style={styles.helpBox}>
         <strong>プレースホルダ:</strong>{" "}
         <code>{"{name}"}</code> / <code>{"{email}"}</code> /{" "}
-        <code>{"{studentId}"}</code> / <code>{"{interviewAt}"}</code>
+        <code>{"{studentId}"}</code> / <code>{"{interviewAt}"}</code> /{" "}
+        <code>{"{meetLink}"}</code>
         <div style={styles.helpHint}>
-          (送信時に応募者の値で置換されます。{"{interviewAt}"} は未設定時に
-          [未設定] と表示)
+          (送信時に応募者の値で置換されます。{"{meetLink}"}{" "}
+          は「面接予定時」トリガーで自動生成された Google Meet URL が入ります)
         </div>
       </div>
 
@@ -340,30 +406,45 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
           </select>
         </div>
 
-        <div style={styles.autoSendRow}>
-          <label style={styles.autoSendLabel}>テンプレート</label>
-          <select
-            value={autoSend.templateId ?? ""}
-            onChange={(e) =>
-              setAutoSend((prev) => ({
-                ...prev,
-                templateId: e.target.value || undefined,
-              }))
-            }
-            disabled={submitting || templates.length === 0}
-            style={styles.select}
-          >
-            <option value="">
-              {templates.length === 0
-                ? "（テンプレ未登録）"
-                : "（選択してください）"}
-            </option>
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name || "(無名テンプレ)"}
-              </option>
-            ))}
-          </select>
+        {/* 005-meet: trigger 別の template 選択 (応募完了時 / 面接予定時 / 合格時) */}
+        <div style={styles.triggersGroup}>
+          <div style={styles.triggersTitle}>送信トリガー</div>
+          {TRIGGER_DEFS.map((def) => {
+            const value = autoSend.triggers?.[def.key] ?? "";
+            return (
+              <div key={def.key} style={styles.triggerRow}>
+                <div style={styles.triggerLabelBlock}>
+                  <div style={styles.triggerLabel}>{def.label}</div>
+                  <div style={styles.triggerDescription}>{def.description}</div>
+                </div>
+                <select
+                  value={value}
+                  onChange={(e) =>
+                    setAutoSend((prev) => ({
+                      ...prev,
+                      triggers: {
+                        ...(prev.triggers ?? {}),
+                        [def.key]: e.target.value || undefined,
+                      },
+                    }))
+                  }
+                  disabled={submitting || templates.length === 0}
+                  style={styles.select}
+                >
+                  <option value="">
+                    {templates.length === 0
+                      ? "（テンプレ未登録）"
+                      : "送信しない"}
+                  </option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name || "(無名テンプレ)"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
         </div>
 
         <div style={styles.autoSendRow}>
@@ -597,6 +678,37 @@ const styles = {
     minWidth: "9rem",
     fontSize: "0.8125rem",
     color: colors.textSecondary,
+  } as CSSProperties,
+  triggersGroup: {
+    marginTop: "0.75rem",
+    paddingTop: "0.5rem",
+    borderTop: `1px dashed ${colors.border}`,
+  } as CSSProperties,
+  triggersTitle: {
+    fontSize: "0.8125rem",
+    fontWeight: 600,
+    color: colors.textSecondary,
+    marginBottom: "0.25rem",
+  } as CSSProperties,
+  triggerRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    marginTop: "0.5rem",
+  } as CSSProperties,
+  triggerLabelBlock: {
+    minWidth: "11rem",
+    display: "flex",
+    flexDirection: "column",
+  } as CSSProperties,
+  triggerLabel: {
+    fontSize: "0.875rem",
+    fontWeight: 500,
+  } as CSSProperties,
+  triggerDescription: {
+    fontSize: "0.6875rem",
+    color: colors.textSecondary,
+    marginTop: "0.125rem",
   } as CSSProperties,
   select: {
     flex: 1,
