@@ -31,7 +31,7 @@
  *   workspaceId ごとに動的に SlackClient を取得するため env が必要。
  */
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { gmailAccounts, gmailProcessedMessages } from "../db/schema";
 import { decryptToken, encryptToken } from "./crypto";
 import { createSlackClientForWorkspace } from "./workspace";
@@ -195,13 +195,26 @@ async function processOneAccount(
   let notifiedLocal = 0;
 
   for (const messageId of ids) {
-    // 既処理 (matched/unmatched 問わず) は skip
-    const existing = await d1
-      .select()
-      .from(gmailProcessedMessages)
-      .where(eq(gmailProcessedMessages.messageId, messageId))
-      .get();
-    if (existing && existing.gmailAccountId === row.id) continue;
+    // Hotfix: 原子的 dedup。「SELECT で確認 → 後で INSERT」だと、
+    // 並行 cron tick が同じ message を見たときに両方が notify してしまう
+    // (race condition で二重発火) ため、
+    // 「先に INSERT を試みる → 実際に row を確保できた invocation だけが notify」
+    // に変える。複合 PK (gmail_account_id, message_id) のおかげで、
+    // 衝突時は onConflictDoNothing で no-op になり、returning() が空配列を返す。
+    const reserved = await d1
+      .insert(gmailProcessedMessages)
+      .values({
+        gmailAccountId: row.id,
+        messageId,
+        processedAt: new Date().toISOString(),
+        matched: 0,
+      })
+      .onConflictDoNothing()
+      .returning({ messageId: gmailProcessedMessages.messageId });
+    if (reserved.length === 0) {
+      // 別 invocation が既に同 message を予約済 (または以前に処理済)。skip。
+      continue;
+    }
 
     // detail (metadata only) 取得
     let detailRes = await fetchGmailMessage(accessToken, messageId);
@@ -211,6 +224,7 @@ async function processOneAccount(
     }
     if (!detailRes.ok) {
       // 1 件失敗で全体を止めない。next message へ。
+      // 既に matched=0 の row を確保済なので、次の tick では skip される。
       console.warn(
         `[gmail-watcher] account=${row.id} fetch message ${messageId} failed: ${detailRes.status}`,
       );
@@ -230,11 +244,12 @@ async function processOneAccount(
         meta,
         row.id,
       );
-      if (sent) notifiedLocal++;
+      if (sent) {
+        notifiedLocal++;
+        // 通知済みフラグを記録 (失敗時は 0 のまま残し、運用調査時に区別可能に)。
+        await markMatched(env, row.id, messageId);
+      }
     }
-
-    // 処理済みとして記録 (matched/unmatched 共)
-    await recordProcessed(env, row.id, messageId, Boolean(matchedRule));
   }
 
   return { matched: matchedLocal, notified: notifiedLocal };
@@ -515,26 +530,28 @@ function buildAutoReplyBlocks(
 
 // === 処理済記録 ===
 
-async function recordProcessed(
+// Hotfix: dedup 用 INSERT は process ループ内に inline 化したため、
+// ここでは「通知に成功した row を matched=1 に昇格」する役割のみを担う。
+// 失敗してもクリティカルではない (二重通知の防止には影響しない / 単に運用調査
+// 時に matched flag が 0 のまま残るだけ) ので、エラーは log だけして握りつぶす。
+async function markMatched(
   env: Env,
   gmailAccountId: string,
   messageId: string,
-  matched: boolean,
 ): Promise<void> {
   const d1 = drizzle(env.DB);
   try {
-    await d1.insert(gmailProcessedMessages).values({
-      gmailAccountId,
-      messageId,
-      processedAt: new Date().toISOString(),
-      matched: matched ? 1 : 0,
-    });
+    await d1
+      .update(gmailProcessedMessages)
+      .set({ matched: 1 })
+      .where(
+        and(
+          eq(gmailProcessedMessages.gmailAccountId, gmailAccountId),
+          eq(gmailProcessedMessages.messageId, messageId),
+        ),
+      );
   } catch (e) {
-    // 競合 (= 並行 cron) 等で PK 違反になっても skip でよい。
-    const msg = String(e);
-    if (!msg.includes("UNIQUE") && !msg.includes("constraint")) {
-      console.error("[gmail-watcher] insert processed_messages failed:", e);
-    }
+    console.error("[gmail-watcher] mark matched failed:", e);
   }
 }
 
