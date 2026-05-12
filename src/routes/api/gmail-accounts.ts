@@ -28,11 +28,14 @@ export const gmailAccountsRouter = new Hono<{ Bindings: Env }>();
 //
 // 005-gmail-watcher: gmail.readonly を追加。受信メールを polling して
 // キーワード一致時に Slack 通知する watcher 機能で必要。
+// 005-meet: calendar.events を追加。pending → scheduled 遷移時に
+// Google Calendar event + Meet link を自動生成するため必要。
 // 既存連携アカウントは scope 不足なので、kota が一度 Gmail 連携を解除して再連携する必要がある。
 const GMAIL_SCOPE = [
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/calendar.events",
 ].join(" ");
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 分
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
