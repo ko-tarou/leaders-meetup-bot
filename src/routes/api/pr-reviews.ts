@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, inArray, type SQL } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, type SQL } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   events,
+  meetings,
   prReviews,
   prReviewLgtms,
   prReviewReviewers,
 } from "../../db/schema";
+import { createSlackClientForWorkspace } from "../../services/workspace";
+import { prReviewRepostByChannel } from "../../services/sticky-pr-review-board";
 
 export const prReviewsRouter = new Hono<{ Bindings: Env }>();
 
@@ -306,3 +309,89 @@ prReviewsRouter.delete("/pr-reviews/:id/reviewers/:slackUserId", async (c) => {
     );
   return c.json({ ok: true });
 });
+
+// === 再レビュー依頼 (005-pr-rereview) ===
+// 既存 LGTM を全削除し status='open' に戻して review_round を +1。
+// reviewers に Slack 通知 + sticky board を repost。
+// 通知失敗は fail-soft（DB 更新は成功扱い、warn で握りつぶす）。
+prReviewsRouter.post(
+  "/orgs/:eventId/pr-reviews/:id/re-request",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const id = c.req.param("id");
+
+    const review = await db
+      .select()
+      .from(prReviews)
+      .where(and(eq(prReviews.id, id), eq(prReviews.eventId, eventId)))
+      .get();
+    if (!review) return c.json({ error: "Not found" }, 404);
+
+    await db.delete(prReviewLgtms).where(eq(prReviewLgtms.reviewId, id));
+    const newRound = (review.reviewRound ?? 1) + 1;
+    const now = new Date().toISOString();
+    await db
+      .update(prReviews)
+      .set({ status: "open", reviewRound: newRound, updatedAt: now })
+      .where(eq(prReviews.id, id));
+
+    // sticky board が貼られている event 配下の全 channel に通知 + repost
+    try {
+      const reviewers = await db
+        .select()
+        .from(prReviewReviewers)
+        .where(eq(prReviewReviewers.reviewId, id))
+        .all();
+      const mentions = reviewers
+        .map((r) => `<@${r.slackUserId}>`)
+        .join(" ");
+      const jst = new Date(new Date(now).getTime() + 9 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 16)
+        .replace("T", " ");
+      const text = [
+        `${mentions ? mentions + " " : ""}🔄 再レビュー依頼 (${newRound}回目)`,
+        `PR: ${review.url ?? "(URL 未設定)"}`,
+        `タイトル: ${review.title}`,
+        `依頼者: <@${review.requesterSlackId}>`,
+        `時刻: ${jst} JST`,
+        "",
+        "変更点を確認の上、再度レビューをお願いします。",
+      ].join("\n");
+
+      const targetMeetings = await db
+        .select()
+        .from(meetings)
+        .where(
+          and(
+            eq(meetings.eventId, eventId),
+            isNotNull(meetings.prReviewBoardTs),
+          ),
+        )
+        .all();
+      for (const m of targetMeetings) {
+        if (!m.workspaceId) continue;
+        const client = await createSlackClientForWorkspace(
+          c.env,
+          m.workspaceId,
+        );
+        if (!client) continue;
+        try {
+          await client.postMessage(m.channelId, text);
+        } catch (e) {
+          console.warn(`pr-review re-request post fail ${m.channelId}:`, e);
+        }
+        try {
+          await prReviewRepostByChannel(c.env, m.channelId);
+        } catch (e) {
+          console.warn(`pr-review re-request repost fail ${m.channelId}:`, e);
+        }
+      }
+    } catch (e) {
+      console.warn("pr-review re-request notify failed (fail-soft):", e);
+    }
+
+    return c.json({ ok: true, newRound });
+  },
+);

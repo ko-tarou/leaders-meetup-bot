@@ -496,6 +496,13 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/pr-reviews/${id}`, { method: "DELETE" }),
+    // 005-pr-rereview: 再レビュー依頼。既存 LGTM を全削除し、status='open' に戻し、
+    // review_round を +1 して reviewers に Slack 通知を送る。
+    reRequest: (eventId: string, id: string) =>
+      request<{ ok: boolean; newRound: number }>(
+        `/orgs/${eventId}/pr-reviews/${id}/re-request`,
+        { method: "POST" },
+      ),
     // LGTM 関連 (Sprint 17 PR1)
     lgtms: {
       list: (reviewId: string) =>
