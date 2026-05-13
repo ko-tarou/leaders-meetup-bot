@@ -121,7 +121,13 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
       )}
 
       {displayed.map((r) => (
-        <PRReviewCard key={r.id} review={r} onSelect={() => setEditing(r)} />
+        <PRReviewCard
+          key={r.id}
+          review={r}
+          onSelect={() => setEditing(r)}
+          eventId={eventId}
+          onChanged={() => setRefreshKey((k) => k + 1)}
+        />
       ))}
 
       {showCreate && (
