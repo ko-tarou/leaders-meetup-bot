@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../../types/env";
 import {
+  extractReposFromConfig,
   handlePullRequestEvent,
   handlePullRequestReviewEvent,
   repostPRReviewForEvent,
@@ -195,10 +196,14 @@ githubWebhookRouter.put("/github-mappings", async (c) => {
   return c.json({ ok: true, count: cleaned.length });
 });
 
-// === debug: pr_review_list action の githubRepo 設定済み一覧 (admin UI 補助) ===
+// === debug: pr_review_list action の githubRepos 設定済み一覧 (admin UI 補助) ===
 //
 // admin UI で「どの event_action が GitHub repo に連携済みか」を出すための補助。
 // 表示専用なので read-only。
+//
+// 後方互換: 旧形式 config.githubRepo (single string) も 1 要素配列として扱う。
+// 1 つの action が複数 repo を持つ場合は repo ごとに 1 行ずつ展開する (UI 側で
+// "repo → event" のリストとして見せやすくするため)。
 githubWebhookRouter.get("/github-mappings/connected-actions", async (c) => {
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -208,17 +213,9 @@ githubWebhookRouter.get("/github-mappings/connected-actions", async (c) => {
     .all();
   const items: { actionId: string; eventId: string; githubRepo: string }[] = [];
   for (const r of rows) {
-    try {
-      const cfg = JSON.parse(r.config ?? "{}") as { githubRepo?: string };
-      if (typeof cfg.githubRepo === "string" && cfg.githubRepo.trim()) {
-        items.push({
-          actionId: r.id,
-          eventId: r.eventId,
-          githubRepo: cfg.githubRepo.trim(),
-        });
-      }
-    } catch {
-      // skip broken config
+    const repos = extractReposFromConfig(r.config);
+    for (const repo of repos) {
+      items.push({ actionId: r.id, eventId: r.eventId, githubRepo: repo });
     }
   }
   return c.json(items);
