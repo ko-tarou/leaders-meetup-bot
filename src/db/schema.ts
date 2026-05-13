@@ -611,6 +611,24 @@ export const appSettings = sqliteTable("app_settings", {
   updatedAt: text("updated_at").notNull(),
 });
 
+// 005-github-webhook: GitHub username → Slack user id のマッピング (migration 0042)
+//
+// GitHub の pull_request / pull_request_review webhook を受信したとき、
+// payload に含まれる GitHub username を Slack user id に解決するための表。
+// admin UI (WorkspacesPage の「GitHub 連携」) から全件取得/全件保存する toml-table
+// 形式で運用する。github_username を PK にすることで重複を物理的に防ぐ。
+export const githubUserMappings = sqliteTable(
+  "github_user_mappings",
+  {
+    githubUsername: text("github_username").primaryKey(),
+    slackUserId: text("slack_user_id").notNull(),
+    displayName: text("display_name"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_github_user_mappings_slack_user_id").on(t.slackUserId)],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",

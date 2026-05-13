@@ -274,6 +274,13 @@
       "when": 1786252800000,
       "tag": "0041_pr_review_round",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1786857600000,
+      "tag": "0042_github_user_mappings",
+      "breakpoints": true
     }
   ]
 }
