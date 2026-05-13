@@ -222,6 +222,9 @@ export const prReviews = sqliteTable(
     // Sprint 22 で多対多化（pr_review_reviewers）。
     // 新コードは参照しない（dead column として残す）。
     reviewerSlackId: text("reviewer_slack_id"),
+    // 005-pr-rereview: 何回目のレビューか（再レビュー依頼の度に +1 される）。
+    // 1 = 初回、N (>1) = N 回目の再レビュー。migration 0041 で追加（既存行は DEFAULT 1）。
+    reviewRound: integer("review_round").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
