@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import type { EventAction } from "../../types";
+import type { EventAction, PRReviewListConfig } from "../../types";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { useIsReadOnly } from "../../hooks/usePublicMode";
@@ -8,57 +8,75 @@ import { colors } from "../../styles/tokens";
 
 // 005-github-webhook: pr_review_list action の汎用設定タブ。
 //
-// 現状は config.githubRepo (= GitHub の "owner/repo") のみ。
-// GitHub webhook が届いたとき、payload.repository.full_name と
-// config.githubRepo が一致する event_action 配下の pr_reviews を更新する。
+// 1 つの action で **複数 GitHub repo** を集約管理できる。config 形式:
+//   - 新: githubRepos: string[]  ←  保存はこちらのみ
+//   - 旧: githubRepo: string     ←  読み込み時のみ後方互換で 1 要素配列に変換
 //
-// 保存は events.actions.update で action.config を JSON 文字列ごと上書きする。
+// 保存は空 / 重複 (case-insensitive) / 不正形式を除外してから API に送る。
 // 既存 config の他 key は preserve する。
+
+const REPO_PATTERN = /^[\w.\-]+\/[\w.\-]+$/;
 
 const styles = {
   wrap: { padding: "1rem" } as CSSProperties,
-  label: {
-    display: "block",
-    fontSize: "0.85rem",
-    color: colors.textSecondary,
-    marginBottom: "0.25rem",
-  } as CSSProperties,
+  label: { display: "block", fontSize: "0.85rem", color: colors.textSecondary, marginBottom: "0.5rem" } as CSSProperties,
+  row: { display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.375rem" } as CSSProperties,
   input: {
-    width: "min(420px, 100%)",
-    padding: "0.375rem 0.5rem",
-    border: `1px solid ${colors.border}`,
-    borderRadius: "0.25rem",
-    fontSize: "0.875rem",
-    background: colors.background,
-    color: colors.text,
-    fontFamily: "monospace",
+    flex: 1, maxWidth: "420px", padding: "0.375rem 0.5rem",
+    border: `1px solid ${colors.border}`, borderRadius: "0.25rem",
+    fontSize: "0.875rem", background: colors.background, color: colors.text, fontFamily: "monospace",
   } as CSSProperties,
-  desc: {
-    fontSize: "0.8rem",
-    color: colors.textMuted,
-    marginTop: "0.25rem",
+  removeBtn: {
+    background: "transparent", color: colors.textSecondary, border: `1px solid ${colors.border}`,
+    width: "2rem", height: "2rem", borderRadius: "0.25rem", cursor: "pointer", fontSize: "1rem", padding: 0,
   } as CSSProperties,
-  btn: {
-    background: colors.primary,
-    color: colors.textInverse,
-    border: "none",
-    padding: "0.5rem 1rem",
-    borderRadius: "0.25rem",
-    cursor: "pointer",
-    fontSize: "0.875rem",
-    marginTop: "0.75rem",
+  addBtn: {
+    background: "transparent", color: colors.primary, border: `1px dashed ${colors.borderStrong}`,
+    padding: "0.375rem 0.75rem", borderRadius: "0.25rem", cursor: "pointer", fontSize: "0.85rem", marginTop: "0.25rem",
+  } as CSSProperties,
+  desc: { fontSize: "0.8rem", color: colors.textMuted, marginTop: "0.5rem" } as CSSProperties,
+  errorText: { color: colors.danger, fontSize: "0.8rem", marginTop: "0.25rem" } as CSSProperties,
+  saveBtn: {
+    background: colors.primary, color: colors.textInverse, border: "none",
+    padding: "0.5rem 1rem", borderRadius: "0.25rem", cursor: "pointer", fontSize: "0.875rem", marginTop: "0.75rem",
   } as CSSProperties,
 };
 
-type Config = { githubRepo?: string; [k: string]: unknown };
-
-function parseConfig(s: string): Config {
+function parseConfig(s: string): PRReviewListConfig {
   try {
     const cfg = JSON.parse(s ?? "{}");
-    return cfg && typeof cfg === "object" ? (cfg as Config) : {};
+    return cfg && typeof cfg === "object" ? (cfg as PRReviewListConfig) : {};
   } catch {
     return {};
   }
+}
+
+// 新 githubRepos / 旧 githubRepo から初期 repos[] を作る (後方互換)。
+function initialReposFromConfig(cfg: PRReviewListConfig): string[] {
+  if (Array.isArray(cfg.githubRepos)) {
+    const list = cfg.githubRepos
+      .filter((r): r is string => typeof r === "string")
+      .map((r) => r.trim())
+      .filter(Boolean);
+    if (list.length > 0) return list;
+  }
+  if (typeof cfg.githubRepo === "string" && cfg.githubRepo.trim()) {
+    return [cfg.githubRepo.trim()];
+  }
+  return [];
+}
+
+// trim + 空除外 + 重複除外 (case-insensitive)。保存前と変更検出に使う。
+function normalizeRepos(repos: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of repos) {
+    const t = r.trim();
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  return out;
 }
 
 export function PRReviewSettingsForm({
@@ -72,32 +90,36 @@ export function PRReviewSettingsForm({
 }) {
   const toast = useToast();
   const isReadOnly = useIsReadOnly();
-  const initial = parseConfig(action.config);
-  const [githubRepo, setGithubRepo] = useState<string>(
-    typeof initial.githubRepo === "string" ? initial.githubRepo : "",
+  const initial = useMemo(() => parseConfig(action.config), [action.config]);
+  const initialRepos = useMemo(() => initialReposFromConfig(initial), [initial]);
+  const [repos, setRepos] = useState<string[]>(() =>
+    initialRepos.length > 0 ? initialRepos : [""],
   );
   const [saving, setSaving] = useState(false);
 
-  const trimmed = githubRepo.trim();
-  const dirty = trimmed !== (initial.githubRepo ?? "");
-  // "owner/repo" 形式 (空 = 連携無効) のゆるい検証
-  const formatOk =
-    trimmed === "" || /^[\w.\-]+\/[\w.\-]+$/.test(trimmed);
+  const normalized = useMemo(() => normalizeRepos(repos), [repos]);
+  // 空は OK (保存時にスキップ)、それ以外は owner/repo 形式必須。
+  const rowValid = repos.map((r) => r.trim() === "" || REPO_PATTERN.test(r.trim()));
+  const allRowsValid = rowValid.every(Boolean);
+  const dirty =
+    normalized.length !== initialRepos.length ||
+    normalized.some((r, i) => r !== initialRepos[i]);
 
   const handleSave = async () => {
-    if (!formatOk) {
+    if (!allRowsValid) {
       toast.error("owner/repo 形式で入力してください (例: ko-tarou/leaders-meetup-bot)");
       return;
     }
     setSaving(true);
     try {
-      const next: Config = { ...initial };
-      if (trimmed === "") delete next.githubRepo;
-      else next.githubRepo = trimmed;
-      await api.events.actions.update(eventId, action.id, {
-        config: JSON.stringify(next),
-      });
+      const next: PRReviewListConfig = { ...initial };
+      if (normalized.length === 0) delete next.githubRepos;
+      else next.githubRepos = normalized;
+      // 旧 single key は新形式が入った時点で削除 (両方残すと混乱の元)。
+      delete next.githubRepo;
+      await api.events.actions.update(eventId, action.id, { config: JSON.stringify(next) });
       toast.success("保存しました");
+      setRepos(normalized.length > 0 ? normalized : [""]);
       onSaved();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "保存に失敗しました");
@@ -109,36 +131,64 @@ export function PRReviewSettingsForm({
   return (
     <div style={styles.wrap}>
       <h3 style={{ marginTop: 0 }}>GitHub 連携</h3>
-      <label style={styles.label}>連携先 GitHub リポジトリ (owner/repo)</label>
-      <input
-        type="text"
-        value={githubRepo}
-        onChange={(e) => setGithubRepo(e.target.value)}
-        placeholder="ko-tarou/leaders-meetup-bot"
-        style={styles.input}
+      <label style={styles.label}>連携先 GitHub リポジトリ (owner/repo) — 複数登録可</label>
+      {repos.map((value, i) => (
+        <div key={i} style={styles.row}>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) =>
+              setRepos((prev) => prev.map((r, idx) => (idx === i ? e.target.value : r)))
+            }
+            placeholder="ko-tarou/leaders-meetup-bot"
+            style={{
+              ...styles.input,
+              ...(rowValid[i] ? {} : { borderColor: colors.danger }),
+            }}
+            disabled={isReadOnly || saving}
+            aria-label={`GitHub repo ${i + 1}`}
+            aria-invalid={!rowValid[i]}
+          />
+          <button
+            type="button"
+            onClick={() =>
+              setRepos((prev) => {
+                const next = prev.filter((_, idx) => idx !== i);
+                return next.length > 0 ? next : [""];
+              })
+            }
+            style={styles.removeBtn}
+            disabled={isReadOnly || saving}
+            aria-label={`${i + 1} 行目を削除`}
+            title="この repo を削除"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => setRepos((prev) => [...prev, ""])}
+        style={styles.addBtn}
         disabled={isReadOnly || saving}
-      />
+      >
+        + repo を追加
+      </button>
       <div style={styles.desc}>
-        このリポジトリの webhook (Pull requests / Pull request reviews) を受信して
-        reviewer 割当 / LGTM / merge を board に自動反映します。空欄で無効化。
+        これらのリポジトリの webhook (Pull requests / Pull request reviews) を受信して、
+        reviewer 割当 / LGTM / merge を board に自動反映します。全削除で連携を無効化できます。
         webhook URL と secret 設定は「ワークスペース管理 → GitHub 連携」を参照。
       </div>
-      {!formatOk && (
-        <div
-          style={{
-            color: colors.danger,
-            fontSize: "0.8rem",
-            marginTop: "0.25rem",
-          }}
-        >
-          owner/repo 形式で入力してください
+      {!allRowsValid && (
+        <div style={styles.errorText}>
+          owner/repo 形式で入力してください (空欄は保存時にスキップされます)
         </div>
       )}
       <button
         type="button"
         onClick={handleSave}
-        style={styles.btn}
-        disabled={isReadOnly || saving || !dirty || !formatOk}
+        style={styles.saveBtn}
+        disabled={isReadOnly || saving || !dirty || !allRowsValid}
       >
         {saving ? "保存中..." : "保存"}
       </button>

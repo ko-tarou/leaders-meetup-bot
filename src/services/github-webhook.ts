@@ -1,9 +1,12 @@
 // 005-github-webhook: GitHub webhook の HMAC 検証 + event ハンドリング。
 //
 // /api/github-webhook 経由で POST されるイベントを処理し、pr_review_list
-// アクションの config.githubRepo と payload.repository.full_name を照合して、
-// 該当する event_action に紐づく pr_reviews テーブルへ reviewer 割当 / LGTM /
-// merge を自動反映する。
+// アクションの config.githubRepos (array) もしくは旧 config.githubRepo (string)
+// と payload.repository.full_name を照合して、該当する event_action に紐づく
+// pr_reviews テーブルへ reviewer 割当 / LGTM / merge を自動反映する。
+//
+// 1 つの action で複数 repo を集約管理できる (multi-repo)。後方互換のため
+// 旧 config.githubRepo (single string) も読み込み時は配列扱いする。
 //
 // 設計方針:
 //   - fail-soft: webhook 処理失敗で 5xx を返さない (GitHub の自動 retry を避ける)。
@@ -18,7 +21,7 @@
 // 他のイベント (push 等) は明示的に skip + 200 OK。
 
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   eventActions,
   githubUserMappings,
@@ -117,50 +120,62 @@ type ResolvedAction = {
 };
 
 /**
+ * action.config から連携先 repo の配列を取り出す。
+ *
+ * 新形式: `githubRepos: string[]`
+ * 旧形式 (後方互換): `githubRepo: string` → `[githubRepo]` に変換
+ *
+ * 戻り値は normalized (trim 済み・空除外)。両方無ければ空配列。
+ */
+export function extractReposFromConfig(configJson: string | null | undefined): string[] {
+  try {
+    const cfg = JSON.parse(configJson ?? "{}") as {
+      githubRepos?: unknown;
+      githubRepo?: unknown;
+    };
+    const list: string[] = [];
+    if (Array.isArray(cfg.githubRepos)) {
+      for (const r of cfg.githubRepos) {
+        if (typeof r === "string" && r.trim()) list.push(r.trim());
+      }
+    }
+    if (list.length === 0 && typeof cfg.githubRepo === "string" && cfg.githubRepo.trim()) {
+      list.push(cfg.githubRepo.trim());
+    }
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * payload.repository.full_name に一致する pr_review_list action を解決する。
  *
- * config は JSON 文字列なので SQL LIKE で粗く絞り込み + JS パースで厳密照合する。
- * 一致が複数あれば最初の 1 件を返す。0 件なら null (callee で skip)。
+ * 全 pr_review_list action を fetch し、各 action の config.githubRepos
+ * (新形式 array) もしくは config.githubRepo (旧形式 string、後方互換) に
+ * fullName が含まれているかを JS 側で照合する。一致が複数あれば最初の 1 件を返す。
+ *
+ * pr_review_list の action 数は通常少ない (せいぜい数十件) ため LIKE 事前フィルタは廃止。
  */
 async function resolveActionForRepo(
   env: Env,
   fullName: string,
 ): Promise<ResolvedAction | null> {
   const db = drizzle(env.DB);
-  // JSON 内 "githubRepo":"owner/repo" を LIKE で粗く絞る。
-  // 厳密な照合は JS 側で行う (SQL 側は false positive を許容する事前フィルタ)。
-  const needle = `%"githubRepo"%${escapeLike(fullName)}%`;
   const candidates = await db
     .select()
     .from(eventActions)
-    .where(
-      and(
-        eq(eventActions.actionType, "pr_review_list"),
-        like(eventActions.config, needle),
-      ),
-    )
+    .where(eq(eventActions.actionType, "pr_review_list"))
     .all();
 
+  const target = fullName.toLowerCase();
   for (const a of candidates) {
-    try {
-      const cfg = JSON.parse(a.config ?? "{}") as { githubRepo?: string };
-      if (
-        typeof cfg.githubRepo === "string" &&
-        cfg.githubRepo.toLowerCase() === fullName.toLowerCase()
-      ) {
-        return { actionId: a.id, eventId: a.eventId };
-      }
-    } catch {
-      // config が壊れている row は skip
+    const repos = extractReposFromConfig(a.config);
+    if (repos.some((r) => r.toLowerCase() === target)) {
+      return { actionId: a.id, eventId: a.eventId };
     }
   }
   return null;
-}
-
-function escapeLike(s: string): string {
-  // _ や % が含まれる org/repo 名にも対応 (GitHub では _ / - / . が合法)。
-  // SQLite の default LIKE では escape を指定しないと _ がワイルドカードになる。
-  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
 }
 
 // === GitHub username → Slack user id ===

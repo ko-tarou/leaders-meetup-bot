@@ -628,13 +628,25 @@ export type GitHubUserMapping = {
   displayName?: string;
 };
 
-// 005-github-webhook: pr_review_list action.config.githubRepo が設定済の
-// 連携対象 action のサマリ。WorkspacesPage の GitHub 連携セクションで「現在
-// どの event で連携が有効か」を可視化するための read-only 表示用。
+// 005-github-webhook: pr_review_list action.config.githubRepos の各 repo に
+// 紐づく連携対象 action のサマリ。WorkspacesPage の GitHub 連携セクションで
+// 「現在どの event で連携が有効か」を可視化するための read-only 表示用。
+// 1 つの action に複数 repo がある場合は BE 側で repo ごとに 1 行展開される。
 export type GitHubConnectedAction = {
   actionId: string;
   eventId: string;
   githubRepo: string;
+};
+
+// 005-github-webhook: pr_review_list action.config の型 (action.config は
+// JSON 文字列なので保存/読込時に parse する)。
+// 新形式: githubRepos: string[]
+// 旧形式 (deprecated, 後方互換のみ): githubRepo: string
+export type PRReviewListConfig = {
+  githubRepos?: string[];
+  /** @deprecated 後方互換のみ。新規保存は githubRepos を使う。 */
+  githubRepo?: string;
+  [k: string]: unknown;
 };
 
 // 005-feedback: 右下フィードバックウィジェットのアプリ全体設定 (singleton)。
