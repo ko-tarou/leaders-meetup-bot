@@ -230,6 +230,9 @@ export type PRReview = {
   status: PRReviewStatus;
   requesterSlackId: string;
   reviewerSlackId: string | null;
+  // 005-pr-rereview: 何回目のレビューか（再レビュー依頼の度に +1）。
+  // 1 = 初回（DB default）、N (>1) = N 回目の再レビュー。
+  reviewRound: number;
   createdAt: string;
   updatedAt: string;
   // 005-16: N+1 解消のため、GET /orgs/:eventId/pr-reviews のレスポンスに埋め込まれる。
