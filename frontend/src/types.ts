@@ -620,6 +620,23 @@ export type BotBulkInviteResult = {
   nextOffset: number | null;
 };
 
+// 005-github-webhook: GitHub username → Slack user id のマッピング (admin UI 用)。
+// BE は github_user_mappings 表に保存。
+export type GitHubUserMapping = {
+  githubUsername: string;
+  slackUserId: string;
+  displayName?: string;
+};
+
+// 005-github-webhook: pr_review_list action.config.githubRepo が設定済の
+// 連携対象 action のサマリ。WorkspacesPage の GitHub 連携セクションで「現在
+// どの event で連携が有効か」を可視化するための read-only 表示用。
+export type GitHubConnectedAction = {
+  actionId: string;
+  eventId: string;
+  githubRepo: string;
+};
+
 // 005-feedback: 右下フィードバックウィジェットのアプリ全体設定 (singleton)。
 // BE の services/feedback.ts: AppSettings と対応。
 export type AppSettings = {
