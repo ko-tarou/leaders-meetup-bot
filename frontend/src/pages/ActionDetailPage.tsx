@@ -6,6 +6,7 @@ import type { EventAction, EventActionType, Meeting } from "../types";
 import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
+import { PRReviewSettingsForm } from "../components/pr-review/PRReviewSettingsForm";
 import { MemberApplicationListTab } from "../components/MemberApplicationListTab";
 import { MemberWelcomeConfigForm } from "../components/MemberWelcomeConfigForm";
 import { ChannelManagementSection } from "../components/ChannelManagementSection";
@@ -501,11 +502,20 @@ function ActionSettingsContent({
         />
       );
     case "task_management":
-    case "pr_review_list":
       // PR3 / Sprint 15 PR2: チャンネル管理は専用サブタブへ移動。
       // ここは将来の汎用設定枠。
       return (
         <PlaceholderContent label="将来の追加設定がここに表示されます。チャンネル管理は「チャンネル管理」タブから行ってください。" />
+      );
+    case "pr_review_list":
+      // 005-github-webhook: pr_review_list 専用の汎用設定。
+      // 現状は config.githubRepo (連携先 GitHub repo) のみ。
+      return (
+        <PRReviewSettingsForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
       );
     case "schedule_polling":
       // Sprint 005-tabs: schedule_polling は「設定」タブを廃止し、
