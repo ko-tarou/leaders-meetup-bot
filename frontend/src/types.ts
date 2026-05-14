@@ -649,6 +649,27 @@ export type PRReviewListConfig = {
   [k: string]: unknown;
 };
 
+// 005-github-import: 設定済み GitHub repo から open PR を取り込む API の戻り値。
+// repo 単位で fail-soft 集計するため、配列で返ってくる (失敗時は ok=false + error)。
+export type GitHubPRImportResult = {
+  repo: string;
+  ok: boolean;
+  prsImported: number;
+  prsUpdated: number;
+  reviewersAdded: number;
+  lgtmsAdded: number;
+  error?: string;
+};
+
+export type GitHubPRImportResponse = {
+  ok: boolean;
+  results: GitHubPRImportResult[];
+  totalImported: number;
+  totalUpdated: number;
+  totalReviewers: number;
+  totalLgtms: number;
+};
+
 // 005-feedback: 右下フィードバックウィジェットのアプリ全体設定 (singleton)。
 // BE の services/feedback.ts: AppSettings と対応。
 export type AppSettings = {

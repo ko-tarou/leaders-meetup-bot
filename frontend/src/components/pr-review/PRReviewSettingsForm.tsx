@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import type { EventAction, PRReviewListConfig } from "../../types";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
+import { useConfirm } from "../ui/ConfirmDialog";
 import { useIsReadOnly } from "../../hooks/usePublicMode";
 import { colors } from "../../styles/tokens";
 
@@ -40,6 +41,14 @@ const styles = {
     background: colors.primary, color: colors.textInverse, border: "none",
     padding: "0.5rem 1rem", borderRadius: "0.25rem", cursor: "pointer", fontSize: "0.875rem", marginTop: "0.75rem",
   } as CSSProperties,
+  importSection: {
+    marginTop: "1.25rem", paddingTop: "1rem", borderTop: `1px solid ${colors.border}`,
+  } as CSSProperties,
+  importBtn: {
+    background: colors.background, color: colors.text, border: `1px solid ${colors.borderStrong}`,
+    padding: "0.5rem 1rem", borderRadius: "0.25rem", cursor: "pointer", fontSize: "0.875rem",
+  } as CSSProperties,
+  importDesc: { fontSize: "0.8rem", color: colors.textMuted, marginTop: "0.5rem" } as CSSProperties,
 };
 
 function parseConfig(s: string): PRReviewListConfig {
@@ -89,6 +98,7 @@ export function PRReviewSettingsForm({
   onSaved: () => void;
 }) {
   const toast = useToast();
+  const { confirm } = useConfirm();
   const isReadOnly = useIsReadOnly();
   const initial = useMemo(() => parseConfig(action.config), [action.config]);
   const initialRepos = useMemo(() => initialReposFromConfig(initial), [initial]);
@@ -96,6 +106,7 @@ export function PRReviewSettingsForm({
     initialRepos.length > 0 ? initialRepos : [""],
   );
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const normalized = useMemo(() => normalizeRepos(repos), [repos]);
   // 空は OK (保存時にスキップ)、それ以外は owner/repo 形式必須。
@@ -104,6 +115,52 @@ export function PRReviewSettingsForm({
   const dirty =
     normalized.length !== initialRepos.length ||
     normalized.some((r, i) => r !== initialRepos[i]);
+
+  // 005-github-import: 設定済み repo の open PR を取り込む。
+  // 取り込み対象は **保存済み** の repos (config.githubRepos)。未保存の編集中
+  // 入力は対象外。理由: BE は action.config を読むので、編集中入力が反映され
+  // ていない時点で取り込むと「画面と挙動の乖離」が起きる。dirty 時は警告。
+  const handleImport = async () => {
+    if (initialRepos.length === 0) {
+      toast.error("GitHub repo を 1 つ以上設定してください");
+      return;
+    }
+    if (dirty) {
+      toast.error("未保存の変更があります。先に保存してください");
+      return;
+    }
+    const ok = await confirm({
+      message: `${initialRepos.length} 個の repo から open PR を取り込みます。よろしいですか？`,
+      confirmLabel: "取り込み",
+    });
+    if (!ok) return;
+
+    setImporting(true);
+    try {
+      const res = await api.prReviews.importGitHubPRs(eventId, action.id);
+      const failed = res.results.filter((r) => !r.ok);
+      const parts = [
+        `新規 ${res.totalImported}件`,
+        `更新 ${res.totalUpdated}件`,
+        `担当追加 ${res.totalReviewers}件`,
+        `LGTM ${res.totalLgtms}件`,
+      ];
+      if (failed.length > 0) {
+        toast.error(
+          `一部失敗 (${failed.length}/${res.results.length} repo): ${failed
+            .map((f) => `${f.repo} (${f.error ?? "error"})`)
+            .join(", ")}`,
+        );
+      } else {
+        toast.success(`取り込み完了: ${parts.join(" / ")}`);
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "取り込みに失敗しました");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!allRowsValid) {
@@ -192,6 +249,31 @@ export function PRReviewSettingsForm({
       >
         {saving ? "保存中..." : "保存"}
       </button>
+
+      <div style={styles.importSection}>
+        <button
+          type="button"
+          onClick={handleImport}
+          style={styles.importBtn}
+          disabled={
+            isReadOnly || importing || saving || initialRepos.length === 0 || dirty
+          }
+          title={
+            initialRepos.length === 0
+              ? "GitHub repo を保存してから取り込めます"
+              : dirty
+                ? "未保存の変更があります。先に保存してください"
+                : undefined
+          }
+        >
+          {importing ? "取り込み中..." : "Open PR を取り込み"}
+        </button>
+        <div style={styles.importDesc}>
+          設定済みリポジトリの open PR と requested reviewers / 既存 LGTM を一括で
+          board に同期します。webhook 未到来の進行中 PR を取り込むためのもの。
+          GitHub API は未認証 (60 req/hour) で叩くので public repo のみ対応。
+        </div>
+      </div>
     </div>
   );
 }
