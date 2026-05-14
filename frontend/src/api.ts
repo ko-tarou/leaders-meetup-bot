@@ -13,6 +13,7 @@ import type {
   EventActionType,
   FeedbackCategory,
   GitHubConnectedAction,
+  GitHubPRImportResponse,
   GitHubUserMapping,
   GmailAccount,
   GmailWatcherConfig,
@@ -520,6 +521,14 @@ export const api = {
           { method: "DELETE" },
         ),
     },
+    // 005-github-import: 設定済み repo の open PR を pr_reviews に取り込む。
+    // requested_reviewers + 既存 APPROVED reviews も同期する。
+    // 公開 (unauthenticated) GitHub API を叩くので public repo 限定。
+    importGitHubPRs: (eventId: string, actionId: string) =>
+      request<GitHubPRImportResponse>(
+        `/orgs/${eventId}/actions/${actionId}/import-github-prs`,
+        { method: "POST" },
+      ),
     // 担当レビュアー関連 (Sprint 22): N人対応
     reviewers: {
       list: (reviewId: string) =>
