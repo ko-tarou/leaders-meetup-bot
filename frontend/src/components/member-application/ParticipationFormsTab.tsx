@@ -152,6 +152,7 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
               .map((r) => DEV_ROLE_LABEL[r] ?? r)
               .filter((r) => r.length > 0);
             const fields: { label: string; value: string }[] = [
+              { label: "Slack表示名", value: display(f.slackName) },
               { label: "学籍番号", value: display(f.studentId) },
               { label: "学科", value: display(f.department) },
               { label: "学年", value: label(GRADE_LABEL, f.grade) },
