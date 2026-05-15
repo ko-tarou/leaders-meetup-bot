@@ -56,6 +56,7 @@ export function ParticipationFormPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
+  const [slackName, setSlackName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [department, setDepartment] = useState("");
   const [grade, setGrade] = useState<ParticipationGrade | "">("");
@@ -114,8 +115,13 @@ export function ParticipationFormPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !studentId.trim() || !department.trim()) {
-      setError("名前・学籍番号・学科は必須です");
+    if (
+      !name.trim() ||
+      !slackName.trim() ||
+      !studentId.trim() ||
+      !department.trim()
+    ) {
+      setError("名前・Slack 表示名・学籍番号・学科は必須です");
       return;
     }
     if (!grade) return setError("学年を選択してください");
@@ -130,6 +136,7 @@ export function ParticipationFormPage() {
       const res = await api.participation.submit(eventId!, {
         token: token || undefined,
         name: name.trim(),
+        slackName: slackName.trim(),
         studentId: studentId.trim(),
         department: department.trim(),
         grade,
@@ -201,6 +208,19 @@ export function ParticipationFormPage() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={100}
+            style={inputStyle}
+          />
+        </Field>
+        <Field
+          label="Slack 表示名 *"
+          hint="Slack に表示されている名前（例: 山田太郎）。ロール自動割当に使用します"
+        >
+          <input
+            type="text"
+            value={slackName}
+            onChange={(e) => setSlackName(e.target.value)}
             required
             maxLength={100}
             style={inputStyle}
