@@ -498,6 +498,7 @@ export type ParticipationPrefill = {
 export type ParticipationSubmitBody = {
   token?: string;
   name: string;
+  slackName?: string;
   studentId?: string;
   department?: string;
   grade?: ParticipationGrade;
@@ -519,6 +520,7 @@ export type ParticipationForm = {
   eventId: string;
   applicationId: string | null;
   name: string;
+  slackName: string | null;
   studentId: string | null;
   department: string | null;
   grade: string | null;
