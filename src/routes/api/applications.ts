@@ -34,6 +34,17 @@ const INTERVIEW_LOCATION_CONFIG: Record<
 
 export const applicationsRouter = new Hono<{ Bindings: Env }>();
 
+/**
+ * participation-form Phase1 PR2: 不透明トークン生成 (32byte 乱数 → hex)。
+ * 推測困難 (256bit) なので applications.participationToken に UNIQUE は付けず
+ * lookup index のみ。既存トークンは再利用するため発行はここ 1 箇所のみ。
+ */
+function generateParticipationToken(): string {
+  const buf = new Uint8Array(32);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // === applications (Sprint 16: 新メンバー入会フロー) ===
 
 // 005-hotfix: 公開応募フォーム用に event の最小情報を返す。
@@ -390,6 +401,7 @@ applicationsRouter.put("/applications/:id", async (c) => {
         existing.id,
         existing.eventId,
         newStatus,
+        new URL(c.req.url).origin,
       );
     } catch (e) {
       console.error("[applications] status transition hook error:", e);
@@ -417,6 +429,7 @@ async function handleStatusTransition(
   applicationId: string,
   eventId: string,
   newStatus: "pending" | "scheduled" | "passed" | "failed" | "rejected",
+  origin: string,
 ): Promise<void> {
   // member_application action を取得 (event 単位で 1 つの想定)。
   const action = await db
@@ -442,10 +455,27 @@ async function handleStatusTransition(
       .where(eq(applications.id, applicationId))
       .get();
     if (!app) return;
+
+    // participation-form Phase1 PR2: 合格 (passed) 遷移時のみ、未発行なら
+    // participationToken を発行・永続化してからメール vars を構築する。
+    // 既存トークンは再利用 (再送で URL 不変)。failed では発行しない。
+    let participationFormLink = "";
+    if (newStatus === "passed") {
+      let token = app.participationToken;
+      if (!token) {
+        token = generateParticipationToken();
+        await db
+          .update(applications)
+          .set({ participationToken: token })
+          .where(eq(applications.id, applicationId));
+      }
+      participationFormLink = `${origin}/participation/${eventId}?t=${token}`;
+    }
+
     await sendApplicationEmailForTrigger(
       env,
       action.config,
-      toApplicationLike(app),
+      { ...toApplicationLike(app), participationFormLink },
       newStatus === "passed" ? "onPassed" : "onFailed",
     );
     return;
