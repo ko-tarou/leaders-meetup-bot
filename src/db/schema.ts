@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { unique, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 // Slack ワークスペース登録（ADR-0006）
 // 複数 Slack workspace（Developers Hub / HackIt 等）を一元管理するためのトップレベル登録
@@ -499,10 +500,19 @@ export const slackRoles = sqliteTable(
       .references(() => eventActions.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
+    // 親ロール (self 参照)。null = ルート。子のメンバーは親の部分集合。
+    // 親削除時は ON DELETE SET NULL で子をルート化する。
+    parentRoleId: text("parent_role_id").references(
+      (): AnySQLiteColumn => slackRoles.id,
+      { onDelete: "set null" },
+    ),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
-  (t) => [index("idx_slack_roles_event_action").on(t.eventActionId)],
+  (t) => [
+    index("idx_slack_roles_event_action").on(t.eventActionId),
+    index("idx_slack_roles_parent").on(t.parentRoleId),
+  ],
 );
 
 export const slackRoleMembers = sqliteTable(

@@ -98,6 +98,46 @@ async function findRoleInAction(
   return { role };
 }
 
+/**
+ * roles 集合から parent_role_id の子マップを構築し、roleId の全子孫
+ * (自身は含まない) を BFS で列挙する。循環があっても visited で停止する。
+ */
+function collectDescendantRoleIds(
+  roles: { id: string; parentRoleId: string | null }[],
+  roleId: string,
+): Set<string> {
+  const childMap = new Map<string, string[]>();
+  for (const r of roles) {
+    if (r.parentRoleId) {
+      const arr = childMap.get(r.parentRoleId) ?? [];
+      arr.push(r.id);
+      childMap.set(r.parentRoleId, arr);
+    }
+  }
+  const out = new Set<string>();
+  const queue = [...(childMap.get(roleId) ?? [])];
+  while (queue.length > 0) {
+    const cur = queue.shift() as string;
+    if (out.has(cur)) continue;
+    out.add(cur);
+    for (const child of childMap.get(cur) ?? []) queue.push(child);
+  }
+  return out;
+}
+
+/** role のメンバー slackUserId 集合を取得する。 */
+async function memberIdSet(
+  db: ReturnType<typeof drizzle>,
+  roleId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select()
+    .from(slackRoleMembers)
+    .where(eq(slackRoleMembers.roleId, roleId))
+    .all();
+  return new Set(rows.map((r) => r.slackUserId));
+}
+
 // ----------------------------------------------------------------------------
 // Roles CRUD
 // ----------------------------------------------------------------------------
@@ -136,6 +176,7 @@ rolesRouter.get(
           id: r.id,
           name: r.name,
           description: r.description,
+          parentRoleId: r.parentRoleId,
           membersCount: memberRows.length,
           channelsCount: channelRows.length,
           createdAt: r.createdAt,
@@ -153,13 +194,25 @@ rolesRouter.post(
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
     const actionId = c.req.param("actionId");
-    const body = await c.req.json<{ name?: string; description?: string }>();
+    const body = await c.req.json<{
+      name?: string;
+      description?: string;
+      parentRoleId?: string;
+    }>();
 
     const found = await findRoleManagementAction(db, eventId, actionId);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
     if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
       return c.json({ error: "name is required" }, 400);
+    }
+
+    let parentRoleId: string | null = null;
+    if (body.parentRoleId != null && body.parentRoleId !== "") {
+      const parent = await findRoleInAction(db, actionId, body.parentRoleId);
+      if ("error" in parent)
+        return c.json({ error: "parent role not found" }, 400);
+      parentRoleId = body.parentRoleId;
     }
 
     const id = crypto.randomUUID();
@@ -169,6 +222,7 @@ rolesRouter.post(
       eventActionId: actionId,
       name: body.name.trim(),
       description: body.description?.trim() || null,
+      parentRoleId,
       createdAt: now,
       updatedAt: now,
     };
@@ -184,7 +238,11 @@ rolesRouter.put(
     const eventId = c.req.param("eventId");
     const actionId = c.req.param("actionId");
     const roleId = c.req.param("roleId");
-    const body = await c.req.json<{ name?: string; description?: string }>();
+    const body = await c.req.json<{
+      name?: string;
+      description?: string;
+      parentRoleId?: string | null;
+    }>();
 
     const found = await findRoleManagementAction(db, eventId, actionId);
     if ("error" in found) return c.json({ error: found.error }, found.status);
@@ -202,6 +260,36 @@ rolesRouter.put(
     }
     if (body.description !== undefined) {
       updates.description = body.description.trim() || null;
+    }
+    if (body.parentRoleId !== undefined) {
+      if (body.parentRoleId === null || body.parentRoleId === "") {
+        updates.parentRoleId = null;
+      } else {
+        const newParentId = body.parentRoleId;
+        if (newParentId === roleId)
+          return c.json({ error: "role cannot be its own parent" }, 400);
+        const parent = await findRoleInAction(db, actionId, newParentId);
+        if ("error" in parent)
+          return c.json({ error: "parent role not found" }, 400);
+        // 循環検出: 新 parent が自分の子孫なら不正。
+        const allRoles = await db
+          .select()
+          .from(slackRoles)
+          .where(eq(slackRoles.eventActionId, actionId))
+          .all();
+        const descendants = collectDescendantRoleIds(allRoles, roleId);
+        if (descendants.has(newParentId))
+          return c.json({ error: "circular parent reference" }, 400);
+        // 不変条件: この role の既存メンバーは新親の全メンバーに含まれること。
+        const own = await memberIdSet(db, roleId);
+        if (own.size > 0) {
+          const parentMembers = await memberIdSet(db, newParentId);
+          const offending = [...own].filter((u) => !parentMembers.has(u));
+          if (offending.length > 0)
+            return c.json({ error: "members not in parent", offending }, 400);
+        }
+        updates.parentRoleId = newParentId;
+      }
     }
 
     await db.update(slackRoles).set(updates).where(eq(slackRoles.id, roleId));
@@ -289,6 +377,21 @@ rolesRouter.post(
       return c.json({ ok: true, added: 0 });
     }
 
+    // 親 role を持つ場合、追加対象が親の全メンバーに含まれることを検証
+    // (含まれない id があれば部分追加せず全体を拒否し不変条件を維持)。
+    if (roleFound.role.parentRoleId) {
+      const parentMembers = await memberIdSet(
+        db,
+        roleFound.role.parentRoleId,
+      );
+      const offending = ids.filter((u) => !parentMembers.has(u));
+      if (offending.length > 0)
+        return c.json(
+          { error: "members not in parent role", offending },
+          400,
+        );
+    }
+
     // 既存 row を読み込んで diff を取り、新規分のみ insert (UNIQUE 制約に依存しない idempotent 実装)。
     const existing = await db
       .select()
@@ -338,6 +441,24 @@ rolesRouter.delete(
           eq(slackRoleMembers.slackUserId, slackUserId),
         ),
       );
+
+    // 不変条件 child ⊆ parent 維持のため、子孫 role からも連鎖削除する。
+    const allRoles = await db
+      .select()
+      .from(slackRoles)
+      .where(eq(slackRoles.eventActionId, actionId))
+      .all();
+    const descendants = collectDescendantRoleIds(allRoles, roleId);
+    for (const childId of descendants) {
+      await db
+        .delete(slackRoleMembers)
+        .where(
+          and(
+            eq(slackRoleMembers.roleId, childId),
+            eq(slackRoleMembers.slackUserId, slackUserId),
+          ),
+        );
+    }
     return c.json({ ok: true });
   },
 );
