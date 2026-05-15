@@ -26,6 +26,9 @@ import type {
   MeetingMember,
   MeetingResponder,
   MeetingStatus,
+  ParticipationForm,
+  ParticipationPrefill,
+  ParticipationSubmitBody,
   Poll,
   PRReview,
   PRReviewLgtm,
@@ -112,6 +115,40 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   // 一部の API（DELETE 等）は body 空のことがあるので、204 はそのまま undefined を返す
   if (res.status === 204) return undefined as T;
   // body が空文字列の場合 res.json() は SyntaxError を投げるので守る
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new APIError(res.status, res.statusText, text);
+  }
+}
+
+// participation-form Phase1 PR3: 公開エンドポイント専用 fetch。
+// request<T>() は getAdminToken() を x-admin-token として常に注入するため、
+// admin 認証不要の公開フォーム (/participation/*) では使えない
+// (PublicApplyPage が event/availability を素の fetch で叩くのと同方針)。
+// このヘルパは token を一切注入せず、エラー時は APIError を投げる。
+async function publicRequest<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers as Record<string, string> | undefined),
+    },
+  });
+  if (!res.ok) {
+    let body = "";
+    try {
+      body = await res.text();
+    } catch {
+      // noop
+    }
+    throw new APIError(res.status, res.statusText, body);
+  }
   const text = await res.text();
   if (!text) return undefined as T;
   try {
@@ -592,6 +629,32 @@ export const api = {
       }),
     delete: (id: string) =>
       request<{ ok: boolean }>(`/applications/${id}`, { method: "DELETE" }),
+  },
+
+  // participation-form Phase1: 参加届フォーム。
+  // 公開3メソッドは admin token を注入しない publicRequest を使う
+  // (PublicApplyPage の素 fetch と同方針)。adminList のみ通常の
+  // request<T>() 経由 (x-admin-token 必須 / PR4 で使用)。
+  participation: {
+    /** 公開: event 存在/名称。404 は { error: "not_found" }。 */
+    event: (eventId: string) =>
+      publicRequest<{ id: string; name: string; type: string }>(
+        `/participation/${eventId}/event`,
+      ),
+    /** 公開: token から prefill。無効/無しは {} を 200。 */
+    prefill: (eventId: string, token: string) =>
+      publicRequest<ParticipationPrefill>(
+        `/participation/${eventId}/prefill?t=${encodeURIComponent(token)}`,
+      ),
+    /** 公開: 参加届提出。成功で { ok: true, id } 201。 */
+    submit: (eventId: string, body: ParticipationSubmitBody) =>
+      publicRequest<{ ok: true; id: string; error?: string }>(
+        `/participation/${eventId}`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    /** admin: イベント単位の参加届一覧 (PR4)。x-admin-token 必須。 */
+    adminList: (eventId: string) =>
+      request<ParticipationForm[]>(`/orgs/${eventId}/participation-forms`),
   },
 
   // 面接官 (005-interviewer-simplify / PR #139)
