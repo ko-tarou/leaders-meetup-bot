@@ -655,6 +655,22 @@ export const api = {
     /** admin: イベント単位の参加届一覧 (PR4)。x-admin-token 必須。 */
     adminList: (eventId: string) =>
       request<ParticipationForm[]>(`/orgs/${eventId}/participation-forms`),
+    /** admin: 参加届を削除 (PR2)。x-admin-token 必須。 */
+    remove: (eventId: string, id: string) =>
+      request<{ ok: boolean }>(
+        `/orgs/${eventId}/participation-forms/${id}`,
+        { method: "DELETE" },
+      ),
+    /** admin: 却下状態を変更 (PR2)。'rejected'=却下 / 'submitted'=却下解除。 */
+    setStatus: (
+      eventId: string,
+      id: string,
+      status: "submitted" | "rejected",
+    ) =>
+      request<{ ok: true; status: "submitted" | "rejected" }>(
+        `/orgs/${eventId}/participation-forms/${id}`,
+        { method: "PATCH", body: JSON.stringify({ status }) },
+      ),
   },
 
   // 面接官 (005-interviewer-simplify / PR #139)

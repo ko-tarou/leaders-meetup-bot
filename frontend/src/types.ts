@@ -531,6 +531,8 @@ export type ParticipationForm = {
   otherAffiliations: string | null;
   desiredActivity: string | null;
   devRoles: string[];
+  /** 'submitted' = 通常 / 'rejected' = 却下 (PR2 で追加)。 */
+  status: "submitted" | "rejected";
   submittedAt: string;
   createdAt: string;
 };
