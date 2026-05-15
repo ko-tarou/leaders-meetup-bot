@@ -384,10 +384,12 @@ export type GmailWatcherConfig = {
 //   - triggers.onSubmit:    応募完了時
 //   - triggers.onScheduled: pending → scheduled (面接日時確定、Meet link 自動付与)
 //   - triggers.onPassed:    scheduled → passed (合格通知)
+//   - triggers.onFailed:    → failed (不合格通知)
 export type AutoSendTriggers = {
   onSubmit?: string;
   onScheduled?: string;
   onPassed?: string;
+  onFailed?: string;
 };
 
 // 自動メール送信成功時に Slack へ送るログ通知の設定。

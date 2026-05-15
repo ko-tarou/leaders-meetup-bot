@@ -328,8 +328,11 @@ applicationsRouter.get("/applications/:id", async (c) => {
 //       * action.config.autoSendEmail.triggers.onScheduled テンプレでメール送信
 //   - 旧 → passed (合格):
 //       * action.config.autoSendEmail.triggers.onPassed テンプレでメール送信
+//   - 旧 → failed (不合格):
+//       * action.config.autoSendEmail.triggers.onFailed テンプレでメール送信
+//       * Calendar event 作成は不要 (Meet link 不要)
 //   - 旧 → pending: 何もしない (onSubmit は POST /apply で既に走っている)
-//   - 旧 → failed / rejected: 何もしない (現状デフォルト)
+//   - 旧 → rejected: 何もしない (現状デフォルト)
 //
 // Calendar event 作成失敗時は fail-soft で続行 (meetLink 無しでメール送る)。
 applicationsRouter.put("/applications/:id", async (c) => {
@@ -432,7 +435,7 @@ async function handleStatusTransition(
     await handleScheduledTransition(env, db, action.config, applicationId);
     return;
   }
-  if (newStatus === "passed") {
+  if (newStatus === "passed" || newStatus === "failed") {
     const app = await db
       .select()
       .from(applications)
@@ -443,11 +446,11 @@ async function handleStatusTransition(
       env,
       action.config,
       toApplicationLike(app),
-      "onPassed",
+      newStatus === "passed" ? "onPassed" : "onFailed",
     );
     return;
   }
-  // pending / failed / rejected: 何もしない (現状仕様)。
+  // pending / rejected: 何もしない (現状仕様)。
 }
 
 /**
