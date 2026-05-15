@@ -5,7 +5,7 @@ type Props = {
   selectedSlots: string[]; // UTC ISO 配列
   onChange: (slots: string[]) => void;
   hourStart?: number; // 0-23, default 9
-  hourEnd?: number; // 0-23, default 22 (= 22:00 開始の枠まで含む)
+  hourEnd?: number; // 0-23, default 22 (= 22:00 / 22:30 開始の枠まで含む)
   // Sprint 19 PR1: 候補制限。undefined なら全 slot 選択可。
   // 配列なら、含まれる slot のみ選択可。それ以外は淡色＋クリック不可。
   restrictTo?: string[];
@@ -41,16 +41,22 @@ export function WeekCalendarPicker({
     });
   }, [weekStart]);
 
-  const hours = useMemo(() => {
-    return Array.from({ length: hourEnd - hourStart + 1 }).map(
-      (_, i) => hourStart + i,
-    );
+  // 30 分単位の slot を生成 ({ hour, minute })。
+  // hourStart <= t < hourEnd + 1 の範囲 (hourEnd = 22 なら 22:30 まで含む)。
+  const timeSlots = useMemo(() => {
+    const slots: { hour: number; minute: number }[] = [];
+    for (let h = hourStart; h <= hourEnd; h++) {
+      for (const m of [0, 30]) {
+        slots.push({ hour: h, minute: m });
+      }
+    }
+    return slots;
   }, [hourStart, hourEnd]);
 
   // 各 cell の datetime (ローカル時刻 → UTC ISO)
-  const getSlotIso = (day: Date, hour: number): string => {
+  const getSlotIso = (day: Date, hour: number, minute: number): string => {
     const local = new Date(day);
-    local.setHours(hour, 0, 0, 0);
+    local.setHours(hour, minute, 0, 0);
     return local.toISOString();
   };
 
@@ -169,51 +175,55 @@ export function WeekCalendarPicker({
           </div>
         ))}
 
-        {/* 時間ごとの行 */}
-        {hours.map((h) => (
-          <div key={h} style={{ display: "contents" }}>
-            <div style={cellStyleTime}>{String(h).padStart(2, "0")}:00</div>
-            {days.map((d, i) => {
-              const slot = getSlotIso(d, h);
-              const selected = isSelected(slot);
-              const past = isPast(slot);
-              const available = isAvailable(slot);
-              // 制限ありかつ候補に含まれない（=disabled だが過去ではない）か
-              const restrictedOut =
-                !available && !past && restrictSet !== null;
-              return (
-                <div
-                  key={i}
-                  role="button"
-                  aria-pressed={selected}
-                  aria-disabled={!available}
-                  onMouseDown={() => handleMouseDown(slot)}
-                  onMouseEnter={() => handleMouseEnter(slot)}
-                  style={{
-                    ...cellStyleSlot,
-                    background: selected
-                      ? colors.success
-                      : past
-                        ? colors.surface
-                        : restrictedOut
+        {/* 時間ごとの行 (30 分単位) */}
+        {timeSlots.map(({ hour, minute }) => {
+          const rowKey = `${hour}:${minute}`;
+          const label = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+          return (
+            <div key={rowKey} style={{ display: "contents" }}>
+              <div style={cellStyleTime}>{label}</div>
+              {days.map((d, i) => {
+                const slot = getSlotIso(d, hour, minute);
+                const selected = isSelected(slot);
+                const past = isPast(slot);
+                const available = isAvailable(slot);
+                // 制限ありかつ候補に含まれない（=disabled だが過去ではない）か
+                const restrictedOut =
+                  !available && !past && restrictSet !== null;
+                return (
+                  <div
+                    key={i}
+                    role="button"
+                    aria-pressed={selected}
+                    aria-disabled={!available}
+                    onMouseDown={() => handleMouseDown(slot)}
+                    onMouseEnter={() => handleMouseEnter(slot)}
+                    style={{
+                      ...cellStyleSlot,
+                      background: selected
+                        ? colors.success
+                        : past
                           ? colors.surface
-                          : colors.background,
-                    color: selected
-                      ? colors.textInverse
-                      : past
-                        ? colors.borderStrong
-                        : restrictedOut
+                          : restrictedOut
+                            ? colors.surface
+                            : colors.background,
+                      color: selected
+                        ? colors.textInverse
+                        : past
                           ? colors.borderStrong
-                          : colors.textMuted,
-                    cursor: available ? "pointer" : "not-allowed",
-                  }}
-                >
-                  {selected ? "✓" : ""}
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                          : restrictedOut
+                            ? colors.borderStrong
+                            : colors.textMuted,
+                      cursor: available ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {selected ? "✓" : ""}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
 
       <div
@@ -237,7 +247,7 @@ const cellStyleHeader: React.CSSProperties = {
 
 const cellStyleTime: React.CSSProperties = {
   background: colors.surface,
-  padding: "0.5rem",
+  padding: "0.25rem 0.5rem",
   textAlign: "right",
   fontSize: "0.75rem",
   color: colors.textSecondary,
@@ -245,10 +255,10 @@ const cellStyleTime: React.CSSProperties = {
 
 const cellStyleSlot: React.CSSProperties = {
   background: colors.background,
-  padding: "0.5rem",
+  padding: "0.25rem",
   textAlign: "center",
   fontSize: "0.875rem",
-  minHeight: "32px",
+  minHeight: "20px",
 };
 
 const navBtnStyle: React.CSSProperties = {
