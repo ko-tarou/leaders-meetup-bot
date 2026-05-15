@@ -34,36 +34,104 @@ type NotificationsConfig = {
   messageTemplate: string;
 };
 
+// 編集対象モード。
+//   application  → action.config.notifications (応募通知)
+//   participation → action.config.participationNotifications (参加届通知)
+type NotificationMode = "application" | "participation";
+
+type ModeDef = {
+  // 編集対象となる action.config 内のキー。
+  configKey: "notifications" | "participationNotifications";
+  // セグメントに表示するラベル。
+  label: string;
+  // ヘッダ説明文 (fail-soft の文言含む)。
+  description: string;
+  // 空文字 / 未設定保存時に BE が使うデフォルト文面 (BE と同期)。
+  defaultTemplate: string;
+  // プレビュー用サンプルデータ (BE の placeholder 仕様と一対一対応)。
+  sampleVars: Record<string, string>;
+  // 表示用 placeholder 一覧 (キー + 説明)。
+  placeholders: { key: string; desc: string }[];
+};
+
 // BE: src/services/application-notification.ts:DEFAULT_TEMPLATE と同期。
-// 空文字 / 未設定保存時はこの文面で通知が送られる。
-const DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
+const APPLICATION_DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
 名前: {name}
 メール: {email}
 応募日時: {appliedAt} (JST)`;
 
-// プレビュー用サンプルデータ。BE の placeholder 仕様と一対一対応。
-const SAMPLE_VARS: Record<string, string> = {
-  mentions: "<@U1>",
-  name: "鈴木 太郎",
-  email: "suzuki@example.com",
-  appliedAt: "2026/05/11 14:30",
-  studentId: "1EP1-1",
-  howFound: "joint_briefing",
-  interviewLocation: "online",
-  interviewAt: "2026/05/15 10:00",
-};
+// BE: src/services/participation-notification.ts:DEFAULT_PARTICIPATION_TEMPLATE と同期。
+const PARTICIPATION_DEFAULT_TEMPLATE = `{mentions} 📋 参加届が提出されました
+名前: {name}
+Slack表示名: {slackName}
+メール: {email}
+希望活動: {desiredActivity}`;
 
-// 表示用に並べる placeholder の一覧 (キー + 説明)。
-const PLACEHOLDERS: { key: string; desc: string }[] = [
-  { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
-  { key: "name", desc: "応募者名" },
-  { key: "email", desc: "メール" },
-  { key: "appliedAt", desc: "応募日時 (JST)" },
-  { key: "studentId", desc: "学生証番号" },
-  { key: "howFound", desc: "どこで知ったか" },
-  { key: "interviewLocation", desc: "面接場所" },
-  { key: "interviewAt", desc: "希望面接日時 (JST)" },
-];
+// モードごとの定義テーブル (DRY: 同一エディタを configKey で切替)。
+const MODE_DEFS: Record<NotificationMode, ModeDef> = {
+  application: {
+    configKey: "notifications",
+    label: "応募通知",
+    description:
+      "新規応募があった時に Slack 通知を送ります。通知失敗で応募自体が失敗することはありません (fail-soft)。",
+    defaultTemplate: APPLICATION_DEFAULT_TEMPLATE,
+    sampleVars: {
+      mentions: "<@U1>",
+      name: "鈴木 太郎",
+      email: "suzuki@example.com",
+      appliedAt: "2026/05/11 14:30",
+      studentId: "1EP1-1",
+      howFound: "joint_briefing",
+      interviewLocation: "online",
+      interviewAt: "2026/05/15 10:00",
+    },
+    placeholders: [
+      { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+      { key: "name", desc: "応募者名" },
+      { key: "email", desc: "メール" },
+      { key: "appliedAt", desc: "応募日時 (JST)" },
+      { key: "studentId", desc: "学生証番号" },
+      { key: "howFound", desc: "どこで知ったか" },
+      { key: "interviewLocation", desc: "面接場所" },
+      { key: "interviewAt", desc: "希望面接日時 (JST)" },
+    ],
+  },
+  participation: {
+    configKey: "participationNotifications",
+    label: "参加届通知",
+    description:
+      "参加届が提出された時に Slack 通知を送ります。通知失敗で参加届提出自体が失敗することはありません (fail-soft)。",
+    defaultTemplate: PARTICIPATION_DEFAULT_TEMPLATE,
+    sampleVars: {
+      mentions: "<@U1>",
+      name: "鈴木 太郎",
+      slackName: "suzuki",
+      email: "suzuki@example.com",
+      studentId: "1EP1-1",
+      department: "情報工学科",
+      grade: "3",
+      gender: "male",
+      desiredActivity: "dev",
+      devRoles: "frontend, backend",
+      otherAffiliations: "なし",
+      submittedAt: "2026/05/11 14:30",
+    },
+    placeholders: [
+      { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+      { key: "name", desc: "氏名" },
+      { key: "slackName", desc: "Slack 表示名" },
+      { key: "email", desc: "メール" },
+      { key: "studentId", desc: "学生証番号" },
+      { key: "department", desc: "学科" },
+      { key: "grade", desc: "学年" },
+      { key: "gender", desc: "性別" },
+      { key: "desiredActivity", desc: "希望活動" },
+      { key: "devRoles", desc: "開発ロール (カンマ区切り)" },
+      { key: "otherAffiliations", desc: "他の所属" },
+      { key: "submittedAt", desc: "提出日時 (JST)" },
+    ],
+  },
+};
 
 /**
  * `{key}` を vars[key] で置換。未定義 key は元の `{key}` を残す。
@@ -84,12 +152,16 @@ type Props = {
   onSaved?: () => void;
 };
 
-function readInitialConfig(action: EventAction): NotificationsConfig {
+function readInitialConfig(
+  action: EventAction,
+  configKey: ModeDef["configKey"],
+): NotificationsConfig {
   try {
-    const parsed = JSON.parse(action.config || "{}") as {
-      notifications?: Partial<NotificationsConfig>;
-    };
-    const n = parsed.notifications ?? {};
+    const parsed = JSON.parse(action.config || "{}") as Record<
+      string,
+      Partial<NotificationsConfig> | undefined
+    >;
+    const n = parsed[configKey] ?? {};
     return {
       enabled: Boolean(n.enabled),
       workspaceId: typeof n.workspaceId === "string" ? n.workspaceId : "",
@@ -116,7 +188,15 @@ function readInitialConfig(action: EventAction): NotificationsConfig {
 export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const toast = useToast();
   const isReadOnly = useIsReadOnly();
-  const initial = useMemo(() => readInitialConfig(action), [action]);
+
+  // 編集対象モード (上部セグメントで切替)。
+  const [mode, setMode] = useState<NotificationMode>("application");
+  const modeDef = MODE_DEFS[mode];
+
+  const initial = useMemo(
+    () => readInitialConfig(action, modeDef.configKey),
+    [action, modeDef.configKey],
+  );
 
   // 確定値 (= 保存済みの notifications config)
   const [enabled, setEnabled] = useState<boolean>(initial.enabled);
@@ -159,6 +239,22 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const activeWorkspaceId = editingChannel ? draftWorkspaceId : workspaceId;
 
   const [saving, setSaving] = useState<boolean>(false);
+
+  // mode 切替時: 確定 state を切替先 mode の保存値で再初期化する。
+  // 未保存ドラフトは破棄でよい (確認ダイアログ不要) ため編集モードも閉じる。
+  // 依存は initial (= action / configKey に応じて useMemo で安定) のみなので
+  // mode 連打や再 render での無限ループは発生しない。
+  useEffect(() => {
+    setEnabled(initial.enabled);
+    setWorkspaceId(initial.workspaceId);
+    setChannelId(initial.channelId);
+    setChannelName(initial.channelName);
+    setMentionUserIds(initial.mentionUserIds);
+    setMessageTemplate(initial.messageTemplate);
+    setEditingChannel(false);
+    setEditingMentions(false);
+    setEditingTemplate(false);
+  }, [initial]);
 
   // workspaces 一覧取得
   useEffect(() => {
@@ -279,7 +375,9 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
       messageTemplate,
     };
     const merged: NotificationsConfig = { ...current, ...patch };
-    const newConfig = { ...baseConfig, notifications: merged };
+    // baseConfig を spread して対象 configKey のみ上書き。
+    // もう一方の通知キー / slackInvites 等 他キーは温存される。
+    const newConfig = { ...baseConfig, [modeDef.configKey]: merged };
     setSaving(true);
     try {
       await api.events.actions.update(eventId, action.id, {
@@ -363,7 +461,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   // 通知文編集
   const startEditTemplate = () => {
     // 現在保存値が空ならテキストエリアに DEFAULT_TEMPLATE を出して編集しやすく。
-    setDraftMessageTemplate(messageTemplate || DEFAULT_TEMPLATE);
+    setDraftMessageTemplate(messageTemplate || modeDef.defaultTemplate);
     setEditingTemplate(true);
   };
 
@@ -372,7 +470,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
     // 「デフォルト扱い」に戻す (BE 側は空文字 → DEFAULT_TEMPLATE)。
     const trimmed = draftMessageTemplate.trim();
     const next =
-      trimmed === "" || trimmed === DEFAULT_TEMPLATE.trim()
+      trimmed === "" || trimmed === modeDef.defaultTemplate.trim()
         ? ""
         : draftMessageTemplate;
     const result = await saveNotifications({ messageTemplate: next });
@@ -383,18 +481,18 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   };
 
   const resetTemplateToDefault = () => {
-    setDraftMessageTemplate(DEFAULT_TEMPLATE);
+    setDraftMessageTemplate(modeDef.defaultTemplate);
   };
 
   // 通知文 display 用 (空ならデフォルトを表示)。
-  const displayTemplate = messageTemplate || DEFAULT_TEMPLATE;
+  const displayTemplate = messageTemplate || modeDef.defaultTemplate;
   const isDefaultTemplate = !messageTemplate;
 
   // 編集中のリアルタイムプレビュー (textarea 下に常時表示)。
   // {mentions} を空にすると先頭にスペース余りが出るため、render 結果は trim する。
   const previewText = useMemo(
-    () => renderTemplate(draftMessageTemplate, SAMPLE_VARS).trim(),
-    [draftMessageTemplate],
+    () => renderTemplate(draftMessageTemplate, modeDef.sampleVars).trim(),
+    [draftMessageTemplate, modeDef.sampleVars],
   );
 
   // メンション display 用名前
@@ -407,10 +505,28 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
     <div>
       <div style={styles.section}>
         <h3 style={styles.h3}>通知設定</h3>
-        <p style={styles.desc}>
-          新規応募があった時に Slack 通知を送ります。通知失敗で応募自体が
-          失敗することはありません (fail-soft)。
-        </p>
+        <div style={styles.segment} role="tablist">
+          {(Object.keys(MODE_DEFS) as NotificationMode[]).map((m) => {
+            const active = m === mode;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setMode(m)}
+                disabled={saving}
+                style={{
+                  ...styles.segmentButton,
+                  ...(active ? styles.segmentButtonActive : {}),
+                }}
+              >
+                {MODE_DEFS[m].label}
+              </button>
+            );
+          })}
+        </div>
+        <p style={styles.desc}>{modeDef.description}</p>
       </div>
 
       <div style={styles.section}>
@@ -650,14 +766,14 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
                     rows={6}
                     disabled={isReadOnly || saving}
                     style={styles.textarea}
-                    placeholder={DEFAULT_TEMPLATE}
+                    placeholder={modeDef.defaultTemplate}
                   />
                 </div>
 
                 <div style={styles.editField}>
                   <label style={styles.label}>使用可能なプレースホルダー</label>
                   <div style={styles.placeholderList}>
-                    {PLACEHOLDERS.map((p) => (
+                    {modeDef.placeholders.map((p) => (
                       <div key={p.key} style={styles.placeholderRow}>
                         <code style={styles.placeholderKey}>{`{${p.key}}`}</code>
                         <span style={styles.placeholderDesc}>{p.desc}</span>
@@ -721,6 +837,26 @@ const styles: Record<string, CSSProperties> = {
     margin: 0,
     fontSize: "0.875rem",
     color: colors.textSecondary,
+  },
+  segment: {
+    display: "inline-flex",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 8,
+    overflow: "hidden",
+    marginBottom: "0.75rem",
+  },
+  segmentButton: {
+    padding: "6px 16px",
+    fontSize: "0.875rem",
+    border: "none",
+    background: colors.background,
+    color: colors.textSecondary,
+    cursor: "pointer",
+  },
+  segmentButtonActive: {
+    background: colors.primary,
+    color: "#ffffff",
+    fontWeight: 600,
   },
   label: {
     display: "block",
