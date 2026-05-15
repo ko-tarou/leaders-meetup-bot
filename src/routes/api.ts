@@ -37,7 +37,7 @@ api.use(
       if (!origin) return origin;
       return ALLOWED_ORIGINS.includes(origin) ? origin : null;
     },
-    allowMethods: ["GET", "POST", "PUT", "DELETE"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowHeaders: ["Content-Type", "x-admin-token"],
   })
 );
