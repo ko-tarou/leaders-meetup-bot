@@ -26,7 +26,7 @@ import { colors } from "../../styles/tokens";
 //
 // 週グリッドの仕様:
 //   - 7 列 (月-日) × N 行 (時間)。週は「月曜始まり」。
-//   - 表示する時間枠 (hours) は data に登場する HH:00 を抽出してソート (空なら 9-18)。
+//   - 表示する時間枠 (timeSlots) は data に登場する HH:MM (30 分単位) を抽出してソート (空なら 9:00-18:30)。
 //   - 「前週」「翌週」「今週へ戻る」で週を切り替える。
 //
 // admin エントリーの仕様:
@@ -139,8 +139,8 @@ export function CalendarTab({ eventId, action }: Props) {
     return Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
   }, [weekStart]);
 
-  // data に登場する時間 (HH:00) のユニーク化 + ソート。空なら 9-18。
-  const hours = useMemo(() => extractHours(data), [data]);
+  // data に登場する時間 (HH:MM, 30 分単位) のユニーク化 + ソート。空なら 9:00-18:30。
+  const timeSlots = useMemo(() => extractTimeSlots(data), [data]);
 
   // datetime → CellEntry の lookup。同 datetime に複数 booking がぶら下がる。
   const cellLookup = useMemo(() => buildCellLookup(data), [data]);
@@ -250,7 +250,7 @@ export function CalendarTab({ eventId, action }: Props) {
       {data !== null && (
         <WeekGrid
           weekDays={weekDays}
-          hours={hours}
+          timeSlots={timeSlots}
           cellLookup={cellLookup}
         />
       )}
@@ -277,13 +277,15 @@ type CellEntry = {
   bookings: CalendarBooking[];
 };
 
+type TimeSlot = { hour: number; minute: number };
+
 function WeekGrid({
   weekDays,
-  hours,
+  timeSlots,
   cellLookup,
 }: {
   weekDays: Date[];
-  hours: number[];
+  timeSlots: TimeSlot[];
   cellLookup: Map<string, CellEntry>;
 }) {
   return (
@@ -310,17 +312,21 @@ function WeekGrid({
         );
       })}
 
-      {/* 時間ごとの行 */}
-      {hours.map((h) => (
-        <div key={h} style={{ display: "contents" }}>
-          <div style={cellStyleTime}>{String(h).padStart(2, "0")}:00</div>
-          {weekDays.map((d, i) => {
-            const key = cellKey(d, h);
-            const entry = cellLookup.get(key);
-            return <GridCell key={i} entry={entry} />;
-          })}
-        </div>
-      ))}
+      {/* 時間ごとの行 (30 分単位) */}
+      {timeSlots.map(({ hour, minute }) => {
+        const rowKey = `${hour}:${minute}`;
+        const label = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+        return (
+          <div key={rowKey} style={{ display: "contents" }}>
+            <div style={cellStyleTime}>{label}</div>
+            {weekDays.map((d, i) => {
+              const key = cellKey(d, hour, minute);
+              const entry = cellLookup.get(key);
+              return <GridCell key={i} entry={entry} />;
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -401,36 +407,55 @@ function formatDateMd(d: Date): string {
 }
 
 /**
- * data に登場する HH (local) をユニーク化してソート。
- * 空の場合 (data null や全空) は 9-18 を fallback で返す。
+ * data に登場する HH:MM (local, 30 分単位に正規化) をユニーク化してソート。
+ * 空の場合 (data null や全空) は 9:00-18:30 を fallback で返す。
+ *
+ * 既存の 1 時間単位 slot (minute=0) も、新しい 30 分単位 slot (minute=30) も
+ * 同じ仕組みで拾える。minute が 0/30 以外なら 30 分単位に丸める (下方向)。
  */
-function extractHours(data: CalendarData | null): number[] {
-  if (!data) return defaultHours();
-  const set = new Set<number>();
-  for (const s of data.slots) {
-    set.add(new Date(s.datetime).getHours());
-  }
-  for (const b of data.bookings) {
-    set.add(new Date(b.interviewAt).getHours());
-  }
-  if (set.size === 0) return defaultHours();
-  return Array.from(set).sort((a, b) => a - b);
+function extractTimeSlots(data: CalendarData | null): TimeSlot[] {
+  if (!data) return defaultTimeSlots();
+  const set = new Set<string>();
+  const push = (date: Date) => {
+    const h = date.getHours();
+    const m = date.getMinutes() >= 30 ? 30 : 0;
+    set.add(`${h}:${m}`);
+  };
+  for (const s of data.slots) push(new Date(s.datetime));
+  for (const b of data.bookings) push(new Date(b.interviewAt));
+  if (set.size === 0) return defaultTimeSlots();
+  return Array.from(set)
+    .map((k) => {
+      const [h, m] = k.split(":").map(Number);
+      return { hour: h, minute: m };
+    })
+    .sort((a, b) =>
+      a.hour !== b.hour ? a.hour - b.hour : a.minute - b.minute,
+    );
 }
 
-function defaultHours(): number[] {
-  return Array.from({ length: 10 }).map((_, i) => 9 + i); // 9-18
+function defaultTimeSlots(): TimeSlot[] {
+  // 9:00, 9:30, 10:00, ..., 18:30
+  const result: TimeSlot[] = [];
+  for (let h = 9; h <= 18; h++) {
+    for (const m of [0, 30]) {
+      result.push({ hour: h, minute: m });
+    }
+  }
+  return result;
 }
 
 /**
  * datetime → CellEntry の lookup。
- * key は cellKey(date, hour) で生成 (local Y-M-D-H)。
+ * key は cellKey(date, hour, minute) で生成 (local Y-M-D-H-M)。
+ * minute は 0/30 に正規化 (30 分単位の grid に合わせる)。
  */
 function buildCellLookup(data: CalendarData | null): Map<string, CellEntry> {
   const map = new Map<string, CellEntry>();
   if (!data) return map;
   for (const s of data.slots) {
     const d = new Date(s.datetime);
-    const key = cellKey(d, d.getHours());
+    const key = cellKey(d, d.getHours(), normalizeMinute(d.getMinutes()));
     const existing = map.get(key);
     if (existing) {
       existing.slot = s;
@@ -440,7 +465,7 @@ function buildCellLookup(data: CalendarData | null): Map<string, CellEntry> {
   }
   for (const b of data.bookings) {
     const d = new Date(b.interviewAt);
-    const key = cellKey(d, d.getHours());
+    const key = cellKey(d, d.getHours(), normalizeMinute(d.getMinutes()));
     const existing = map.get(key);
     if (existing) {
       existing.bookings.push(b);
@@ -451,9 +476,14 @@ function buildCellLookup(data: CalendarData | null): Map<string, CellEntry> {
   return map;
 }
 
-/** local Y-M-D-H で cell の lookup key を生成。 */
-function cellKey(d: Date, hour: number): string {
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}-${hour}`;
+/** 30 分単位 grid に合わせて minute を 0 / 30 に正規化。 */
+function normalizeMinute(minute: number): number {
+  return minute >= 30 ? 30 : 0;
+}
+
+/** local Y-M-D-H-M で cell の lookup key を生成。 */
+function cellKey(d: Date, hour: number, minute: number): string {
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}-${hour}-${minute}`;
 }
 
 // ----------------------------------------------------------------------------
