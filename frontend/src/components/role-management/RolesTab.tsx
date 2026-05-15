@@ -46,6 +46,47 @@ function parseConfig(raw: string): Config {
 
 type ExpandedView = "members" | "channels" | null;
 
+// フラットな roles 配列を「ルート → その子」の表示順に並べ替える。
+// 2 階層想定。parentRoleId が一覧内に存在しない場合もルート扱いにして
+// 取りこぼしを防ぐ。各要素に表示用の depth を付与する。
+function toTreeOrder(
+  roles: SlackRole[],
+): Array<{ role: SlackRole; depth: number }> {
+  const byCreated = [...roles].sort((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
+  );
+  const ids = new Set(byCreated.map((r) => r.id));
+  const roots = byCreated.filter(
+    (r) => r.parentRoleId === null || !ids.has(r.parentRoleId),
+  );
+  const childrenOf = (pid: string) =>
+    byCreated.filter((r) => r.parentRoleId === pid);
+  const out: Array<{ role: SlackRole; depth: number }> = [];
+  for (const root of roots) {
+    out.push({ role: root, depth: 0 });
+    for (const child of childrenOf(root.id)) {
+      out.push({ role: child, depth: 1 });
+    }
+  }
+  return out;
+}
+
+// edit 時に親候補から除外する「自分自身 + 自分の子孫」の id 集合を返す。
+function descendantIds(roles: SlackRole[], rootId: string): Set<string> {
+  const result = new Set<string>([rootId]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const r of roles) {
+      if (r.parentRoleId && result.has(r.parentRoleId) && !result.has(r.id)) {
+        result.add(r.id);
+        added = true;
+      }
+    }
+  }
+  return result;
+}
+
 type Props = {
   eventId: string;
   action: EventAction;
@@ -88,6 +129,11 @@ export function RolesTab({ eventId, action }: Props) {
 
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
+  const tree = useMemo(
+    () => (roles ? toTreeOrder(roles) : []),
+    [roles],
+  );
+
   const handleDelete = async (role: SlackRole) => {
     const ok = await confirm({
       message: `ロール「${role.name}」を削除しますか？メンバー / チャンネル割当もすべて削除されます。`,
@@ -127,11 +173,25 @@ export function RolesTab({ eventId, action }: Props) {
         </div>
       ) : (
         <div style={{ display: "grid", gap: "0.5rem" }}>
-          {roles.map((r) => (
-            <div key={r.id} style={{ display: "grid", gap: "0.5rem" }}>
+          {tree.map(({ role: r, depth }) => (
+            <div
+              key={r.id}
+              style={
+                depth > 0
+                  ? { display: "grid", gap: "0.5rem", ...s.childRow }
+                  : { display: "grid", gap: "0.5rem" }
+              }
+            >
               <div style={s.row}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{r.name}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {depth > 0 && (
+                      <span style={s.childPrefix} aria-hidden>
+                        └{" "}
+                      </span>
+                    )}
+                    {r.name}
+                  </div>
                   {r.description && (
                     <div style={s.meta}>{r.description}</div>
                   )}
@@ -211,6 +271,7 @@ export function RolesTab({ eventId, action }: Props) {
           eventId={eventId}
           actionId={action.id}
           mode="create"
+          roles={roles ?? []}
           onClose={() => setShowAdd(false)}
           onSaved={() => {
             setShowAdd(false);
@@ -224,6 +285,7 @@ export function RolesTab({ eventId, action }: Props) {
           actionId={action.id}
           mode="edit"
           role={editingRole}
+          roles={roles ?? []}
           onClose={() => setEditingRole(null)}
           onSaved={() => {
             setEditingRole(null);
@@ -244,6 +306,7 @@ function RoleEditModal({
   actionId,
   mode,
   role,
+  roles,
   onClose,
   onSaved,
 }: {
@@ -251,13 +314,26 @@ function RoleEditModal({
   actionId: string;
   mode: "create" | "edit";
   role?: SlackRole;
+  roles: SlackRole[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const toast = useToast();
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
+  const [parentRoleId, setParentRoleId] = useState<string>(
+    role?.parentRoleId ?? "",
+  );
   const [submitting, setSubmitting] = useState(false);
+
+  // 親候補: 同 action の他ロール。edit 時は自分自身 + 子孫を除外 (循環防止)。
+  const parentOptions = useMemo(() => {
+    const excluded =
+      mode === "edit" && role
+        ? descendantIds(roles, role.id)
+        : new Set<string>();
+    return roles.filter((r) => !excluded.has(r.id));
+  }, [roles, mode, role]);
 
   const handleSubmit = async () => {
     if (!name.trim()) {
@@ -270,18 +346,25 @@ function RoleEditModal({
         await api.roles.create(eventId, actionId, {
           name: name.trim(),
           description: description.trim() || undefined,
+          parentRoleId: parentRoleId || undefined,
         });
         toast.success("ロールを作成しました");
       } else if (role) {
         await api.roles.update(eventId, actionId, role.id, {
           name: name.trim(),
           description: description.trim(),
+          parentRoleId: parentRoleId || null,
         });
         toast.success("ロールを更新しました");
       }
       onSaved();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存に失敗しました");
+      const msg = e instanceof Error ? e.message : "保存に失敗しました";
+      toast.error(
+        /not in parent|subset|cycle|循環/i.test(msg)
+          ? "親ロールに含まれないメンバーがいる、または循環するため変更できません"
+          : msg,
+      );
       setSubmitting(false);
     }
   };
@@ -311,6 +394,25 @@ function RoleEditModal({
           style={{ ...s.input, resize: "vertical" }}
           disabled={submitting}
         />
+        <label style={{ ...s.label, marginTop: "0.5rem" }}>
+          親ロール (任意)
+        </label>
+        <select
+          value={parentRoleId}
+          onChange={(e) => setParentRoleId(e.target.value)}
+          style={s.input}
+          disabled={submitting}
+        >
+          <option value="">(なし = ルート)</option>
+          {parentOptions.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+        <div style={s.meta}>
+          子ロールのメンバーは親ロールのメンバーに限定されます。
+        </div>
         <div style={s.modalActions}>
           <button onClick={onClose} disabled={submitting} style={s.secondaryBtn}>
             キャンセル
@@ -348,24 +450,37 @@ function RoleMembersSubView({
   const toast = useToast();
   const [allUsers, setAllUsers] = useState<SlackUser[] | null>(null);
   const [assigned, setAssigned] = useState<Set<string> | null>(null);
+  // 親ロールがある場合のみ、親メンバーの slackUserId 集合。null は「制限なし」。
+  const [parentMembers, setParentMembers] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+
+  const parentRoleId = role.parentRoleId;
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setAllUsers(null);
     setAssigned(null);
+    setParentMembers(null);
     Promise.all([
       api.roles.workspaceMembers(eventId, actionId),
       api.roles.getMembers(eventId, actionId, role.id),
+      parentRoleId
+        ? api.roles.getMembers(eventId, actionId, parentRoleId)
+        : Promise.resolve(null),
     ])
-      .then(([users, rows]) => {
+      .then(([users, rows, parentRows]) => {
         if (cancelled) return;
         setAllUsers(Array.isArray(users) ? users : []);
         setAssigned(new Set((Array.isArray(rows) ? rows : []).map((r) => r.slackUserId)));
+        setParentMembers(
+          parentRows
+            ? new Set(parentRows.map((r) => r.slackUserId))
+            : null,
+        );
       })
       .catch((e) => {
         if (cancelled) return;
@@ -378,7 +493,7 @@ function RoleMembersSubView({
     return () => {
       cancelled = true;
     };
-  }, [eventId, actionId, role.id]);
+  }, [eventId, actionId, role.id, parentRoleId]);
 
   const userById = useMemo(() => {
     const m = new Map<string, SlackUser>();
@@ -391,6 +506,8 @@ function RoleMembersSubView({
     const q = search.trim().toLowerCase();
     return allUsers
       .filter((u) => !assigned.has(u.id))
+      // 親ロールがある場合は候補を親メンバーに限定 (子 ⊆ 親)。
+      .filter((u) => (parentMembers ? parentMembers.has(u.id) : true))
       .filter((u) => {
         if (!q) return true;
         return (
@@ -399,7 +516,7 @@ function RoleMembersSubView({
           (u.displayName?.toLowerCase().includes(q) ?? false)
         );
       });
-  }, [allUsers, assigned, search]);
+  }, [allUsers, assigned, parentMembers, search]);
 
   const handleAdd = async () => {
     if (selected.size === 0) return;
@@ -421,7 +538,12 @@ function RoleMembersSubView({
       setSelected(new Set());
       onChanged();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "追加に失敗しました");
+      const msg = e instanceof Error ? e.message : "追加に失敗しました";
+      toast.error(
+        /not in parent/i.test(msg)
+          ? "親ロールに含まれないメンバーは追加できません"
+          : msg,
+      );
     } finally {
       setSubmitting(false);
     }
@@ -499,6 +621,11 @@ function RoleMembersSubView({
       )}
 
       <h4 style={{ ...s.subHeading, marginTop: "1rem" }}>追加</h4>
+      {parentMembers !== null && (
+        <div style={{ ...s.meta, marginBottom: "0.5rem" }}>
+          このロールは親ロールのメンバーのみ追加できます。
+        </div>
+      )}
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
@@ -742,6 +869,15 @@ const s: Record<string, CSSProperties> = {
   meta: {
     fontSize: "0.75rem",
     color: colors.textSecondary,
+  },
+  childRow: {
+    marginLeft: "1.5rem",
+    paddingLeft: "0.75rem",
+    borderLeft: `2px solid ${colors.border}`,
+  },
+  childPrefix: {
+    color: colors.textSecondary,
+    fontWeight: 400,
   },
   metaInline: {
     fontSize: "0.75rem",

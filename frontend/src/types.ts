@@ -544,6 +544,8 @@ export type SlackRole = {
   id: string;
   name: string;
   description: string | null;
+  // 親ロール (子ロールのメンバー ⊆ 親ロールのメンバー)。ルートは null。
+  parentRoleId: string | null;
   membersCount: number;
   channelsCount: number;
   createdAt: string;
