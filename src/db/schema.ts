@@ -192,6 +192,8 @@ export const participationForms = sqliteTable(
     }),
     name: text("name").notNull(),
     studentId: text("student_id"),
+    // Slack 表示名。Phase2 のロール自動割当用 (nullable・任意入力)
+    slackName: text("slack_name"),
     // 学科・自由記述
     department: text("department"),
     // '1' | '2' | '3' | '4' | 'graduate'
