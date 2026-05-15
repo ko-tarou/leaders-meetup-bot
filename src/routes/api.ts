@@ -16,6 +16,7 @@ import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
 import { feedbackRouter } from "./api/feedback";
 import { githubWebhookRouter } from "./api/github-webhook";
+import { participationRouter } from "./api/participation";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -60,6 +61,10 @@ api.use("/*", async (c, next) => {
   if (
     sub === "/health" ||
     sub.startsWith("/apply/") ||
+    // participation-form Phase1 PR2: 参加届の公開フォーム
+    // (prefill / event / submit)。/orgs/:eventId/participation-forms は
+    // この prefix に該当しないため admin auth が維持される。
+    sub.startsWith("/participation/") ||
     sub.startsWith("/interviewer-form/") ||
     sub === "/public-auth" ||
     // Sprint 26: Google OAuth callback は Google からのリダイレクトで届くため
@@ -99,5 +104,6 @@ api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
 api.route("/", feedbackRouter);
 api.route("/", githubWebhookRouter);
+api.route("/", participationRouter);
 
 export { api };
