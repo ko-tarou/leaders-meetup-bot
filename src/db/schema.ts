@@ -157,8 +157,63 @@ export const applications = sqliteTable(
     // 005-meet: Calendar event に紐づく Google Meet URL。
     // メールテンプレ {meetLink} placeholder で埋め込む。
     meetLink: text("meet_link"),
+    // participation-form: 参加届フォームの不透明トークン (migration 0044)。
+    // 合格遷移時にアプリ層で乱数 32byte を発行・格納する。null = 未発行。
+    // UNIQUE は付けず lookup 用 index のみ (衝突は乱数長で実質排除)。
+    participationToken: text("participation_token"),
   },
-  (t) => [index("idx_applications_event_id").on(t.eventId)],
+  (t) => [
+    index("idx_applications_event_id").on(t.eventId),
+    index("idx_applications_participation_token").on(t.participationToken),
+  ],
+);
+
+// participation-form: 参加届フォーム（migration 0044）
+// 合格した応募者が合格メールの共通 URL /participation/:eventId?t=<token>
+// から提出する。token 有り提出は applicationId に紐づき、token 無し直接
+// 提出は applicationId=NULL の独立レコードとなる。
+//
+// token 有りの再提出は upsert（同 application_id の重複を防ぐ）。これは
+// `application_id` が非 NULL のときのみ効く partial unique index
+// (idx_participation_forms_app_uniq) で表現する。Drizzle では partial
+// index を表現しづらいため schema 上は通常 index のみ張り、partial
+// unique index は migration 0044 (生 SQL) でのみ表現する
+// （slackRoleMembers の同種コメント参照）。
+export const participationForms = sqliteTable(
+  "participation_forms",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    // token 無し直接提出は NULL。応募削除時は SET NULL で履歴を残す。
+    applicationId: text("application_id").references(() => applications.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    studentId: text("student_id"),
+    // 学科・自由記述
+    department: text("department"),
+    // '1' | '2' | '3' | '4' | 'graduate'
+    grade: text("grade"),
+    email: text("email").notNull(),
+    // 'male' | 'female' | 'other' | 'prefer_not'
+    gender: text("gender"),
+    // 0/1 boolean
+    hasAllergy: integer("has_allergy").notNull().default(0),
+    allergyDetail: text("allergy_detail"),
+    otherAffiliations: text("other_affiliations"),
+    // 'event' | 'dev' | 'both'
+    desiredActivity: text("desired_activity"),
+    // JSON 文字列配列。例 ["pm","frontend","backend","android","ios","infra"]
+    devRoles: text("dev_roles").notNull().default("[]"),
+    submittedAt: text("submitted_at").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_participation_forms_event_id").on(t.eventId),
+    index("idx_participation_forms_application_id").on(t.applicationId),
+  ],
 );
 
 // 005-interviewer-simplify: 面接官 (interviewer)
