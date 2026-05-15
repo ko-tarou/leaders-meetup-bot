@@ -676,7 +676,7 @@ export const api = {
     create: (
       eventId: string,
       actionId: string,
-      data: { name: string; description?: string },
+      data: { name: string; description?: string; parentRoleId?: string },
     ) =>
       request<SlackRole>(`/orgs/${eventId}/actions/${actionId}/roles`, {
         method: "POST",
@@ -686,7 +686,11 @@ export const api = {
       eventId: string,
       actionId: string,
       roleId: string,
-      data: { name?: string; description?: string },
+      data: {
+        name?: string;
+        description?: string;
+        parentRoleId?: string | null;
+      },
     ) =>
       request<SlackRole>(
         `/orgs/${eventId}/actions/${actionId}/roles/${roleId}`,
