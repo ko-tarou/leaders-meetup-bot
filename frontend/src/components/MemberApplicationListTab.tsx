@@ -391,6 +391,17 @@ function ApplicationDetailModal({
   const slots = parseSlots(application.availableSlots);
 
   const handleStatusChange = async (newStatus: ApplicationStatus) => {
+    if (newStatus === "passed" || newStatus === "failed") {
+      const ok = await confirm({
+        message:
+          newStatus === "passed"
+            ? `「${application.name}」を合格にします。応募者へ合格メールが自動送信されます。よろしいですか？`
+            : `「${application.name}」を不合格にします。応募者へ不合格メールが自動送信されます。よろしいですか？`,
+        confirmLabel: newStatus === "passed" ? "合格にする" : "不合格にする",
+        variant: newStatus === "failed" ? "danger" : "default",
+      });
+      if (!ok) return;
+    }
     setSubmitting(true);
     try {
       await api.applications.update(application.id, {
