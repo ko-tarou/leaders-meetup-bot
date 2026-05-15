@@ -188,7 +188,15 @@ function readInitialConfig(
 export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const toast = useToast();
   const isReadOnly = useIsReadOnly();
-  const initial = useMemo(() => readInitialConfig(action), [action]);
+
+  // 編集対象モード (上部セグメントで切替)。
+  const [mode, setMode] = useState<NotificationMode>("application");
+  const modeDef = MODE_DEFS[mode];
+
+  const initial = useMemo(
+    () => readInitialConfig(action, modeDef.configKey),
+    [action, modeDef.configKey],
+  );
 
   // 確定値 (= 保存済みの notifications config)
   const [enabled, setEnabled] = useState<boolean>(initial.enabled);
@@ -231,6 +239,22 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const activeWorkspaceId = editingChannel ? draftWorkspaceId : workspaceId;
 
   const [saving, setSaving] = useState<boolean>(false);
+
+  // mode 切替時: 確定 state を切替先 mode の保存値で再初期化する。
+  // 未保存ドラフトは破棄でよい (確認ダイアログ不要) ため編集モードも閉じる。
+  // 依存は initial (= action / configKey に応じて useMemo で安定) のみなので
+  // mode 連打や再 render での無限ループは発生しない。
+  useEffect(() => {
+    setEnabled(initial.enabled);
+    setWorkspaceId(initial.workspaceId);
+    setChannelId(initial.channelId);
+    setChannelName(initial.channelName);
+    setMentionUserIds(initial.mentionUserIds);
+    setMessageTemplate(initial.messageTemplate);
+    setEditingChannel(false);
+    setEditingMentions(false);
+    setEditingTemplate(false);
+  }, [initial]);
 
   // workspaces 一覧取得
   useEffect(() => {
@@ -351,7 +375,9 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
       messageTemplate,
     };
     const merged: NotificationsConfig = { ...current, ...patch };
-    const newConfig = { ...baseConfig, notifications: merged };
+    // baseConfig を spread して対象 configKey のみ上書き。
+    // もう一方の通知キー / slackInvites 等 他キーは温存される。
+    const newConfig = { ...baseConfig, [modeDef.configKey]: merged };
     setSaving(true);
     try {
       await api.events.actions.update(eventId, action.id, {
@@ -435,7 +461,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   // 通知文編集
   const startEditTemplate = () => {
     // 現在保存値が空ならテキストエリアに DEFAULT_TEMPLATE を出して編集しやすく。
-    setDraftMessageTemplate(messageTemplate || DEFAULT_TEMPLATE);
+    setDraftMessageTemplate(messageTemplate || modeDef.defaultTemplate);
     setEditingTemplate(true);
   };
 
@@ -444,7 +470,7 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
     // 「デフォルト扱い」に戻す (BE 側は空文字 → DEFAULT_TEMPLATE)。
     const trimmed = draftMessageTemplate.trim();
     const next =
-      trimmed === "" || trimmed === DEFAULT_TEMPLATE.trim()
+      trimmed === "" || trimmed === modeDef.defaultTemplate.trim()
         ? ""
         : draftMessageTemplate;
     const result = await saveNotifications({ messageTemplate: next });
@@ -455,18 +481,18 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   };
 
   const resetTemplateToDefault = () => {
-    setDraftMessageTemplate(DEFAULT_TEMPLATE);
+    setDraftMessageTemplate(modeDef.defaultTemplate);
   };
 
   // 通知文 display 用 (空ならデフォルトを表示)。
-  const displayTemplate = messageTemplate || DEFAULT_TEMPLATE;
+  const displayTemplate = messageTemplate || modeDef.defaultTemplate;
   const isDefaultTemplate = !messageTemplate;
 
   // 編集中のリアルタイムプレビュー (textarea 下に常時表示)。
   // {mentions} を空にすると先頭にスペース余りが出るため、render 結果は trim する。
   const previewText = useMemo(
-    () => renderTemplate(draftMessageTemplate, SAMPLE_VARS).trim(),
-    [draftMessageTemplate],
+    () => renderTemplate(draftMessageTemplate, modeDef.sampleVars).trim(),
+    [draftMessageTemplate, modeDef.sampleVars],
   );
 
   // メンション display 用名前
@@ -479,10 +505,28 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
     <div>
       <div style={styles.section}>
         <h3 style={styles.h3}>通知設定</h3>
-        <p style={styles.desc}>
-          新規応募があった時に Slack 通知を送ります。通知失敗で応募自体が
-          失敗することはありません (fail-soft)。
-        </p>
+        <div style={styles.segment} role="tablist">
+          {(Object.keys(MODE_DEFS) as NotificationMode[]).map((m) => {
+            const active = m === mode;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setMode(m)}
+                disabled={saving}
+                style={{
+                  ...styles.segmentButton,
+                  ...(active ? styles.segmentButtonActive : {}),
+                }}
+              >
+                {MODE_DEFS[m].label}
+              </button>
+            );
+          })}
+        </div>
+        <p style={styles.desc}>{modeDef.description}</p>
       </div>
 
       <div style={styles.section}>
@@ -722,14 +766,14 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
                     rows={6}
                     disabled={isReadOnly || saving}
                     style={styles.textarea}
-                    placeholder={DEFAULT_TEMPLATE}
+                    placeholder={modeDef.defaultTemplate}
                   />
                 </div>
 
                 <div style={styles.editField}>
                   <label style={styles.label}>使用可能なプレースホルダー</label>
                   <div style={styles.placeholderList}>
-                    {PLACEHOLDERS.map((p) => (
+                    {modeDef.placeholders.map((p) => (
                       <div key={p.key} style={styles.placeholderRow}>
                         <code style={styles.placeholderKey}>{`{${p.key}}`}</code>
                         <span style={styles.placeholderDesc}>{p.desc}</span>
@@ -793,6 +837,26 @@ const styles: Record<string, CSSProperties> = {
     margin: 0,
     fontSize: "0.875rem",
     color: colors.textSecondary,
+  },
+  segment: {
+    display: "inline-flex",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 8,
+    overflow: "hidden",
+    marginBottom: "0.75rem",
+  },
+  segmentButton: {
+    padding: "6px 16px",
+    fontSize: "0.875rem",
+    border: "none",
+    background: colors.background,
+    color: colors.textSecondary,
+    cursor: "pointer",
+  },
+  segmentButtonActive: {
+    background: colors.primary,
+    color: "#ffffff",
+    fontWeight: 600,
   },
   label: {
     display: "block",
