@@ -80,6 +80,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
   const body = await c.req.json<{
     token?: string;
     name?: string;
+    slackName?: string;
     studentId?: string;
     department?: string;
     grade?: string;
@@ -156,6 +157,8 @@ participationRouter.post("/participation/:eventId", async (c) => {
   const fields = {
     eventId,
     name: body.name.trim(),
+    // 任意入力。空/未指定は null (student_id 等の任意文字列と同扱い)
+    slackName: body.slackName?.trim() || null,
     studentId: body.studentId?.trim() || null,
     department: body.department?.trim() || null,
     grade: body.grade || null,
