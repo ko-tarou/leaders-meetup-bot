@@ -34,36 +34,104 @@ type NotificationsConfig = {
   messageTemplate: string;
 };
 
+// 編集対象モード。
+//   application  → action.config.notifications (応募通知)
+//   participation → action.config.participationNotifications (参加届通知)
+type NotificationMode = "application" | "participation";
+
+type ModeDef = {
+  // 編集対象となる action.config 内のキー。
+  configKey: "notifications" | "participationNotifications";
+  // セグメントに表示するラベル。
+  label: string;
+  // ヘッダ説明文 (fail-soft の文言含む)。
+  description: string;
+  // 空文字 / 未設定保存時に BE が使うデフォルト文面 (BE と同期)。
+  defaultTemplate: string;
+  // プレビュー用サンプルデータ (BE の placeholder 仕様と一対一対応)。
+  sampleVars: Record<string, string>;
+  // 表示用 placeholder 一覧 (キー + 説明)。
+  placeholders: { key: string; desc: string }[];
+};
+
 // BE: src/services/application-notification.ts:DEFAULT_TEMPLATE と同期。
-// 空文字 / 未設定保存時はこの文面で通知が送られる。
-const DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
+const APPLICATION_DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
 名前: {name}
 メール: {email}
 応募日時: {appliedAt} (JST)`;
 
-// プレビュー用サンプルデータ。BE の placeholder 仕様と一対一対応。
-const SAMPLE_VARS: Record<string, string> = {
-  mentions: "<@U1>",
-  name: "鈴木 太郎",
-  email: "suzuki@example.com",
-  appliedAt: "2026/05/11 14:30",
-  studentId: "1EP1-1",
-  howFound: "joint_briefing",
-  interviewLocation: "online",
-  interviewAt: "2026/05/15 10:00",
-};
+// BE: src/services/participation-notification.ts:DEFAULT_PARTICIPATION_TEMPLATE と同期。
+const PARTICIPATION_DEFAULT_TEMPLATE = `{mentions} 📋 参加届が提出されました
+名前: {name}
+Slack表示名: {slackName}
+メール: {email}
+希望活動: {desiredActivity}`;
 
-// 表示用に並べる placeholder の一覧 (キー + 説明)。
-const PLACEHOLDERS: { key: string; desc: string }[] = [
-  { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
-  { key: "name", desc: "応募者名" },
-  { key: "email", desc: "メール" },
-  { key: "appliedAt", desc: "応募日時 (JST)" },
-  { key: "studentId", desc: "学生証番号" },
-  { key: "howFound", desc: "どこで知ったか" },
-  { key: "interviewLocation", desc: "面接場所" },
-  { key: "interviewAt", desc: "希望面接日時 (JST)" },
-];
+// モードごとの定義テーブル (DRY: 同一エディタを configKey で切替)。
+const MODE_DEFS: Record<NotificationMode, ModeDef> = {
+  application: {
+    configKey: "notifications",
+    label: "応募通知",
+    description:
+      "新規応募があった時に Slack 通知を送ります。通知失敗で応募自体が失敗することはありません (fail-soft)。",
+    defaultTemplate: APPLICATION_DEFAULT_TEMPLATE,
+    sampleVars: {
+      mentions: "<@U1>",
+      name: "鈴木 太郎",
+      email: "suzuki@example.com",
+      appliedAt: "2026/05/11 14:30",
+      studentId: "1EP1-1",
+      howFound: "joint_briefing",
+      interviewLocation: "online",
+      interviewAt: "2026/05/15 10:00",
+    },
+    placeholders: [
+      { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+      { key: "name", desc: "応募者名" },
+      { key: "email", desc: "メール" },
+      { key: "appliedAt", desc: "応募日時 (JST)" },
+      { key: "studentId", desc: "学生証番号" },
+      { key: "howFound", desc: "どこで知ったか" },
+      { key: "interviewLocation", desc: "面接場所" },
+      { key: "interviewAt", desc: "希望面接日時 (JST)" },
+    ],
+  },
+  participation: {
+    configKey: "participationNotifications",
+    label: "参加届通知",
+    description:
+      "参加届が提出された時に Slack 通知を送ります。通知失敗で参加届提出自体が失敗することはありません (fail-soft)。",
+    defaultTemplate: PARTICIPATION_DEFAULT_TEMPLATE,
+    sampleVars: {
+      mentions: "<@U1>",
+      name: "鈴木 太郎",
+      slackName: "suzuki",
+      email: "suzuki@example.com",
+      studentId: "1EP1-1",
+      department: "情報工学科",
+      grade: "3",
+      gender: "male",
+      desiredActivity: "dev",
+      devRoles: "frontend, backend",
+      otherAffiliations: "なし",
+      submittedAt: "2026/05/11 14:30",
+    },
+    placeholders: [
+      { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+      { key: "name", desc: "氏名" },
+      { key: "slackName", desc: "Slack 表示名" },
+      { key: "email", desc: "メール" },
+      { key: "studentId", desc: "学生証番号" },
+      { key: "department", desc: "学科" },
+      { key: "grade", desc: "学年" },
+      { key: "gender", desc: "性別" },
+      { key: "desiredActivity", desc: "希望活動" },
+      { key: "devRoles", desc: "開発ロール (カンマ区切り)" },
+      { key: "otherAffiliations", desc: "他の所属" },
+      { key: "submittedAt", desc: "提出日時 (JST)" },
+    ],
+  },
+};
 
 /**
  * `{key}` を vars[key] で置換。未定義 key は元の `{key}` を残す。
@@ -84,12 +152,16 @@ type Props = {
   onSaved?: () => void;
 };
 
-function readInitialConfig(action: EventAction): NotificationsConfig {
+function readInitialConfig(
+  action: EventAction,
+  configKey: ModeDef["configKey"],
+): NotificationsConfig {
   try {
-    const parsed = JSON.parse(action.config || "{}") as {
-      notifications?: Partial<NotificationsConfig>;
-    };
-    const n = parsed.notifications ?? {};
+    const parsed = JSON.parse(action.config || "{}") as Record<
+      string,
+      Partial<NotificationsConfig> | undefined
+    >;
+    const n = parsed[configKey] ?? {};
     return {
       enabled: Boolean(n.enabled),
       workspaceId: typeof n.workspaceId === "string" ? n.workspaceId : "",
