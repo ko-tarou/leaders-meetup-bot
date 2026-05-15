@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { api } from "../../api";
 import type { EventAction, ParticipationForm } from "../../types";
 import { Button } from "../ui/Button";
+import { useConfirm } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 
@@ -70,8 +71,13 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
   // Phase1 は eventId 単位の一覧のみ参照する (将来の action 別表示用に保持)。
   void action;
   const toast = useToast();
+  const { confirm } = useConfirm();
   const [forms, setForms] = useState<ParticipationForm[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +99,69 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [eventId, toast]);
+  }, [eventId, refreshKey, toast]);
+
+  const handleReject = useCallback(
+    async (f: ParticipationForm) => {
+      const name = display(f.name);
+      const ok = await confirm({
+        message: `「${name}」を却下しますか？\nPhase2 でロール自動割当が有効でも、却下者にはロールを付与せず剥奪します。`,
+        variant: "danger",
+        confirmLabel: "却下",
+      });
+      if (!ok) return;
+      setBusyId(f.id);
+      try {
+        await api.participation.setStatus(eventId, f.id, "rejected");
+        toast.success("参加届を却下しました");
+        triggerRefresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "却下に失敗しました");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [confirm, eventId, toast],
+  );
+
+  const handleUnreject = useCallback(
+    async (f: ParticipationForm) => {
+      setBusyId(f.id);
+      try {
+        await api.participation.setStatus(eventId, f.id, "submitted");
+        toast.success("却下を解除しました");
+        triggerRefresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "却下解除に失敗しました");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [eventId, toast],
+  );
+
+  const handleDelete = useCallback(
+    async (f: ParticipationForm) => {
+      const name = display(f.name);
+      const ok = await confirm({
+        message: `「${name}」の参加届を削除しますか？この操作は取り消せません。`,
+        variant: "danger",
+        confirmLabel: "削除",
+      });
+      if (!ok) return;
+      setBusyId(f.id);
+      try {
+        await api.participation.remove(eventId, f.id);
+        toast.success("参加届を削除しました");
+        triggerRefresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "削除に失敗しました");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [confirm, eventId, toast],
+  );
 
   const participationUrl = `${window.location.origin}/participation/${eventId}`;
   const handleCopy = async () => {
@@ -168,13 +236,21 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
                 value: label(ACTIVITY_LABEL, f.desiredActivity),
               },
             ];
+            const rejected = f.status === "rejected";
+            const busy = busyId === f.id;
             return (
-              <div key={f.id} style={s.card}>
+              <div
+                key={f.id}
+                style={rejected ? { ...s.card, ...s.cardRejected } : s.card}
+              >
                 <div style={s.cardHeader}>
                   <span style={s.name}>{display(f.name)}</span>
-                  <span style={linked ? s.badgeLinked : s.badgeDirect}>
-                    {linked ? "応募紐付き" : "直接応募"}
-                  </span>
+                  <div style={s.badges}>
+                    {rejected && <span style={s.badgeRejected}>却下済み</span>}
+                    <span style={linked ? s.badgeLinked : s.badgeDirect}>
+                      {linked ? "応募紐付き" : "直接応募"}
+                    </span>
+                  </div>
                 </div>
 
                 <dl style={s.grid}>
@@ -203,6 +279,36 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
 
                 <div style={s.submittedAt}>
                   提出日時: {new Date(f.submittedAt).toLocaleString("ja-JP")}
+                </div>
+
+                <div style={s.actions}>
+                  {rejected ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => handleUnreject(f)}
+                    >
+                      却下解除
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      onClick={() => handleReject(f)}
+                    >
+                      却下
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => handleDelete(f)}
+                  >
+                    削除
+                  </Button>
                 </div>
               </div>
             );
@@ -268,12 +374,25 @@ const s: Record<string, CSSProperties> = {
     borderRadius: 8,
     background: colors.surface,
   },
+  cardRejected: { opacity: 0.6 },
   cardHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: "0.5rem",
     marginBottom: "0.625rem",
+  },
+  badges: { display: "flex", alignItems: "center", gap: "0.375rem" },
+  badgeRejected: {
+    ...badgeBase,
+    background: colors.dangerSubtle,
+    color: colors.danger,
+  },
+  actions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "0.5rem",
+    marginTop: "0.75rem",
   },
   name: {
     fontSize: "0.95rem",
