@@ -1,8 +1,17 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { events, applications, participationForms } from "../../db/schema";
+import {
+  events,
+  applications,
+  participationForms,
+  eventActions,
+} from "../../db/schema";
+import {
+  sendParticipationNotification,
+  type ParticipationFormLike,
+} from "../../services/participation-notification";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
 //
@@ -172,6 +181,42 @@ participationRouter.post("/participation/:eventId", async (c) => {
     submittedAt: now,
   };
 
+  // 保存成功後の Slack 通知 (fail-soft)。member_application アクション config の
+  // participationNotifications を参照。sendApplicationNotification と完全に対の
+  // 実装で、通知失敗・member_application 不在は提出 API を失敗させない。
+  // 応募作成側 (applications.ts:283) と同じく await + try/catch 方式に合わせる。
+  const notifyParticipation = async () => {
+    try {
+      const action = await db
+        .select()
+        .from(eventActions)
+        .where(
+          and(
+            eq(eventActions.eventId, eventId),
+            eq(eventActions.actionType, "member_application"),
+          ),
+        )
+        .get();
+      if (!action) return; // member_application 不在 → 通知 no-op
+      const formLike: ParticipationFormLike = {
+        name: fields.name,
+        email: fields.email,
+        submittedAt: fields.submittedAt,
+        slackName: fields.slackName,
+        studentId: fields.studentId,
+        department: fields.department,
+        grade: fields.grade,
+        gender: fields.gender,
+        desiredActivity: fields.desiredActivity,
+        otherAffiliations: fields.otherAffiliations,
+        devRoles,
+      };
+      await sendParticipationNotification(c.env, action.config, formLike);
+    } catch (e) {
+      console.error("[participation] notification hook error:", e);
+    }
+  };
+
   // applicationId 非null: 既存行があれば UPDATE、無ければ INSERT (idempotent)。
   // partial unique index に依存せず先 SELECT で分岐 (roles.ts のメンバー
   // upsert と同思想 / 同時提出でも例外にならない)。
@@ -186,12 +231,14 @@ participationRouter.post("/participation/:eventId", async (c) => {
         .update(participationForms)
         .set(fields)
         .where(eq(participationForms.id, existing.id));
+      await notifyParticipation();
       return c.json({ ok: true, id: existing.id }, 201);
     }
     const id = crypto.randomUUID();
     await db
       .insert(participationForms)
       .values({ id, applicationId, createdAt: now, ...fields });
+    await notifyParticipation();
     return c.json({ ok: true, id }, 201);
   }
 
@@ -200,6 +247,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
   await db
     .insert(participationForms)
     .values({ id, applicationId: null, createdAt: now, ...fields });
+  await notifyParticipation();
   return c.json({ ok: true, id }, 201);
 });
 
