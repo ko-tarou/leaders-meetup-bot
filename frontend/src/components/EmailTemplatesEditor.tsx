@@ -131,6 +131,10 @@ function parseInitialAutoSend(
         typeof triggersRaw?.onPassed === "string"
           ? triggersRaw.onPassed
           : undefined,
+      onFailed:
+        typeof triggersRaw?.onFailed === "string"
+          ? triggersRaw.onFailed
+          : undefined,
     };
     // logToSlack (任意): 自動メール送信成功時の Slack ログ通知。
     const logRaw = (raw as { logToSlack?: unknown }).logToSlack;
@@ -186,7 +190,7 @@ const LOG_SAMPLE_VARS: Record<string, string> = {
 
 const LOG_PLACEHOLDERS: { key: string; desc: string }[] = [
   { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
-  { key: "triggerLabel", desc: "トリガー名 (応募完了時 / 面接予定時 / 合格時)" },
+  { key: "triggerLabel", desc: "トリガー名 (応募完了時 / 面接予定時 / 合格時 / 不合格時)" },
   { key: "to", desc: "送信先メールアドレス" },
   { key: "recipientName", desc: "応募者名" },
   { key: "subject", desc: "送信したメール件名 (placeholder 置換済み)" },
@@ -282,7 +286,7 @@ function parseInitialSlackInvites(
 // 005-meet: trigger ラベル + UI 順序定義。
 // 編集 UI と「保存時のバリデーション」両方で参照する。
 const TRIGGER_DEFS: ReadonlyArray<{
-  key: "onSubmit" | "onScheduled" | "onPassed";
+  key: "onSubmit" | "onScheduled" | "onPassed" | "onFailed";
   label: string;
   description: string;
 }> = [
@@ -301,6 +305,11 @@ const TRIGGER_DEFS: ReadonlyArray<{
     key: "onPassed",
     label: "合格時",
     description: "status: → passed で送信",
+  },
+  {
+    key: "onFailed",
+    label: "不合格時",
+    description: "status: → failed で送信",
   },
 ];
 
@@ -1267,7 +1276,7 @@ export function EmailTemplatesEditor({ eventId, action, onChange }: Props) {
           </select>
         </div>
 
-        {/* 005-meet: trigger 別の template 選択 (応募完了時 / 面接予定時 / 合格時) */}
+        {/* 005-meet: trigger 別の template 選択 (応募完了時 / 面接予定時 / 合格時 / 不合格時) */}
         <div style={styles.triggersGroup}>
           <div style={styles.triggersTitle}>送信トリガー</div>
           {TRIGGER_DEFS.map((def) => {
