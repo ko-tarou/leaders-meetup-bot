@@ -26,7 +26,11 @@ import { createSlackClientForWorkspace } from "./workspace";
 import type { Env } from "../types/env";
 import type { ApplicationLike } from "./application-notification";
 
-export type AutoSendTrigger = "onSubmit" | "onScheduled" | "onPassed";
+export type AutoSendTrigger =
+  | "onSubmit"
+  | "onScheduled"
+  | "onPassed"
+  | "onFailed";
 
 export type AutoSendTriggers = {
   /** 応募完了時に送るテンプレ id */
@@ -35,6 +39,8 @@ export type AutoSendTriggers = {
   onScheduled?: string;
   /** scheduled → passed (合格通知) 時に送るテンプレ id */
   onPassed?: string;
+  /** → failed (不合格通知) 時に送るテンプレ id */
+  onFailed?: string;
 };
 
 /**
@@ -80,6 +86,7 @@ const TRIGGER_LABELS: Record<AutoSendTrigger, string> = {
   onSubmit: "応募完了時",
   onScheduled: "面接予定時",
   onPassed: "合格時",
+  onFailed: "不合格時",
 };
 
 export function getTriggerLabel(trigger: AutoSendTrigger): string {
