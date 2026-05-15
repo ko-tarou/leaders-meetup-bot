@@ -296,6 +296,9 @@ function buildTemplateVars(
     // 合格メール等で Slack 招待リンクを案内するために使う。
     // 旧仕様 (slackInvite 単数) も自動 fallback。未設定は空文字。
     slackInviteLink,
+    // participation-form Phase1 PR2: 合格メールに埋め込む参加届フォーム URL。
+    // passed 遷移ハンドラで token 発行後に set される。他 trigger では空文字。
+    participationFormLink: application.participationFormLink ?? "",
   };
 }
 

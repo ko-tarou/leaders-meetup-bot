@@ -42,6 +42,10 @@ export type ApplicationLike = {
   // 005-meet: Calendar event 作成後に埋め込まれる Google Meet URL。
   // 未設定 (calendar event 未生成 or 失敗) は空文字に置換される。
   meetLink?: string | null;
+  // participation-form Phase1 PR2: 合格メールに埋め込む参加届フォーム URL。
+  // 合格 (passed) 遷移時のみ token を発行して set される。それ以外は
+  // 空文字に置換される ({participationFormLink} placeholder)。
+  participationFormLink?: string | null;
 };
 
 /**
