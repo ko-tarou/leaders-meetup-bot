@@ -209,6 +209,8 @@ export const participationForms = sqliteTable(
     desiredActivity: text("desired_activity"),
     // JSON 文字列配列。例 ["pm","frontend","backend","android","ios","infra"]
     devRoles: text("dev_roles").notNull().default("[]"),
+    // 'submitted' | 'rejected'。Phase2 ロール剥奪判定用 (migration 0046)
+    status: text("status").notNull().default("submitted"),
     submittedAt: text("submitted_at").notNull(),
     createdAt: text("created_at").notNull(),
   },

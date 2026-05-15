@@ -281,6 +281,7 @@ participationRouter.get("/orgs/:eventId/participation-forms", async (c) => {
       } catch {
         parsed = [];
       }
+      // status は ...r で含まれる (migration 0046)。明示変換不要。
       return {
         ...r,
         devRoles: Array.isArray(parsed) ? parsed : [],
@@ -288,3 +289,77 @@ participationRouter.get("/orgs/:eventId/participation-forms", async (c) => {
     }),
   );
 });
+
+// ---------------------------------------------------------------------------
+// admin helper: form の存在 & eventId 所属を検証する
+// (roles.ts の findRoleInAction と同等の堅さ。他 event の form を
+//  操作させないため eventId 不一致は 400、存在しなければ 404)。
+// ---------------------------------------------------------------------------
+async function findParticipationForm(
+  db: ReturnType<typeof drizzle>,
+  eventId: string,
+  id: string,
+) {
+  const form = await db
+    .select()
+    .from(participationForms)
+    .where(eq(participationForms.id, id))
+    .get();
+  if (!form) return { error: "participation form not found", status: 404 as const };
+  if (form.eventId !== eventId)
+    return { error: "eventId mismatch", status: 400 as const };
+  return { form };
+}
+
+const VALID_STATUS = ["submitted", "rejected"];
+
+// ---------------------------------------------------------------------------
+// admin: 参加届を削除する。x-admin-token 必須
+// (/orgs/* は api.ts の bypass 対象外なので admin auth が適用される)。
+// ---------------------------------------------------------------------------
+participationRouter.delete(
+  "/orgs/:eventId/participation-forms/:id",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const id = c.req.param("id");
+
+    const found = await findParticipationForm(db, eventId, id);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    await db.delete(participationForms).where(eq(participationForms.id, id));
+    return c.json({ ok: true });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// admin: 参加届の status を更新する (却下 / 却下解除を兼ねる)。
+//   body { status: 'submitted' | 'rejected' }
+//   status:'rejected' = 却下、status:'submitted' = 却下解除。
+// x-admin-token 必須 (/orgs/* は admin auth 配下)。
+// ---------------------------------------------------------------------------
+participationRouter.patch(
+  "/orgs/:eventId/participation-forms/:id",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const id = c.req.param("id");
+    const body = await c.req.json<{ status?: string }>();
+
+    if (
+      typeof body.status !== "string" ||
+      !VALID_STATUS.includes(body.status)
+    ) {
+      return c.json({ error: "invalid status" }, 400);
+    }
+
+    const found = await findParticipationForm(db, eventId, id);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    await db
+      .update(participationForms)
+      .set({ status: body.status })
+      .where(eq(participationForms.id, id));
+    return c.json({ ok: true, status: body.status });
+  },
+);
