@@ -33,6 +33,7 @@ import {
   PublicThanksPage,
 } from "./pages/PublicApplyPage";
 import { InterviewerFormPage } from "./pages/InterviewerFormPage";
+import { ParticipationFormPage } from "./pages/ParticipationFormPage";
 import { PublicEntryPage } from "./pages/PublicEntryPage";
 import { PublicManagementPage } from "./pages/PublicManagementPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
@@ -49,6 +50,7 @@ export function App() {
   if (
     pathname.startsWith("/apply") ||
     pathname.startsWith("/interviewer-form") ||
+    pathname.startsWith("/participation") ||
     pathname.startsWith("/public/")
   ) {
     return (
@@ -63,6 +65,10 @@ export function App() {
             <Route
               path="/interviewer-form/:token"
               element={<InterviewerFormPage />}
+            />
+            <Route
+              path="/participation/:eventId"
+              element={<ParticipationFormPage />}
             />
             <Route path="/public/:token" element={<PublicEntryPage />} />
           </Routes>
