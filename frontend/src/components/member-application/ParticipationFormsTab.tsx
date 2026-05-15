@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { api } from "../../api";
 import type { EventAction, ParticipationForm } from "../../types";
+import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 
@@ -94,6 +95,16 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
     };
   }, [eventId, toast]);
 
+  const participationUrl = `${window.location.origin}/participation/${eventId}`;
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(participationUrl);
+      toast.success("URL をコピーしました");
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
+  };
+
   if (forms === null) {
     return (
       <div style={{ padding: "1rem", color: colors.textSecondary }}>
@@ -104,6 +115,25 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
 
   return (
     <div style={s.wrap}>
+      <section style={s.shareBox} aria-label="参加届フォーム URL">
+        <div style={s.shareLabel}>参加届フォーム URL</div>
+        <p style={s.shareDesc}>
+          このリンクを共有すると、誰でも参加届を記入できます。合格者には合格メールに個別リンクが自動で添付されます。
+        </p>
+        <div style={s.shareRow}>
+          <input
+            readOnly
+            value={participationUrl}
+            style={s.shareInput}
+            aria-label="参加届フォーム URL"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <Button size="sm" onClick={handleCopy}>
+            コピー
+          </Button>
+        </div>
+      </section>
+
       <h3 style={s.h3}>参加届 ({forms.length}件)</h3>
 
       {error && (
@@ -192,6 +222,43 @@ const badgeBase: CSSProperties = {
 
 const s: Record<string, CSSProperties> = {
   wrap: { padding: "1rem" },
+  shareBox: {
+    padding: "0.75rem 1rem",
+    background: colors.primarySubtle,
+    border: `1px solid ${colors.primary}`,
+    borderRadius: "0.5rem",
+    marginBottom: "1rem",
+  },
+  shareLabel: {
+    fontSize: "0.75rem",
+    color: colors.textSecondary,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    marginBottom: "0.25rem",
+  },
+  shareDesc: {
+    margin: "0 0 0.5rem",
+    fontSize: "0.8rem",
+    color: colors.text,
+    lineHeight: 1.5,
+  },
+  shareRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+  },
+  shareInput: {
+    flex: "1 1 280px",
+    minWidth: 0,
+    padding: "0.4rem 0.5rem",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.375rem",
+    fontFamily: "monospace",
+    fontSize: "0.8rem",
+    background: colors.background,
+    color: colors.text,
+  },
   h3: { margin: "0 0 0.75rem", fontSize: "1rem" },
   list: { display: "flex", flexDirection: "column", gap: "0.75rem" },
   card: {
