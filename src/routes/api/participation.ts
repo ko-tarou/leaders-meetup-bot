@@ -10,6 +10,7 @@ import {
 } from "../../db/schema";
 import {
   sendParticipationNotification,
+  sendParticipationUnresolvedNotification,
   type ParticipationFormLike,
 } from "../../services/participation-notification";
 import {
@@ -247,7 +248,36 @@ participationRouter.post("/participation/:eventId", async (c) => {
       const slackUserId = fields.slackName
         ? await resolveSlackUserId(c.env, cfg.workspaceId, fields.slackName)
         : null;
-      if (!slackUserId) return; // 未解決 → 手動紐付け待ち (デフォルト維持)
+      if (!slackUserId) {
+        // 表示名解決に失敗 (未解決) → 運営へ通知。手動紐付け待ち。
+        // この経路は roleAutoAssign 有効時のみ走る (上の cfg.enabled ガード)
+        // ため、自動割当 OFF 時は「未解決」概念が無く発火しない。解決成功時は
+        // この分岐に入らないので通知も飛ばない。fail-soft (通知失敗で提出を
+        // ブロックしない)。formLike は fields から最小構成で組む。
+        try {
+          const unresolvedForm: ParticipationFormLike = {
+            name: fields.name,
+            email: fields.email,
+            submittedAt: fields.submittedAt,
+            slackName: fields.slackName,
+            studentId: fields.studentId,
+            department: fields.department,
+            grade: fields.grade,
+            gender: fields.gender,
+            desiredActivity: fields.desiredActivity,
+            otherAffiliations: fields.otherAffiliations,
+            devRoles,
+          };
+          await sendParticipationUnresolvedNotification(
+            c.env,
+            action.config,
+            unresolvedForm,
+          );
+        } catch (e) {
+          console.error("[participation] unresolved notify error:", e);
+        }
+        return; // 未解決 → 手動紐付け待ち (デフォルト維持)
+      }
 
       await db
         .update(participationForms)
