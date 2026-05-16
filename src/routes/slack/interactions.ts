@@ -27,6 +27,7 @@ import {
   notifyReviewersAssigned,
 } from "../../services/sticky-pr-review-board";
 import { createSlackClientForWorkspace } from "../../services/workspace";
+import { reRequestReview } from "../../services/pr-review-actions";
 import { getSlackClient, type SlackVariables } from "./utils";
 import { gmailAccounts } from "../../db/schema";
 import {
@@ -509,6 +510,44 @@ interactionsRouter.post("/interactions", async (c) => {
             await prReviewRepostByChannel(c.env, channelId);
           } catch (e) {
             console.error("Failed to handle sticky_pr_done:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_rereview_<reviewId>: 完了済み PR の「🔄 再レビュー依頼」ボタン。
+    // LGTM 全削除 + status='open' + review_round++ + reviewer 再通知 + board repost。
+    // ロジックは services/pr-review-actions.ts の reRequestReview に共通化済み
+    // （Web API `POST .../re-request` と同一処理）。board repost は
+    // reRequestReview 内で実施されるため、ここでは二重 repost しない。
+    // fail-soft: 失敗してもログのみ（既存 sticky_pr_* ハンドラと同じ作法）。
+    if (action.action_id?.startsWith("sticky_pr_rereview_")) {
+      const reviewId = action.value;
+      if (!reviewId) return c.json({ ok: true });
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const reviewRow = await d1
+              .select({ eventId: prReviews.eventId })
+              .from(prReviews)
+              .where(eq(prReviews.id, reviewId))
+              .get();
+            if (!reviewRow) {
+              console.warn(
+                `sticky_pr_rereview: review ${reviewId} not found`,
+              );
+              return;
+            }
+            await reRequestReview(c.env, {
+              eventId: reviewRow.eventId,
+              reviewId,
+            });
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_rereview:", e);
           }
         })(),
       );
