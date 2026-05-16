@@ -23,7 +23,8 @@ import { scheduleTaskReminders } from "../../services/devhub-task-reminder";
 import { stickyRepostByChannel } from "../../services/sticky-task-board";
 import {
   prReviewRepostByChannel,
-  LGTM_THRESHOLD,
+  resolveLgtmThreshold,
+  notifyReviewersAssigned,
 } from "../../services/sticky-pr-review-board";
 import { createSlackClientForWorkspace } from "../../services/workspace";
 import { getSlackClient, type SlackVariables } from "./utils";
@@ -407,14 +408,23 @@ interactionsRouter.post("/interactions", async (c) => {
                 createdAt: new Date().toISOString(),
               });
 
-              // LGTM 数を確認（しきい値は sticky-pr-review-board.ts と共通定数を参照）
+              // LGTM 数を確認。しきい値は当該 review が属する event の
+              // pr_review_list config から解決（未設定 / 不正は 2 に fallback）
               const lgtms = await d1
                 .select()
                 .from(prReviewLgtms)
                 .where(eq(prReviewLgtms.reviewId, reviewId))
                 .all();
+              const reviewRow = await d1
+                .select({ eventId: prReviews.eventId })
+                .from(prReviews)
+                .where(eq(prReviews.id, reviewId))
+                .get();
+              const lgtmThreshold = reviewRow
+                ? await resolveLgtmThreshold(c.env.DB, reviewRow.eventId)
+                : 2;
 
-              if (lgtms.length >= LGTM_THRESHOLD) {
+              if (lgtms.length >= lgtmThreshold) {
                 // status='merged' への遷移を atomic 化して二重通知を防ぐ
                 // (multi-review #27 R5 [must])。
                 // WHERE status != 'merged' + RETURNING で「自分が初めて
@@ -740,6 +750,16 @@ interactionsRouter.post("/interactions", async (c) => {
                   repErr,
                 );
               }
+              // 割当レビュアーへ「依頼が来た」明示メンション通知
+              // （reviewer 未指定なら notifyReviewersAssigned 側で no-op）。
+              // fail-soft: 関数内 try/catch で握りつぶすため作成は失敗しない。
+              await notifyReviewersAssigned(c.env, {
+                channelId,
+                reviewerSlackIds: reviewerSlackId ? [reviewerSlackId] : [],
+                title,
+                url,
+                requesterSlackId,
+              });
             }
           } catch (e) {
             console.error(
