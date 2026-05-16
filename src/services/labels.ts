@@ -31,6 +31,7 @@ export const TASK_PRIORITY_EMOJI: Record<string, string> = {
 export const PR_REVIEW_STATUS_LABEL: Record<string, string> = {
   open: "未着手",
   in_review: "レビュー中",
+  changes_requested: "修正依頼中",
   merged: "マージ済",
   closed: "クローズ",
 };
@@ -42,6 +43,7 @@ export const PR_REVIEW_STATUS_LABEL: Record<string, string> = {
 export const PR_REVIEW_STATUS_EMOJI: Record<string, string> = {
   open: "🔴",
   in_review: "🟡",
+  changes_requested: "🔧",
   merged: "✅",
   closed: "⚫",
 };

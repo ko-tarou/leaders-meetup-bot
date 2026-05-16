@@ -256,46 +256,38 @@ export async function buildPRReviewBoardBlocks(
       text: { type: "mrkdwn", text: sectionText },
     });
 
-    // 状態に応じてボタン構成を変える（LGTM ベース運用）
-    const buttons: unknown[] = [];
-    if (r.status === "open" || r.status === "in_review") {
-      buttons.push({
-        type: "button",
-        action_id: `sticky_pr_lgtm_${r.id}`,
-        text: { type: "plain_text", text: "👍 LGTM" },
-        value: r.id,
-      });
-      buttons.push({
-        type: "button",
-        action_id: `sticky_pr_done_${r.id}`,
-        text: { type: "plain_text", text: "✓ 強制完了" },
-        value: r.id,
-        style: "primary",
-      });
-    }
-    // Slack完結 PR3: 完了済み (merged) の PR にだけ「🔄 再レビュー依頼」を出す。
-    // open/in_review 中はまだレビュー中なので再依頼の意味が薄い。完了した
-    // ものを再度見てもらうのが再レビュー。confirm で LGTM リセットの誤爆を防ぐ。
-    // （既定の board は merged を非表示にするため、showClosed=true の時のみ表示される）
-    if (r.status === "merged") {
-      buttons.push({
-        type: "button",
-        action_id: `sticky_pr_rereview_${r.id}`,
-        text: { type: "plain_text", text: "🔄 再レビュー依頼" },
-        value: r.id,
-        confirm: {
-          title: { type: "plain_text", text: "再レビュー依頼" },
-          text: {
-            type: "mrkdwn",
-            text: "LGTM をリセットして再レビュー依頼します。よろしいですか？",
+    // Slack 完結 BE PR1: 未完了レビュー（merged/closed 以外。changes_requested
+    // を含む）には常に 3 ボタン（👍 LGTM / 💬 コメント / ✏️ 編集）のみ出す。
+    // 旧「強制完了」「再レビュー依頼」の board 直下単体ボタンは撤去し、
+    // 編集モーダル内のアクションに集約した（ハンドラ自体は編集モーダルから
+    // 再利用するため interactions.ts に残している）。
+    // showClosed=true で merged/closed を表示する場合はボタンを出さない
+    // （完了済みに対する操作導線は board からは提供しない）。
+    if (r.status !== "merged" && r.status !== "closed") {
+      blocks.push({
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            action_id: `sticky_pr_lgtm_${r.id}`,
+            text: { type: "plain_text", text: "👍 LGTM" },
+            value: r.id,
           },
-          confirm: { type: "plain_text", text: "依頼する" },
-          deny: { type: "plain_text", text: "キャンセル" },
-        },
+          {
+            type: "button",
+            action_id: `sticky_pr_comment_${r.id}`,
+            text: { type: "plain_text", text: "💬 コメント" },
+            value: r.id,
+          },
+          {
+            type: "button",
+            action_id: `sticky_pr_edit_${r.id}`,
+            text: { type: "plain_text", text: "✏️ 編集" },
+            value: r.id,
+            style: "primary",
+          },
+        ],
       });
-    }
-    if (buttons.length > 0) {
-      blocks.push({ type: "actions", elements: buttons });
     }
     blocks.push({ type: "divider" });
   }
