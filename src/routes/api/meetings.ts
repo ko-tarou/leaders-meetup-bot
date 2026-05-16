@@ -991,9 +991,20 @@ function validateCandidateRule(frequency: Frequency, rule: unknown): string | nu
         return "candidateRule.weeksAhead must be 0..8 (weekly)";
       }
       return null;
-    case "monthly":
-      if (typeof r.weekday !== "number" || r.weekday < 0 || r.weekday > 6) {
-        return "candidateRule.weekday must be 0..6 (monthly)";
+    case "monthly": {
+      // 新形 weekdays[] (各 0..6, 1〜7要素) または legacy weekday (number 0..6) のどちらか必須。
+      const isWeekday = (w: unknown): w is number =>
+        typeof w === "number" && Number.isInteger(w) && w >= 0 && w <= 6;
+      if (Array.isArray(r.weekdays)) {
+        if (
+          r.weekdays.length < 1 ||
+          r.weekdays.length > 7 ||
+          !r.weekdays.every(isWeekday)
+        ) {
+          return "candidateRule.weekdays must be 1..7 elements, each 0..6 (monthly)";
+        }
+      } else if (!isWeekday(r.weekday)) {
+        return "candidateRule.weekdays (array) or weekday (0..6) is required (monthly)";
       }
       if (!Array.isArray(r.weeks)) {
         return "candidateRule.weeks must be an array (monthly)";
@@ -1008,6 +1019,7 @@ function validateCandidateRule(frequency: Frequency, rule: unknown): string | nu
         return "candidateRule.monthOffset must be 0..12 (monthly)";
       }
       return null;
+    }
     case "yearly":
       if (typeof r.month !== "number" || r.month < 1 || r.month > 12) {
         return "candidateRule.month must be 1..12 (yearly)";

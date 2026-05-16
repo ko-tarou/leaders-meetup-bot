@@ -444,7 +444,8 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   // frequency 別に shape が変わる:
   //   daily:   { type:"daily" }
   //   weekly:  { type:"weekday", weekday, weeksAhead? }
-  //   monthly: { type:"weekday", weekday, weeks, monthOffset? }
+  //   monthly: { type:"weekday", weekdays:number[], weeks, monthOffset? }
+  //            (legacy: weekday:number 単数。weekdays が無ければ [weekday] 扱い)
   //   yearly:  { type:"yearly", month, day }
   candidateRule: text("candidate_rule").notNull(),
   // monthly 用: 毎月何日に投票を開始/締切するか (1-28)

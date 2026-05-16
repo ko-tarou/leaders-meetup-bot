@@ -16,13 +16,34 @@ import { getJstNow, jstToUtcIso } from "./time-utils";
 type Frequency = "daily" | "weekly" | "monthly" | "yearly";
 
 // candidate_rule は frequency 別に shape が変わる。
-// 既存 monthly row は { type:"weekday", weekday, weeks, monthOffset } で保存されている。
+// 既存(legacy) monthly row は { type:"weekday", weekday, weeks, monthOffset } で保存されている。
+// 新形は weekdays(配列) を持つ。weekdays があればそれを優先し、無ければ legacy weekday を
+// 単一要素配列として扱う（normalizeWeekdays で吸収）。migration 不要。
 type MonthlyRule = {
   type: "weekday";
-  weekday: number; // 0=日, 1=月, ..., 6=土
+  weekdays?: number[]; // 新形: 0=日, 1=月, ..., 6=土 の配列 (1〜7要素)
+  weekday?: number; // legacy: 単一曜日 (後方互換用)
   weeks: number[];
   monthOffset?: number;
 };
+
+/**
+ * monthly weekday rule の曜日を正規化して number[] に揃える。
+ * 新形 weekdays があればそれを、無ければ legacy weekday を [weekday] として扱う。
+ * 0-6 範囲外を除去し、重複除去・昇順ソートする。
+ */
+function normalizeWeekdays(rule: MonthlyRule): number[] {
+  const raw =
+    rule.weekdays && rule.weekdays.length > 0
+      ? rule.weekdays
+      : typeof rule.weekday === "number"
+        ? [rule.weekday]
+        : [];
+  const filtered = raw.filter(
+    (w) => typeof w === "number" && Number.isInteger(w) && w >= 0 && w <= 6,
+  );
+  return Array.from(new Set(filtered)).sort((a, b) => a - b);
+}
 type WeeklyRule = { type?: "weekly"; weekday: number; weeksAhead?: number };
 type YearlyRule = { type?: "yearly"; month: number; day: number };
 type DailyRule = { type?: "daily" };
@@ -447,24 +468,30 @@ function formatDateJa(isoDate: string): string {
   return `${year}年${month}月${day}日(${wd})`;
 }
 
-/** monthly: candidateRule (type:"weekday") に基づいて候補日を生成する（純粋関数） */
+/**
+ * monthly: candidateRule (type:"weekday") に基づいて候補日を生成する（純粋関数）。
+ * weeks[] × weekdays[] の全組合せ（第N週の各曜日）を生成し、重複除去・昇順ソートする。
+ * legacy 単一 weekday は normalizeWeekdays が [weekday] に正規化するため挙動不変。
+ */
 export function generateCandidateDates(rule: MonthlyRule, yearMonth: string): string[] {
   const [year, month] = yearMonth.split("-").map(Number);
-  const dates: string[] = [];
+  const weekdays = normalizeWeekdays(rule);
+  if (weekdays.length === 0) return [];
+  const dateSet = new Set<string>();
   const daysInMonth = new Date(year, month, 0).getDate();
 
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month - 1, day);
-    if (date.getDay() !== rule.weekday) continue;
+    if (!weekdays.includes(date.getDay())) continue;
 
     const weekNumber = Math.ceil(day / 7);
     if (rule.weeks.includes(weekNumber)) {
       const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      dates.push(dateStr);
+      dateSet.add(dateStr);
     }
   }
 
-  return dates;
+  return Array.from(dateSet).sort();
 }
 
 /** baseYearMonth ("YYYY-MM") に offset ヶ月を加算した YYYY-MM を返す */
