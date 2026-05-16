@@ -15,7 +15,6 @@ import { rolesRouter } from "./api/roles";
 import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
 import { feedbackRouter } from "./api/feedback";
-import { githubWebhookRouter } from "./api/github-webhook";
 import { participationRouter } from "./api/participation";
 
 const api = new Hono<{ Bindings: Env }>();
@@ -75,11 +74,7 @@ api.use("/*", async (c, next) => {
     // /app-settings (admin GET/PUT) は bypass しない (保護)。
     sub === "/feedback" ||
     sub === "/feedback/ai-chat" ||
-    sub === "/feedback/status" ||
-    // 005-github-webhook: GitHub からの POST は x-admin-token を持たない。
-    // 認証は X-Hub-Signature-256 の HMAC 検証 (services/github-webhook.ts) で担保する。
-    // /github-mappings (admin CRUD) は bypass しない (保護)。
-    sub === "/github-webhook"
+    sub === "/feedback/status"
   ) {
     return next();
   }
@@ -103,7 +98,6 @@ api.route("/", rolesRouter);
 api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
 api.route("/", feedbackRouter);
-api.route("/", githubWebhookRouter);
 api.route("/", participationRouter);
 
 export { api };
