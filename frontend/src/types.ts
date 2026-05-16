@@ -119,12 +119,20 @@ export type AutoScheduleFrequency = "daily" | "weekly" | "monthly" | "yearly";
 // BE 仕様 (src/services/auto-cycle.ts / src/routes/api/meetings.ts):
 //   - daily   : 翌日固定 (BE が +1 day で固定。daysAhead 等の追加 field は無視される)
 //   - weekly  : weekday (0..6) + weeksAhead (0..8, 0=今週)
-//   - monthly : weekday + weeks + monthOffset (既存)
+//   - monthly : weekdays[] + weeks + monthOffset (BE は legacy 単数 weekday も受理)
 //   - yearly  : month (1..12) + day (1..28)
+//
+// monthly の `weekdays` が正。`weekday`(単数) は legacy レコード受信用の optional。
 export type AutoScheduleCandidateRule =
   | { type: "daily" }
   | { type: "weekly"; weekday: number; weeksAhead?: number }
-  | { type: "weekday"; weekday: number; weeks: number[]; monthOffset?: number }
+  | {
+      type: "weekday";
+      weekdays: number[];
+      weekday?: number;
+      weeks: number[];
+      monthOffset?: number;
+    }
   | { type: "yearly"; month: number; day: number };
 
 /** frequency 切替時に初期化する candidateRule の default 値 */
@@ -137,7 +145,7 @@ export function defaultCandidateRule(
     case "weekly":
       return { type: "weekly", weekday: 1, weeksAhead: 0 };
     case "monthly":
-      return { type: "weekday", weekday: 6, weeks: [2, 3, 4], monthOffset: 0 };
+      return { type: "weekday", weekdays: [6], weeks: [2, 3, 4], monthOffset: 0 };
     case "yearly":
       return { type: "yearly", month: 1, day: 1 };
   }
