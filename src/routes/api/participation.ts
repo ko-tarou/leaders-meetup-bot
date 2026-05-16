@@ -499,3 +499,69 @@ participationRouter.patch(
     return c.json({ ok: true, status: body.status });
   },
 );
+
+// ---------------------------------------------------------------------------
+// admin: 未解決フォームに Slack ユーザーを手動紐付けする。
+//   body { slackUserId: string }
+//   slack_user_id をセットし、却下でなく config 有効なら即付与して
+//   assigned_role_ids を更新する (手動紐付け = 解決完了 → そのまま付与)。
+// x-admin-token 必須 (/orgs/* は admin auth 配下)。
+// ---------------------------------------------------------------------------
+participationRouter.patch(
+  "/orgs/:eventId/participation-forms/:id/slack-user",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const id = c.req.param("id");
+    const body = await c.req.json<{ slackUserId?: string }>();
+
+    if (
+      typeof body.slackUserId !== "string" ||
+      !body.slackUserId.trim()
+    ) {
+      return c.json({ error: "slackUserId is required" }, 400);
+    }
+    const slackUserId = body.slackUserId.trim();
+
+    const found = await findParticipationForm(db, eventId, id);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    await db
+      .update(participationForms)
+      .set({ slackUserId })
+      .where(eq(participationForms.id, id));
+
+    // 却下でなく config 有効なら即付与 (fail-soft: 付与失敗で 200 不変)。
+    let assignedRoleIds: string[] = [];
+    try {
+      const form = found.form;
+      if (form.status !== "rejected") {
+        const config = await getMemberApplicationConfig(db, eventId);
+        const cfg = readRoleAutoAssignConfig(config);
+        if (cfg && cfg.enabled) {
+          const res = await applyRoleAssignment(c.env, {
+            memberApplicationActionConfig: config,
+            form: {
+              id,
+              slackUserId,
+              desiredActivity: form.desiredActivity,
+              devRoles: form.devRoles,
+              status: "submitted",
+            },
+          });
+          assignedRoleIds = res.assignedRoleIds;
+          if (assignedRoleIds.length > 0) {
+            await db
+              .update(participationForms)
+              .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
+              .where(eq(participationForms.id, id));
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[participation] manual link role hook error:", e);
+    }
+
+    return c.json({ ok: true, slackUserId, assignedRoleIds });
+  },
+);
