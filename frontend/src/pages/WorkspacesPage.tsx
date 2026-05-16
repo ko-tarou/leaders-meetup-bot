@@ -12,7 +12,6 @@ import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 import { GmailWatcherEditor } from "../components/GmailWatcherEditor";
 import { FeedbackSettingsSection } from "../components/feedback/FeedbackSettingsSection";
-import { GitHubIntegrationSection } from "../components/GitHubIntegrationSection";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
@@ -448,9 +447,6 @@ export function WorkspacesPage() {
         workspaces={workspaces}
         disabled={isReadOnly}
       />
-
-      {/* 005-github-webhook: GitHub repo webhook 経由で PR レビュー board を自動更新 */}
-      <GitHubIntegrationSection disabled={isReadOnly} />
 
       {/* 手動登録は fallback として温存 (ADR-0007) — ページ下部に小さく配置 */}
       <div
