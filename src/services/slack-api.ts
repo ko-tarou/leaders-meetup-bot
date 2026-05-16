@@ -90,6 +90,12 @@ export class SlackClient {
     return this.callApi("views.open", { trigger_id: triggerId, view });
   }
 
+  // 既に開いている modal を view_id で差し替える（modal 内 block_actions 後に
+  // 結果メッセージへ更新する用途）。
+  async updateView(viewId: string, view: unknown): Promise<SlackResponse> {
+    return this.callApi("views.update", { view_id: viewId, view });
+  }
+
   async postEphemeral(
     channel: string,
     user: string,

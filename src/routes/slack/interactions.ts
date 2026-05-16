@@ -13,11 +13,14 @@ import {
   taskAssignees,
   prReviews,
   prReviewLgtms,
+  prReviewReviewers,
 } from "../../db/schema";
 import {
   buildStickyTaskAddModal,
   buildPRReviewAddModal,
+  buildPRReviewEditModal,
   handleTaskAddSubmission,
+  PR_REVIEW_MAX_REVIEWERS,
 } from "../../services/devhub-task-modal";
 import { scheduleTaskReminders } from "../../services/devhub-task-reminder";
 import { stickyRepostByChannel } from "../../services/sticky-task-board";
@@ -491,10 +494,17 @@ interactionsRouter.post("/interactions", async (c) => {
     }
 
     // sticky_pr_done_<reviewId>: status=merged に更新 → 即時 repost（ボードから消える）
+    //
+    // board 直下の単体ボタンは BE PR1 で撤去したが、編集モーダル内のアクション
+    // から再利用される。board 文脈では action.value = reviewId（旧仕様。残し）、
+    // モーダル文脈では action.value = JSON({reviewId, channelId})。modal 文脈は
+    // payload.channel が無いため value JSON から channelId を解決し、完了後に
+    // モーダルを結果表示に差し替える（views.update）。
     if (action.action_id?.startsWith("sticky_pr_done_")) {
-      const reviewId = action.value;
-      const channelId = payload.channel?.id;
-      if (!reviewId || !channelId) return c.json({ ok: true });
+      const ctx = resolveStickyPrActionContext(action, payload);
+      if (!ctx.reviewId || !ctx.channelId) return c.json({ ok: true });
+      const { reviewId, channelId } = ctx;
+      const viewId: string | undefined = payload.view?.id;
 
       c.executionCtx.waitUntil(
         (async () => {
@@ -508,6 +518,13 @@ interactionsRouter.post("/interactions", async (c) => {
               })
               .where(eq(prReviews.id, reviewId));
             await prReviewRepostByChannel(c.env, channelId);
+            if (viewId) {
+              await closeStickyPrModal(
+                c,
+                viewId,
+                "✅ レビュー依頼を完了にしました。",
+              );
+            }
           } catch (e) {
             console.error("Failed to handle sticky_pr_done:", e);
           }
@@ -523,9 +540,15 @@ interactionsRouter.post("/interactions", async (c) => {
     // （Web API `POST .../re-request` と同一処理）。board repost は
     // reRequestReview 内で実施されるため、ここでは二重 repost しない。
     // fail-soft: 失敗してもログのみ（既存 sticky_pr_* ハンドラと同じ作法）。
+    // board 直下の単体ボタンは BE PR1 で撤去。編集モーダル内アクションから
+    // 再利用する。reRequestReview 内で board repost まで実施されるため、
+    // ここでは二重 repost しない（既存挙動を維持）。modal 文脈なら完了後に
+    // モーダルを結果表示へ差し替える。
     if (action.action_id?.startsWith("sticky_pr_rereview_")) {
-      const reviewId = action.value;
-      if (!reviewId) return c.json({ ok: true });
+      const ctx = resolveStickyPrActionContext(action, payload);
+      if (!ctx.reviewId) return c.json({ ok: true });
+      const { reviewId } = ctx;
+      const viewId: string | undefined = payload.view?.id;
 
       c.executionCtx.waitUntil(
         (async () => {
@@ -546,6 +569,13 @@ interactionsRouter.post("/interactions", async (c) => {
               eventId: reviewRow.eventId,
               reviewId,
             });
+            if (viewId) {
+              await closeStickyPrModal(
+                c,
+                viewId,
+                "🔄 再レビュー依頼を送信しました。",
+              );
+            }
           } catch (e) {
             console.error("Failed to handle sticky_pr_rereview:", e);
           }
@@ -578,6 +608,153 @@ interactionsRouter.post("/interactions", async (c) => {
             await prReviewRepostByChannel(c.env, channelId);
           } catch (e) {
             console.error("Failed to handle sticky_pr_review:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_comment_<reviewId>: 「💬 コメント」ボタン。
+    // 入力モーダルは出さず、即:
+    //   1. status='changes_requested' に UPDATE（board で「🔧 修正依頼中」表示・
+    //      未完了として一覧に残る）
+    //   2. 依頼者へチャンネルでメンション通知（押下者=reviewer をメンション）
+    //   3. board repost
+    // LGTM には一切カウントしない（prReviewLgtms に触れない）。
+    // fail-soft: 既存 sticky_pr_* と同じ ack 作法。失敗はログのみ。
+    if (action.action_id?.startsWith("sticky_pr_comment_")) {
+      const reviewId = action.value;
+      const reviewerId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !reviewerId || !channelId) {
+        return c.json({ ok: true });
+      }
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const review = await d1
+              .select()
+              .from(prReviews)
+              .where(eq(prReviews.id, reviewId))
+              .get();
+            if (!review) {
+              console.warn(
+                `sticky_pr_comment: review ${reviewId} not found`,
+              );
+              return;
+            }
+            await d1
+              .update(prReviews)
+              .set({
+                status: "changes_requested",
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(prReviews.id, reviewId));
+
+            // 依頼者へチャンネルでメンション通知（fail-soft）
+            try {
+              const meeting = await d1
+                .select()
+                .from(meetings)
+                .where(eq(meetings.channelId, channelId))
+                .get();
+              if (meeting && meeting.workspaceId) {
+                const client = await createSlackClientForWorkspace(
+                  c.env,
+                  meeting.workspaceId,
+                );
+                if (client) {
+                  const message = `<@${review.requesterSlackId}> 🔧 <@${reviewerId}> さんが修正を希望しています: ${review.title}`;
+                  await client.postMessage(channelId, message);
+                }
+              }
+            } catch (e) {
+              console.warn(
+                "sticky_pr_comment notify failed (fail-soft):",
+                e,
+              );
+            }
+
+            await prReviewRepostByChannel(c.env, channelId);
+          } catch (e) {
+            console.error("Failed to handle sticky_pr_comment:", e);
+          }
+        })(),
+      );
+
+      return c.json({ ok: true });
+    }
+
+    // sticky_pr_edit_<reviewId>: 「✏️ 編集」ボタン → 編集モーダル open。
+    // trigger_id は 3 秒で失効するため waitUntil 内でも極力早く openView。
+    if (action.action_id?.startsWith("sticky_pr_edit_")) {
+      const reviewId = action.value;
+      const triggerId = payload.trigger_id;
+      const channelId = payload.channel?.id;
+      if (!reviewId || !triggerId || !channelId) {
+        return c.json({ ok: true });
+      }
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            const d1 = drizzle(c.env.DB);
+            const review = await d1
+              .select()
+              .from(prReviews)
+              .where(eq(prReviews.id, reviewId))
+              .get();
+            if (!review) {
+              console.warn(`sticky_pr_edit: review ${reviewId} not found`);
+              return;
+            }
+            const reviewerRows = await d1
+              .select()
+              .from(prReviewReviewers)
+              .where(eq(prReviewReviewers.reviewId, reviewId))
+              .all();
+            const meeting = await d1
+              .select()
+              .from(meetings)
+              .where(eq(meetings.channelId, channelId))
+              .get();
+            if (!meeting || !meeting.workspaceId) {
+              console.warn(
+                `sticky_pr_edit: meeting/workspace not found for channel ${channelId}`,
+              );
+              return;
+            }
+            const client = await createSlackClientForWorkspace(
+              c.env,
+              meeting.workspaceId,
+            );
+            if (!client) {
+              console.warn(
+                `sticky_pr_edit: no SlackClient for workspace ${meeting.workspaceId}`,
+              );
+              return;
+            }
+            const view = buildPRReviewEditModal({
+              reviewId,
+              eventId: review.eventId,
+              channelId,
+              title: review.title,
+              url: review.url,
+              description: review.description,
+              reviewerSlackIds: reviewerRows.map((r) => r.slackUserId),
+            });
+            const res = await client.openView(triggerId, view);
+            if (!res.ok) {
+              console.error(
+                "sticky_pr_edit views.open returned not ok:",
+                res,
+              );
+            }
+          } catch (e) {
+            console.error("Failed to open sticky_pr_edit modal:", e);
           }
         })(),
       );
@@ -740,8 +917,10 @@ interactionsRouter.post("/interactions", async (c) => {
         values.url_block?.url_input?.value || null;
       const description: string | null =
         values.desc_block?.desc_input?.value || null;
-      const reviewerSlackId: string | null =
-        values.reviewer_block?.reviewer_input?.selected_user || null;
+      // 複数レビュアー対応（multi_users_select）。最大 5 に切り詰める。
+      const reviewerSlackIds: string[] = (
+        values.reviewer_block?.reviewer_input?.selected_users || []
+      ).slice(0, PR_REVIEW_MAX_REVIEWERS);
 
       if (!title || !title.trim()) {
         return c.json({
@@ -766,8 +945,9 @@ interactionsRouter.post("/interactions", async (c) => {
             const reviewId = crypto.randomUUID();
             const now = new Date().toISOString();
             // レビュアー指定があれば即 in_review、無ければ open
-            const initialStatus = reviewerSlackId ? "in_review" : "open";
-            await d1.insert(prReviews).values({
+            const initialStatus =
+              reviewerSlackIds.length > 0 ? "in_review" : "open";
+            const reviewInsert = d1.insert(prReviews).values({
               id: reviewId,
               eventId,
               title,
@@ -775,10 +955,28 @@ interactionsRouter.post("/interactions", async (c) => {
               description,
               status: initialStatus,
               requesterSlackId,
-              reviewerSlackId,
+              // 旧 dead column。新コードは prReviewReviewers を正とするが
+              // 既存挙動互換のため先頭1人を入れておく（参照はしない）。
+              reviewerSlackId: reviewerSlackIds[0] ?? null,
               createdAt: now,
               updatedAt: now,
             });
+            const reviewerRows = reviewerSlackIds.map((slackUserId) => ({
+              id: crypto.randomUUID(),
+              reviewId,
+              slackUserId,
+              createdAt: now,
+            }));
+            // review 本体と reviewers を 1 トランザクションで INSERT
+            // （途中失敗で中途半端な状態を残さない）。
+            if (reviewerRows.length > 0) {
+              await d1.batch([
+                reviewInsert,
+                d1.insert(prReviewReviewers).values(reviewerRows),
+              ]);
+            } else {
+              await reviewInsert;
+            }
 
             if (channelId) {
               try {
@@ -794,7 +992,7 @@ interactionsRouter.post("/interactions", async (c) => {
               // fail-soft: 関数内 try/catch で握りつぶすため作成は失敗しない。
               await notifyReviewersAssigned(c.env, {
                 channelId,
-                reviewerSlackIds: reviewerSlackId ? [reviewerSlackId] : [],
+                reviewerSlackIds,
                 title,
                 url,
                 requesterSlackId,
@@ -811,10 +1009,170 @@ interactionsRouter.post("/interactions", async (c) => {
 
       return c.json({});
     }
+
+    // === Slack 完結 BE PR1: PR レビュー編集モーダルのサブミット ===
+    // title/description/url を UPDATE、prReviewReviewers を選択値で置換
+    // （全削除 → 挿入の idempotent。最大5に切り詰め）→ board repost。
+    if (view?.callback_id === "sticky_pr_review_edit_submit") {
+      let meta: {
+        reviewId?: string;
+        eventId?: string;
+        channelId?: string;
+      } = {};
+      try {
+        meta = JSON.parse(view.private_metadata || "{}");
+      } catch {
+        meta = {};
+      }
+      const reviewId = meta.reviewId;
+      const channelId = meta.channelId || "";
+
+      const values = view.state?.values || {};
+      const title: string | undefined =
+        values.title_block?.title_input?.value;
+      const url: string | null = values.url_block?.url_input?.value || null;
+      const description: string | null =
+        values.desc_block?.desc_input?.value || null;
+      const reviewerSlackIds: string[] = (
+        values.reviewer_block?.reviewer_input?.selected_users || []
+      ).slice(0, PR_REVIEW_MAX_REVIEWERS);
+
+      if (!title || !title.trim()) {
+        return c.json({
+          response_action: "errors",
+          errors: { title_block: "タイトルは必須です" },
+        });
+      }
+      if (!reviewId) {
+        return c.json({
+          response_action: "errors",
+          errors: {
+            title_block:
+              "レビュー情報が失われています。ボードの編集ボタンを押し直してください。",
+          },
+        });
+      }
+
+      c.executionCtx.waitUntil(
+        (async () => {
+          const d1 = drizzle(c.env.DB);
+          try {
+            await d1
+              .update(prReviews)
+              .set({
+                title,
+                url,
+                description,
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(prReviews.id, reviewId));
+
+            // reviewers を全削除 → 再挿入（idempotent 置換）。
+            const now = new Date().toISOString();
+            const reviewerRows = reviewerSlackIds.map((slackUserId) => ({
+              id: crypto.randomUUID(),
+              reviewId,
+              slackUserId,
+              createdAt: now,
+            }));
+            const delStmt = d1
+              .delete(prReviewReviewers)
+              .where(eq(prReviewReviewers.reviewId, reviewId));
+            if (reviewerRows.length > 0) {
+              await d1.batch([
+                delStmt,
+                d1.insert(prReviewReviewers).values(reviewerRows),
+              ]);
+            } else {
+              await delStmt;
+            }
+
+            if (channelId) {
+              await prReviewRepostByChannel(c.env, channelId);
+            }
+          } catch (e) {
+            console.error(
+              "Failed to edit pr review from sticky modal:",
+              e,
+            );
+          }
+        })(),
+      );
+
+      return c.json({});
+    }
   }
 
   return c.json({ ok: true });
 });
+
+// =============================================================================
+// Slack 完結 BE PR1: 編集モーダル内アクション共通ヘルパー
+// =============================================================================
+
+/**
+ * sticky_pr_done_* / sticky_pr_rereview_* の文脈解決。
+ *
+ * - board 直下ボタン（旧仕様。BE PR1 で撤去済みだが後方互換で残す）:
+ *   action.value = reviewId（プレーン文字列）、channelId は payload.channel.id
+ * - 編集モーダル内ボタン: action.value = JSON({reviewId, channelId})。
+ *   モーダル文脈は payload.channel が無いため value から channelId を取る。
+ */
+function resolveStickyPrActionContext(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  action: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): { reviewId: string | null; channelId: string | null } {
+  const raw: string | undefined = action.value;
+  if (raw && raw.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw) as {
+        reviewId?: string;
+        channelId?: string;
+      };
+      return {
+        reviewId: parsed.reviewId || null,
+        channelId:
+          parsed.channelId || payload.channel?.id || null,
+      };
+    } catch {
+      // fallthrough to plain-string handling
+    }
+  }
+  return {
+    reviewId: raw || null,
+    channelId: payload.channel?.id || null,
+  };
+}
+
+/**
+ * 編集モーダル内アクション完了後にモーダルを結果表示へ差し替える。
+ * fail-soft: workspace / view 解決失敗・API 失敗でも warn のみ。
+ */
+async function closeStickyPrModal(
+  c: Parameters<typeof getSlackClient>[0],
+  viewId: string,
+  message: string,
+): Promise<void> {
+  try {
+    const client = getSlackClient(c);
+    await client.updateView(viewId, {
+      type: "modal",
+      callback_id: "sticky_pr_review_result",
+      title: { type: "plain_text", text: "完了" },
+      close: { type: "plain_text", text: "閉じる" },
+      blocks: [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: message },
+        },
+      ],
+    });
+  } catch (e) {
+    console.warn("closeStickyPrModal failed (fail-soft):", e);
+  }
+}
 
 // =============================================================================
 // Sprint 27: Gmail watcher 自動返信ハンドラ
