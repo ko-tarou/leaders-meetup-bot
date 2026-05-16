@@ -16,6 +16,7 @@ import {
   readRoleAutoAssignConfig,
   resolveSlackUserId,
   applyRoleAssignment,
+  revokeRoleAssignment,
 } from "../../services/role-auto-assign";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
@@ -371,6 +372,25 @@ async function findParticipationForm(
   return { form };
 }
 
+// admin helper: 当該 event の member_application action.config を取得する
+// (ロール自動割当 config 参照用。不在/取得失敗は null)。
+async function getMemberApplicationConfig(
+  db: ReturnType<typeof drizzle>,
+  eventId: string,
+): Promise<string | null> {
+  const action = await db
+    .select()
+    .from(eventActions)
+    .where(
+      and(
+        eq(eventActions.eventId, eventId),
+        eq(eventActions.actionType, "member_application"),
+      ),
+    )
+    .get();
+  return action?.config ?? null;
+}
+
 const VALID_STATUS = ["submitted", "rejected"];
 
 // ---------------------------------------------------------------------------
@@ -416,10 +436,66 @@ participationRouter.patch(
     const found = await findParticipationForm(db, eventId, id);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
+    // status DB 更新は従来どおり確実に行う (ロール操作はその後の付加処理)。
     await db
       .update(participationForms)
       .set({ status: body.status })
       .where(eq(participationForms.id, id));
+
+    // ロール剥奪 / 再付与 (fail-soft)。ロール操作失敗で status 更新を
+    // 失敗させない。config 無効ならスキップ (status 更新自体は成功)。
+    try {
+      const config = await getMemberApplicationConfig(db, eventId);
+      const cfg = readRoleAutoAssignConfig(config);
+      const form = found.form;
+      if (cfg && cfg.enabled && form.slackUserId) {
+        if (body.status === "rejected") {
+          // 却下: 保存済み assignedRoleIds を剥奪し実績を '[]' にクリア
+          // (再付与時の二重記録防止)。
+          let assigned: unknown = [];
+          try {
+            assigned = JSON.parse(form.assignedRoleIds);
+          } catch {
+            assigned = [];
+          }
+          const ids = Array.isArray(assigned)
+            ? assigned.filter((x): x is string => typeof x === "string")
+            : [];
+          if (ids.length > 0) {
+            await revokeRoleAssignment(c.env, {
+              roleManagementActionId: cfg.roleManagementActionId,
+              slackUserId: form.slackUserId,
+              assignedRoleIds: ids,
+            });
+            await db
+              .update(participationForms)
+              .set({ assignedRoleIds: "[]" })
+              .where(eq(participationForms.id, id));
+          }
+        } else if (body.status === "submitted") {
+          // 却下解除 (復帰): 解決済みなら再付与する。
+          const { assignedRoleIds } = await applyRoleAssignment(c.env, {
+            memberApplicationActionConfig: config,
+            form: {
+              id,
+              slackUserId: form.slackUserId,
+              desiredActivity: form.desiredActivity,
+              devRoles: form.devRoles,
+              status: "submitted",
+            },
+          });
+          if (assignedRoleIds.length > 0) {
+            await db
+              .update(participationForms)
+              .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
+              .where(eq(participationForms.id, id));
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[participation] role status hook error:", e);
+    }
+
     return c.json({ ok: true, status: body.status });
   },
 );
