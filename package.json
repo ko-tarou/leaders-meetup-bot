@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply leaders-meetup-bot --local",
-    "db:migrate:remote": "wrangler d1 migrations apply leaders-meetup-bot --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply leaders-meetup-bot --remote",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -20,13 +23,16 @@
     "react-router-dom": "^7.14.2"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.6",
     "@cloudflare/workers-types": "latest",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "latest",
+    "@vitest/coverage-v8": "^4.1.6",
     "drizzle-kit": "^0.31.10",
     "typescript": "latest",
     "vite": "latest",
+    "vitest": "^4.1.6",
     "wrangler": "latest"
   }
 }
