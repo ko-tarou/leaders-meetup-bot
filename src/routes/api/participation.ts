@@ -342,10 +342,18 @@ participationRouter.get("/orgs/:eventId/participation-forms", async (c) => {
       } catch {
         parsed = [];
       }
-      // status は ...r で含まれる (migration 0046)。明示変換不要。
+      let assigned: unknown = [];
+      try {
+        assigned = JSON.parse(r.assignedRoleIds);
+      } catch {
+        assigned = [];
+      }
+      // status / slackUserId は ...r で含まれる (migration 0046/0047)。
+      // assignedRoleIds は devRoles 同様 JSON.parse して配列で返す。
       return {
         ...r,
         devRoles: Array.isArray(parsed) ? parsed : [],
+        assignedRoleIds: Array.isArray(assigned) ? assigned : [],
       };
     }),
   );
