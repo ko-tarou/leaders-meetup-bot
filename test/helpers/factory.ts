@@ -24,6 +24,7 @@ import {
   slackRoleMembers,
   interviewers,
   interviewerSlots,
+  participationForms,
 } from "../../src/db/schema";
 
 let seq = 0;
@@ -220,6 +221,36 @@ export async function makeEncryptedWorkspace(
   } satisfies typeof workspaces.$inferInsert;
   await db.insert(workspaces).values(row);
   return { row, botPlain, secretPlain };
+}
+
+/**
+ * 006-0-3: 参加届 (participation_forms) を seed する。
+ *
+ * status は migration 0046 で 'submitted' default、slackUserId/assignedRoleIds は
+ * migration 0047 で追加 (default null / '[]')。characterization 用に
+ * 必須カラムを決定的に埋める。devRoles/assignedRoleIds は JSON 文字列で渡す。
+ */
+export async function makeParticipationForm(
+  eventId: string,
+  over: Partial<typeof participationForms.$inferInsert> = {},
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("pf"),
+    eventId,
+    applicationId: null,
+    name: "参加 太郎",
+    email: "participant@example.com",
+    hasAllergy: 0,
+    devRoles: "[]",
+    status: "submitted",
+    assignedRoleIds: "[]",
+    submittedAt: NOW,
+    createdAt: NOW,
+    ...over,
+  } satisfies typeof participationForms.$inferInsert;
+  await db.insert(participationForms).values(row);
+  return row;
 }
 
 export async function makeInterviewer(
