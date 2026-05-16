@@ -39,7 +39,7 @@ const DEFAULT_REMINDERS: ReminderItem[] = [
 const INITIAL_CONFIG: AutoScheduleConfig = {
   enabled: true,
   frequency: "monthly",
-  candidateRule: { type: "weekday", weekday: 6, weeks: [2, 3, 4], monthOffset: 0 },
+  candidateRule: { type: "weekday", weekdays: [6], weeks: [2, 3, 4], monthOffset: 0 },
   pollStartDay: 1,
   pollStartTime: "00:00",
   pollCloseDay: 10,
@@ -53,6 +53,29 @@ const INITIAL_CONFIG: AutoScheduleConfig = {
   messageTemplate: "",
 };
 
+/**
+ * GET から受け取った candidateRule を state 用に正規化する。
+ * monthly(legacy) は weekday(単数) のみで返ることがあるため weekdays[] に寄せる。
+ * weekdays も weekday も無い不正データは weekdays: [] (UI で未選択表示)。
+ */
+function normalizeCandidateRule(
+  rule: AutoScheduleCandidateRule,
+): AutoScheduleCandidateRule {
+  if (rule.type !== "weekday") return rule;
+  const weekdays =
+    Array.isArray(rule.weekdays) && rule.weekdays.length > 0
+      ? rule.weekdays
+      : typeof rule.weekday === "number"
+        ? [rule.weekday]
+        : [];
+  return {
+    type: "weekday",
+    weekdays,
+    weeks: rule.weeks ?? [],
+    monthOffset: rule.monthOffset ?? 0,
+  };
+}
+
 /** monthly 既存挙動用: candidateRule.type === "weekday" を取り出す。InstantSendPanel が利用。 */
 function extractMonthlyRule(rule: AutoScheduleCandidateRule): {
   weekday: number;
@@ -61,7 +84,8 @@ function extractMonthlyRule(rule: AutoScheduleCandidateRule): {
 } {
   if (rule.type === "weekday") {
     return {
-      weekday: rule.weekday,
+      // InstantSendPanel は単一 weekday 前提のため先頭の曜日を代表値として渡す
+      weekday: rule.weekdays[0] ?? rule.weekday ?? 6,
       weeks: rule.weeks,
       monthOffset: rule.monthOffset ?? 0,
     };
@@ -100,8 +124,9 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
         setSchedule(data);
         // frequency 未指定の既存行は monthly として扱う。
         const freq = data.frequency ?? "monthly";
-        const candidate: AutoScheduleCandidateRule =
-          data.candidateRule ?? INITIAL_CONFIG.candidateRule;
+        const candidate: AutoScheduleCandidateRule = normalizeCandidateRule(
+          data.candidateRule ?? INITIAL_CONFIG.candidateRule,
+        );
         setConfig({
           enabled: data.enabled === 1,
           frequency: freq,
@@ -149,6 +174,15 @@ export function ScheduleSection({ meetingId, onChange, panels }: Props) {
   }, [load]);
 
   const handleSave = async () => {
+    // monthly は候補曜日を最低1つ選択必須 (BE validation も弾くが UX のため FE でも)
+    if (
+      config.frequency === "monthly" &&
+      config.candidateRule.type === "weekday" &&
+      config.candidateRule.weekdays.length === 0
+    ) {
+      toast.error("候補日の曜日を1つ以上選択してください");
+      return;
+    }
     setSaving(true);
     // ローカル ID は backend に送らない
     const normalized: ReminderItem[] = reminders.map((r) => ({

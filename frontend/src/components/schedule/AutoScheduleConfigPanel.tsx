@@ -285,11 +285,24 @@ function MonthlyFields({ value, patch }: SubProps) {
   const rule =
     value.candidateRule.type === "weekday"
       ? value.candidateRule
-      : { type: "weekday" as const, weekday: 6, weeks: [2, 3, 4], monthOffset: 0 };
+      : {
+          type: "weekday" as const,
+          weekdays: [6],
+          weeks: [2, 3, 4],
+          monthOffset: 0,
+        };
   const monthOffset = rule.monthOffset ?? 0;
+  const weekdays = rule.weekdays;
 
   const patchRule = (next: Partial<typeof rule>) => {
     patch({ candidateRule: { ...rule, ...next } });
+  };
+
+  const toggleWeekday = (d: number) => {
+    const next = weekdays.includes(d)
+      ? weekdays.filter((x) => x !== d)
+      : [...weekdays, d].sort((a, b) => a - b);
+    patchRule({ weekdays: next });
   };
 
   const toggleWeek = (w: number) => {
@@ -303,17 +316,30 @@ function MonthlyFields({ value, patch }: SubProps) {
     <>
       <div style={{ marginBottom: 12 }}>
         <label style={labelStyle}>候補日の曜日</label>
-        <select
-          value={rule.weekday}
-          onChange={(e) => patchRule({ weekday: Number(e.target.value) })}
-          style={inputStyle}
-        >
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {WEEKDAYS.map((name, i) => (
-            <option key={i} value={i}>
-              {name}曜日
-            </option>
+            <button
+              key={i}
+              onClick={() => toggleWeekday(i)}
+              type="button"
+              style={{
+                padding: "8px 12px",
+                border: `1px solid ${colors.borderStrong}`,
+                borderRadius: 4,
+                cursor: "pointer",
+                background: weekdays.includes(i)
+                  ? colors.primary
+                  : colors.background,
+                color: weekdays.includes(i) ? colors.textInverse : colors.text,
+              }}
+            >
+              {name}
+            </button>
           ))}
-        </select>
+        </div>
+        <p style={{ margin: "4px 0 0", color: colors.textSecondary, fontSize: 12 }}>
+          複数選択できます。選択した各曜日 × 各週の組合せが候補日になります
+        </p>
       </div>
 
       <div style={{ marginBottom: 12 }}>
