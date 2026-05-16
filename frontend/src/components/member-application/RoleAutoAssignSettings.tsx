@@ -36,7 +36,14 @@ type Props = {
   }) => void;
 };
 
-/** role 複数選択チェックボックス群 (マッピング設定で流用)。 */
+/**
+ * role 複数選択チェックボックス群 (マッピング設定で流用)。
+ *
+ * 親子ゲーティング: 子ロール (parentRoleId != null) は、その親ロールが
+ * 同じ mapping の selected に含まれていなければ disabled。親にチェックを
+ * 付けると子の disabled が外れる (selected 変化で再描画され自動反映)。
+ * 親解除時の子孫除去は呼び出し側の toggle ハンドラが担う。
+ */
 function RoleMultiSelect({
   roles,
   selected,
@@ -49,18 +56,50 @@ function RoleMultiSelect({
   if (roles.length === 0) {
     return <span style={s.mapMuted}>ロール未登録</span>;
   }
+  const nameById = new Map(roles.map((r) => [r.id, r.name]));
+  const hasGatedChild = roles.some(
+    (r) => r.parentRoleId != null && !selected.includes(r.parentRoleId),
+  );
   return (
     <div style={s.roleChecks}>
-      {roles.map((r) => (
-        <label key={r.id} style={s.roleCheck}>
-          <input
-            type="checkbox"
-            checked={selected.includes(r.id)}
-            onChange={() => onToggle(r.id)}
-          />
-          <span>{r.name}</span>
-        </label>
-      ))}
+      <div style={s.roleCheckList}>
+        {roles.map((r) => {
+          const isChild = r.parentRoleId != null;
+          const gated = isChild && !selected.includes(r.parentRoleId);
+          const parentName =
+            r.parentRoleId != null
+              ? (nameById.get(r.parentRoleId) ?? r.parentRoleId)
+              : "";
+          return (
+            <label
+              key={r.id}
+              style={{
+                ...s.roleCheck,
+                ...(isChild ? s.roleCheckChild : null),
+                ...(gated ? s.roleCheckGated : null),
+              }}
+              title={
+                gated
+                  ? `親ロール「${parentName}」を選択すると有効化されます`
+                  : undefined
+              }
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(r.id)}
+                disabled={gated}
+                onChange={() => onToggle(r.id)}
+              />
+              <span>{r.name}</span>
+            </label>
+          );
+        })}
+      </div>
+      {hasGatedChild && (
+        <span style={s.roleCheckHint}>
+          子ロールは親ロールを選択すると有効化されます
+        </span>
+      )}
     </div>
   );
 }
@@ -170,23 +209,30 @@ export function RoleAutoAssignSettings({
     return "";
   }, [rmActions, rmActionId]);
 
+  // selected 配列を toggle する。OFF にする role が他の選択中 role の親なら
+  // (parentRoleId === roleId)、その子も同時に除去して「親未選択で子だけ
+  // 選択中」の不正状態を防ぐ (現状 2 階層前提なので直接の子だけ見れば十分)。
+  const toggleInList = (cur: string[], roleId: string): string[] => {
+    if (!cur.includes(roleId)) return [...cur, roleId];
+    const childIds = new Set(
+      (roles ?? [])
+        .filter((r) => r.parentRoleId === roleId)
+        .map((r) => r.id),
+    );
+    return cur.filter((x) => x !== roleId && !childIds.has(x));
+  };
+
   const toggleActivity = (k: ActivityKey, roleId: string) =>
-    setCfg((c) => {
-      const cur = c.activity[k];
-      const next = cur.includes(roleId)
-        ? cur.filter((x) => x !== roleId)
-        : [...cur, roleId];
-      return { ...c, activity: { ...c.activity, [k]: next } };
-    });
+    setCfg((c) => ({
+      ...c,
+      activity: { ...c.activity, [k]: toggleInList(c.activity[k], roleId) },
+    }));
 
   const toggleDevRole = (k: DevRoleKey, roleId: string) =>
-    setCfg((c) => {
-      const cur = c.devRole[k];
-      const next = cur.includes(roleId)
-        ? cur.filter((x) => x !== roleId)
-        : [...cur, roleId];
-      return { ...c, devRole: { ...c.devRole, [k]: next } };
-    });
+    setCfg((c) => ({
+      ...c,
+      devRole: { ...c.devRole, [k]: toggleInList(c.devRole[k], roleId) },
+    }));
 
   const handleSaveCfg = async () => {
     // role_management が 1 件だけならその id を確定的に採用する。
@@ -442,13 +488,26 @@ const s: Record<string, CSSProperties> = {
     minWidth: 110,
     paddingTop: "0.2rem",
   },
-  roleChecks: { display: "flex", flexWrap: "wrap", gap: "0.5rem", flex: 1 },
+  roleChecks: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.25rem",
+    flex: 1,
+  },
+  roleCheckList: { display: "flex", flexWrap: "wrap", gap: "0.5rem" },
   roleCheck: {
     display: "inline-flex",
     alignItems: "center",
     gap: "0.25rem",
     fontSize: "0.8rem",
   },
+  roleCheckChild: { marginLeft: "1rem" },
+  roleCheckGated: {
+    opacity: 0.45,
+    cursor: "not-allowed",
+    color: colors.textMuted,
+  },
+  roleCheckHint: { fontSize: "0.7rem", color: colors.textSecondary },
   mapWarn: {
     padding: "0.5rem 0.75rem",
     background: colors.warningSubtle,
