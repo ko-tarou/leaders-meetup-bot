@@ -11,9 +11,6 @@ import {
 } from "../../db/schema";
 import { createSlackClientForWorkspace } from "../../services/workspace";
 import { prReviewRepostByChannel } from "../../services/sticky-pr-review-board";
-import { importOpenPRsByActionId } from "../../services/github-pr-import";
-import { repostPRReviewForEvent } from "../../services/github-webhook";
-import { eventActions } from "../../db/schema";
 
 export const prReviewsRouter = new Hono<{ Bindings: Env }>();
 
@@ -396,59 +393,5 @@ prReviewsRouter.post(
     }
 
     return c.json({ ok: true, newRound });
-  },
-);
-
-// === Open PR 取り込み (005-github-import) ===
-// pr_review_list action の config.githubRepos に設定された全 repo の open PR
-// を pr_reviews に取り込む。webhook は「これから起きるイベント」を反映するが、
-// 設定直後の repo には既に進行中の PR があるケースが多いので、それを 1 ボタン
-// で同期する。
-//
-// fail-soft: 1 repo の失敗で他 repo を止めない。結果は results[] に repo 別
-// で詰めて返し、FE 側でエラーを表示する。
-// repost は best-effort (失敗しても 200 OK)。
-prReviewsRouter.post(
-  "/orgs/:eventId/actions/:actionId/import-github-prs",
-  async (c) => {
-    const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
-
-    const results = await importOpenPRsByActionId(c.env, eventId, actionId);
-    if (results === null) {
-      // action が無い、または actionType が pr_review_list 以外
-      const db = drizzle(c.env.DB);
-      const exists = await db
-        .select()
-        .from(eventActions)
-        .where(
-          and(eq(eventActions.id, actionId), eq(eventActions.eventId, eventId)),
-        )
-        .get();
-      if (!exists) return c.json({ error: "action_not_found" }, 404);
-      return c.json({ error: "wrong_action_type" }, 400);
-    }
-
-    // 何かしら import / update された場合のみ sticky board を再投稿。
-    const totalImported = results.reduce((s, r) => s + r.prsImported, 0);
-    const totalUpdated = results.reduce((s, r) => s + r.prsUpdated, 0);
-    const totalReviewers = results.reduce((s, r) => s + r.reviewersAdded, 0);
-    const totalLgtms = results.reduce((s, r) => s + r.lgtmsAdded, 0);
-    if (totalImported + totalUpdated + totalReviewers + totalLgtms > 0) {
-      try {
-        await repostPRReviewForEvent(c.env, eventId);
-      } catch (e) {
-        console.warn("[pr-review-import] repost failed (fail-soft):", e);
-      }
-    }
-
-    return c.json({
-      ok: true,
-      results,
-      totalImported,
-      totalUpdated,
-      totalReviewers,
-      totalLgtms,
-    });
   },
 );
