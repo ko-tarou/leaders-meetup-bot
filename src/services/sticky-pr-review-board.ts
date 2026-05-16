@@ -273,6 +273,27 @@ export async function buildPRReviewBoardBlocks(
         style: "primary",
       });
     }
+    // Slack完結 PR3: 完了済み (merged) の PR にだけ「🔄 再レビュー依頼」を出す。
+    // open/in_review 中はまだレビュー中なので再依頼の意味が薄い。完了した
+    // ものを再度見てもらうのが再レビュー。confirm で LGTM リセットの誤爆を防ぐ。
+    // （既定の board は merged を非表示にするため、showClosed=true の時のみ表示される）
+    if (r.status === "merged") {
+      buttons.push({
+        type: "button",
+        action_id: `sticky_pr_rereview_${r.id}`,
+        text: { type: "plain_text", text: "🔄 再レビュー依頼" },
+        value: r.id,
+        confirm: {
+          title: { type: "plain_text", text: "再レビュー依頼" },
+          text: {
+            type: "mrkdwn",
+            text: "LGTM をリセットして再レビュー依頼します。よろしいですか？",
+          },
+          confirm: { type: "plain_text", text: "依頼する" },
+          deny: { type: "plain_text", text: "キャンセル" },
+        },
+      });
+    }
     if (buttons.length > 0) {
       blocks.push({ type: "actions", elements: buttons });
     }
