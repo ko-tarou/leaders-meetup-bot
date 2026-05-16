@@ -111,8 +111,19 @@ export function RoleAutoAssignSettings({
 }: Props) {
   const toast = useToast();
 
-  // マッピング設定 state (config 由来の確定値を編集 draft として扱う)
-  const initialCfg = useMemo(() => readRoleAutoAssign(action), [action]);
+  // マッピング設定 state (config 由来の確定値を編集 draft として扱う)。
+  //
+  // 依存は action オブジェクト参照ではなく action.config 文字列にする。
+  // 親 (ParticipationFormsTab / ActionDetailPage) の再レンダで action prop の
+  // 参照だけが変わり中身 (config) が不変なケース (onResolved→親 setState 連鎖
+  // 等) でも initialCfg を再計算しないため、下の setCfg(initialCfg) effect が
+  // 編集中の cfg を保存前に破棄しなくなる。保存などで config 文字列が実際に
+  // 変わったときだけ再初期化が走り、最新の保存内容を正しく反映する。
+  const initialCfg = useMemo(
+    () => readRoleAutoAssign(action),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [action.config],
+  );
   const [cfg, setCfg] = useState<RoleAutoAssignConfig>(initialCfg);
   const [showSettings, setShowSettings] = useState(false);
   const [savingCfg, setSavingCfg] = useState(false);
