@@ -216,12 +216,166 @@ export function buildPRReviewAddModal(
         type: "input",
         block_id: "reviewer_block",
         optional: true,
-        label: { type: "plain_text", text: "レビュアー（任意）" },
+        label: { type: "plain_text", text: "レビュアー（任意・最大5人）" },
         element: {
-          type: "users_select",
+          type: "multi_users_select",
           action_id: "reviewer_input",
+          max_selected_items: PR_REVIEW_MAX_REVIEWERS,
           placeholder: { type: "plain_text", text: "レビュアーを選択" },
         },
+      },
+    ],
+  };
+}
+
+/**
+ * PR レビューに割り当てられるレビュアーの上限。
+ * Slack の multi_users_select の max_selected_items と
+ * view_submission の検証（切り詰め）で共通に使う。
+ */
+export const PR_REVIEW_MAX_REVIEWERS = 5;
+
+/**
+ * ADR-0008 / Slack 完結 BE PR1: PR レビュー sticky board の「✏️ 編集」
+ * ボタンから開く編集モーダル view。
+ *
+ * callback_id: sticky_pr_review_edit_submit
+ * private_metadata: { reviewId, eventId, channelId } を JSON 化
+ *
+ * - title: 必須（現値をプリフィル）
+ * - description: 任意（multiline, 現値をプリフィル）
+ * - url: 任意（現値をプリフィル）
+ * - reviewers: 任意（multi_users_select, 最大5, 現レビュアーをプリフィル）
+ *
+ * さらにモーダル本体に「強制完了」「🔄 再レビュー依頼」ボタンを置く。
+ * これらは board から撤去したアクションで、編集モーダル内 block_actions
+ * として既存ハンドラ（sticky_pr_done_* / sticky_pr_rereview_*）を再利用する。
+ * モーダル内文脈では payload.channel が無いため value に
+ * {reviewId, channelId} JSON を載せてハンドラ側で文脈を解決する。
+ */
+export type PRReviewEditModalMetadata = {
+  reviewId: string;
+  eventId: string;
+  channelId: string;
+};
+
+export function buildPRReviewEditModal(params: {
+  reviewId: string;
+  eventId: string;
+  channelId: string;
+  title: string;
+  url?: string | null;
+  description?: string | null;
+  reviewerSlackIds: string[];
+}) {
+  const meta: PRReviewEditModalMetadata = {
+    reviewId: params.reviewId,
+    eventId: params.eventId,
+    channelId: params.channelId,
+  };
+  // モーダル内アクションは payload.channel が null なので、文脈
+  // (reviewId / channelId) を value JSON に載せて渡す。
+  const actionValue = JSON.stringify({
+    reviewId: params.reviewId,
+    channelId: params.channelId,
+  });
+  const reviewers = params.reviewerSlackIds.slice(0, PR_REVIEW_MAX_REVIEWERS);
+  return {
+    type: "modal",
+    callback_id: "sticky_pr_review_edit_submit",
+    private_metadata: JSON.stringify(meta),
+    title: { type: "plain_text", text: "レビュー依頼を編集" },
+    submit: { type: "plain_text", text: "保存" },
+    close: { type: "plain_text", text: "閉じる" },
+    blocks: [
+      {
+        type: "input",
+        block_id: "title_block",
+        label: { type: "plain_text", text: "タイトル" },
+        element: {
+          type: "plain_text_input",
+          action_id: "title_input",
+          max_length: 200,
+          initial_value: params.title,
+        },
+      },
+      {
+        type: "input",
+        block_id: "desc_block",
+        optional: true,
+        label: { type: "plain_text", text: "詳細（説明）" },
+        element: {
+          type: "plain_text_input",
+          action_id: "desc_input",
+          multiline: true,
+          max_length: 2000,
+          ...(params.description
+            ? { initial_value: params.description }
+            : {}),
+        },
+      },
+      {
+        type: "input",
+        block_id: "url_block",
+        optional: true,
+        label: { type: "plain_text", text: "参考リンク" },
+        element: {
+          type: "plain_text_input",
+          action_id: "url_input",
+          ...(params.url ? { initial_value: params.url } : {}),
+        },
+      },
+      {
+        type: "input",
+        block_id: "reviewer_block",
+        optional: true,
+        label: { type: "plain_text", text: "レビュアー（最大5人）" },
+        element: {
+          type: "multi_users_select",
+          action_id: "reviewer_input",
+          max_selected_items: PR_REVIEW_MAX_REVIEWERS,
+          placeholder: { type: "plain_text", text: "レビュアーを選択" },
+          ...(reviewers.length > 0
+            ? { initial_users: reviewers }
+            : {}),
+        },
+      },
+      { type: "divider" },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            action_id: `sticky_pr_done_${params.reviewId}`,
+            text: { type: "plain_text", text: "✓ 強制完了" },
+            value: actionValue,
+            confirm: {
+              title: { type: "plain_text", text: "強制完了" },
+              text: {
+                type: "mrkdwn",
+                text: "このレビュー依頼を完了（マージ済）にします。よろしいですか？",
+              },
+              confirm: { type: "plain_text", text: "完了にする" },
+              deny: { type: "plain_text", text: "キャンセル" },
+            },
+          },
+          {
+            type: "button",
+            action_id: `sticky_pr_rereview_${params.reviewId}`,
+            text: { type: "plain_text", text: "🔄 再レビュー依頼" },
+            value: actionValue,
+            style: "danger",
+            confirm: {
+              title: { type: "plain_text", text: "再レビュー依頼" },
+              text: {
+                type: "mrkdwn",
+                text: "LGTM をリセットして再レビュー依頼します。よろしいですか？",
+              },
+              confirm: { type: "plain_text", text: "依頼する" },
+              deny: { type: "plain_text", text: "キャンセル" },
+            },
+          },
+        ],
       },
     ],
   };
