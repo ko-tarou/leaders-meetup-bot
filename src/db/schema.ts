@@ -211,6 +211,10 @@ export const participationForms = sqliteTable(
     devRoles: text("dev_roles").notNull().default("[]"),
     // 'submitted' | 'rejected'。Phase2 ロール剥奪判定用 (migration 0046)
     status: text("status").notNull().default("submitted"),
+    // 解決済み Slack ユーザー ID。null = 未解決。Phase2 自動割当用 (migration 0047)
+    slackUserId: text("slack_user_id"),
+    // 付与済みロール ID JSON 配列。却下時剥奪用 (migration 0047)
+    assignedRoleIds: text("assigned_role_ids").notNull().default("[]"),
     submittedAt: text("submitted_at").notNull(),
     createdAt: text("created_at").notNull(),
   },
