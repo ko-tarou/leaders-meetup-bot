@@ -686,10 +686,10 @@ export const appSettings = sqliteTable("app_settings", {
 
 // 005-github-webhook: GitHub username → Slack user id のマッピング (migration 0042)
 //
-// GitHub の pull_request / pull_request_review webhook を受信したとき、
-// payload に含まれる GitHub username を Slack user id に解決するための表。
-// admin UI (WorkspacesPage の「GitHub 連携」) から全件取得/全件保存する toml-table
-// 形式で運用する。github_username を PK にすることで重複を物理的に防ぐ。
+// [DEPRECATED] PR レビューの GitHub 連携 (webhook / open PR 取込) は撤去済み
+// (Slack 中心の再設計 PR1)。このテーブル定義は破壊的 migration を避けるため
+// 残置しているが、参照するコードは存在しない。再連携の予定が無ければ将来の
+// migration で DROP を検討する。
 export const githubUserMappings = sqliteTable(
   "github_user_mappings",
   {

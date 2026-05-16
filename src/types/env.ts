@@ -41,10 +41,4 @@ export type Env = {
   // 未設定の場合、/api/feedback/ai-chat は 500 を返す。
   // `npx wrangler secret put GEMINI_API_KEY` で設定済。
   GEMINI_API_KEY: string;
-
-  // 005-github-webhook: GitHub webhook の HMAC-SHA256 検証用 shared secret。
-  // GitHub 側 (repo Settings → Webhooks) で同じ値を Secret 欄に登録する。
-  // 未設定の場合 /api/github-webhook は 503 を返して webhook を一時無効化する。
-  // `wrangler secret put GITHUB_WEBHOOK_SECRET` で設定する。
-  GITHUB_WEBHOOK_SECRET: string;
 };
