@@ -50,7 +50,7 @@ export type ParticipationFormLike = {
 };
 
 /**
- * デフォルト通知文。messageTemplate 未設定 or 空文字のときに使う。
+ * デフォルト通知文 (参加届提出)。messageTemplate 未設定 or 空文字のときに使う。
  */
 export const DEFAULT_PARTICIPATION_TEMPLATE = `{mentions} 📋 参加届が提出されました
 名前: {name}
@@ -59,34 +59,72 @@ Slack表示名: {slackName}
 希望活動: {desiredActivity}`;
 
 /**
- * action.config を parse して participationNotifications 設定を取り出す。
+ * デフォルト通知文 (Slack 表示名の解決失敗 = 未解決)。
+ * vars は参加届通知と同じ集合のみ使う (新規 placeholder を増やさない)。
+ */
+export const DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE = `{mentions} ⚠️ 参加届の Slack 表示名が見つかりませんでした
+名前: {name}
+Slack表示名: {slackName}
+メール: {email}
+希望活動: {desiredActivity}
+手動でのロール紐付けが必要です（参加届タブ）`;
+
+/** generic 通知が参照する action.config の通知設定キー。 */
+type ParticipationNotificationConfigKey =
+  | "participationNotifications"
+  | "participationUnresolvedNotifications";
+
+/**
+ * action.config を parse して指定キーの通知設定を取り出す。
  * 不正な JSON / 欠損は undefined を返す (= 通知無効扱い)。
  * readNotificationsConfig が parsed.notifications を返すのと対。
  */
-export function readParticipationNotificationsConfig(
+function readParticipationNotificationConfigByKey(
   rawConfig: string | null | undefined,
+  configKey: ParticipationNotificationConfigKey,
 ): ParticipationNotificationConfig | undefined {
   if (!rawConfig) return undefined;
   try {
-    const parsed = JSON.parse(rawConfig) as {
-      participationNotifications?: ParticipationNotificationConfig;
-    };
-    return parsed.participationNotifications;
+    const parsed = JSON.parse(rawConfig) as Partial<
+      Record<ParticipationNotificationConfigKey, ParticipationNotificationConfig>
+    >;
+    return parsed[configKey];
   } catch {
     return undefined;
   }
 }
 
 /**
- * 参加届提出成功後に呼ばれる通知送信処理。
- * 通知失敗時もログ出力のみで例外は throw しない (fail-soft)。
+ * action.config を parse して participationNotifications 設定を取り出す。
+ * 既存 export の後方互換維持 (シグネチャ・挙動不変)。
  */
-export async function sendParticipationNotification(
+export function readParticipationNotificationsConfig(
+  rawConfig: string | null | undefined,
+): ParticipationNotificationConfig | undefined {
+  return readParticipationNotificationConfigByKey(
+    rawConfig,
+    "participationNotifications",
+  );
+}
+
+/**
+ * 通知送信の汎用実装。configKey とデフォルトテンプレを引数で受け、
+ * enabled/workspace/channel ガード・vars 構築・renderTemplate・postMessage を
+ * 共通化する。通知失敗時もログ出力のみで例外は throw しない (fail-soft)。
+ */
+async function sendParticipationNotificationGeneric(
   env: Env,
   actionConfig: string | null | undefined,
   form: ParticipationFormLike,
+  opts: {
+    configKey: ParticipationNotificationConfigKey;
+    defaultTemplate: string;
+  },
 ): Promise<void> {
-  const notif = readParticipationNotificationsConfig(actionConfig);
+  const notif = readParticipationNotificationConfigByKey(
+    actionConfig,
+    opts.configKey,
+  );
   if (!notif?.enabled) return;
   if (!notif.workspaceId || !notif.channelId) return;
 
@@ -126,7 +164,7 @@ export async function sendParticipationNotification(
 
     const template = notif.messageTemplate?.trim()
       ? notif.messageTemplate
-      : DEFAULT_PARTICIPATION_TEMPLATE;
+      : opts.defaultTemplate;
     const text = renderTemplate(template, vars).trim();
 
     const res = await slack.postMessage(notif.channelId, text);
@@ -137,4 +175,34 @@ export async function sendParticipationNotification(
     console.error("[participation-notification] unexpected error:", e);
     // do not throw - 通知失敗で参加届提出を失敗させない
   }
+}
+
+/**
+ * 参加届提出成功後に呼ばれる通知送信処理。
+ * 通知失敗時もログ出力のみで例外は throw しない (fail-soft)。
+ */
+export async function sendParticipationNotification(
+  env: Env,
+  actionConfig: string | null | undefined,
+  form: ParticipationFormLike,
+): Promise<void> {
+  return sendParticipationNotificationGeneric(env, actionConfig, form, {
+    configKey: "participationNotifications",
+    defaultTemplate: DEFAULT_PARTICIPATION_TEMPLATE,
+  });
+}
+
+/**
+ * Slack 表示名の解決に失敗 (未解決 = 手動紐付け待ち) したときに運営へ通知する。
+ * 通知失敗時もログ出力のみで例外は throw しない (fail-soft)。
+ */
+export async function sendParticipationUnresolvedNotification(
+  env: Env,
+  actionConfig: string | null | undefined,
+  form: ParticipationFormLike,
+): Promise<void> {
+  return sendParticipationNotificationGeneric(env, actionConfig, form, {
+    configKey: "participationUnresolvedNotifications",
+    defaultTemplate: DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE,
+  });
 }
