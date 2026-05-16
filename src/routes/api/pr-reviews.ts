@@ -10,7 +10,10 @@ import {
   prReviewReviewers,
 } from "../../db/schema";
 import { createSlackClientForWorkspace } from "../../services/workspace";
-import { prReviewRepostByChannel } from "../../services/sticky-pr-review-board";
+import {
+  prReviewRepostByChannel,
+  notifyReviewersAssigned,
+} from "../../services/sticky-pr-review-board";
 
 export const prReviewsRouter = new Hono<{ Bindings: Env }>();
 
@@ -116,6 +119,36 @@ prReviewsRouter.post("/orgs/:eventId/pr-reviews", async (c) => {
     updatedAt: now,
   };
   await db.insert(prReviews).values(review);
+
+  // reviewer 指定がある場合、sticky board が貼られている channel に
+  // 「依頼が来た」明示メンション通知（reviewer 未指定なら no-op）。
+  // fail-soft: notifyReviewersAssigned 内で握りつぶすため作成 API は失敗しない。
+  if (body.reviewerSlackId) {
+    try {
+      const targetMeetings = await db
+        .select()
+        .from(meetings)
+        .where(
+          and(
+            eq(meetings.eventId, eventId),
+            isNotNull(meetings.prReviewBoardTs),
+          ),
+        )
+        .all();
+      for (const m of targetMeetings) {
+        await notifyReviewersAssigned(c.env, {
+          channelId: m.channelId,
+          reviewerSlackIds: [body.reviewerSlackId],
+          title: review.title,
+          url: review.url,
+          requesterSlackId: review.requesterSlackId,
+        });
+      }
+    } catch (e) {
+      console.warn("pr-review create notify failed (fail-soft):", e);
+    }
+  }
+
   return c.json(review, 201);
 });
 
