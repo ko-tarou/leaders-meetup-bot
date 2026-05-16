@@ -693,54 +693,14 @@ export type BotBulkInviteResult = {
   nextOffset: number | null;
 };
 
-// 005-github-webhook: GitHub username → Slack user id のマッピング (admin UI 用)。
-// BE は github_user_mappings 表に保存。
-export type GitHubUserMapping = {
-  githubUsername: string;
-  slackUserId: string;
-  displayName?: string;
-};
-
-// 005-github-webhook: pr_review_list action.config.githubRepos の各 repo に
-// 紐づく連携対象 action のサマリ。WorkspacesPage の GitHub 連携セクションで
-// 「現在どの event で連携が有効か」を可視化するための read-only 表示用。
-// 1 つの action に複数 repo がある場合は BE 側で repo ごとに 1 行展開される。
-export type GitHubConnectedAction = {
-  actionId: string;
-  eventId: string;
-  githubRepo: string;
-};
-
-// 005-github-webhook: pr_review_list action.config の型 (action.config は
-// JSON 文字列なので保存/読込時に parse する)。
-// 新形式: githubRepos: string[]
-// 旧形式 (deprecated, 後方互換のみ): githubRepo: string
+// pr_review_list action.config の型 (action.config は JSON 文字列なので
+// 保存/読込時に parse する)。PR レビューは Slack 中心の設計に移行し、
+// FE で設定するのは lgtmThreshold のみ。他 key は BE が温存する想定なので
+// index signature で受ける (保存時もマージで他 key を壊さない)。
 export type PRReviewListConfig = {
-  githubRepos?: string[];
-  /** @deprecated 後方互換のみ。新規保存は githubRepos を使う。 */
-  githubRepo?: string;
+  /** 自動完了に必要な LGTM 数。未設定なら 2。 */
+  lgtmThreshold?: number;
   [k: string]: unknown;
-};
-
-// 005-github-import: 設定済み GitHub repo から open PR を取り込む API の戻り値。
-// repo 単位で fail-soft 集計するため、配列で返ってくる (失敗時は ok=false + error)。
-export type GitHubPRImportResult = {
-  repo: string;
-  ok: boolean;
-  prsImported: number;
-  prsUpdated: number;
-  reviewersAdded: number;
-  lgtmsAdded: number;
-  error?: string;
-};
-
-export type GitHubPRImportResponse = {
-  ok: boolean;
-  results: GitHubPRImportResult[];
-  totalImported: number;
-  totalUpdated: number;
-  totalReviewers: number;
-  totalLgtms: number;
 };
 
 // 005-feedback: 右下フィードバックウィジェットのアプリ全体設定 (singleton)。

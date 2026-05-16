@@ -12,9 +12,6 @@ import type {
   EventAction,
   EventActionType,
   FeedbackCategory,
-  GitHubConnectedAction,
-  GitHubPRImportResponse,
-  GitHubUserMapping,
   GmailAccount,
   GmailWatcherConfig,
   HowFound,
@@ -558,14 +555,6 @@ export const api = {
           { method: "DELETE" },
         ),
     },
-    // 005-github-import: 設定済み repo の open PR を pr_reviews に取り込む。
-    // requested_reviewers + 既存 APPROVED reviews も同期する。
-    // 公開 (unauthenticated) GitHub API を叩くので public repo 限定。
-    importGitHubPRs: (eventId: string, actionId: string) =>
-      request<GitHubPRImportResponse>(
-        `/orgs/${eventId}/actions/${actionId}/import-github-prs`,
-        { method: "POST" },
-      ),
     // 担当レビュアー関連 (Sprint 22): N人対応
     reviewers: {
       list: (reviewId: string) =>
@@ -985,20 +974,6 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(patch),
       }),
-  },
-
-  // 005-github-webhook: GitHub-Slack マッピング (admin)。
-  // PUT は全件置換 (DELETE → INSERT) の toml-table 方式。
-  githubMappings: {
-    list: () => request<GitHubUserMapping[]>("/github-mappings"),
-    save: (mappings: GitHubUserMapping[]) =>
-      request<{ ok: boolean; count: number }>("/github-mappings", {
-        method: "PUT",
-        body: JSON.stringify({ mappings }),
-      }),
-    /** pr_review_list で githubRepo が設定済 action の一覧 (read-only)。 */
-    connectedActions: () =>
-      request<GitHubConnectedAction[]>("/github-mappings/connected-actions"),
   },
 
   // 005-feedback: フィードバック送信 / AI チャット (公開 API, admin token 不要)。
