@@ -7,7 +7,11 @@ import type {
 } from "../../types";
 import { api } from "../../api";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
+
+// レビュアーは 2〜5 人を推奨。ハード下限は設けず、最大 5 人で打ち止めにする。
+const MAX_REVIEWERS = 5;
 
 const styles = {
   modalOverlay: {
@@ -93,6 +97,7 @@ export function PRReviewForm({
   onSaved,
 }: PRReviewFormProps) {
   const { confirm } = useConfirm();
+  const toast = useToast();
   const isEdit = !!review;
   const [title, setTitle] = useState(review?.title ?? "");
   const [url, setUrl] = useState(review?.url ?? "");
@@ -135,6 +140,14 @@ export function PRReviewForm({
     const value = reviewerInput.trim();
     if (!value) return;
     if (!review) return; // 新規モードでは無効
+    if (reviewers.length >= MAX_REVIEWERS) {
+      toast.warning(`レビュアーは最大 ${MAX_REVIEWERS} 人までです`);
+      return;
+    }
+    if (reviewers.some((r) => r.slackUserId === value)) {
+      setReviewerError("このレビュアーは既に追加されています");
+      return;
+    }
     setReviewerError(null);
     try {
       const created = await api.prReviews.reviewers.add(review.id, value);
@@ -253,9 +266,12 @@ export function PRReviewForm({
             style={styles.fullInput}
           />
         </Field>
-        <Field label="レビュアー（複数登録可）">
+        <Field label="レビュアー（2〜5人を推奨）">
           {isEdit ? (
             <>
+              <div style={styles.reviewersHint}>
+                レビュアーは最大 {MAX_REVIEWERS} 人（現在 {reviewers.length} 人）。
+              </div>
               {reviewers.length > 0 && (
                 <div style={styles.chipsRow}>
                   {reviewers.map((rv) => (
@@ -274,29 +290,35 @@ export function PRReviewForm({
                   ))}
                 </div>
               )}
-              <div style={styles.chipInputRow}>
-                <input
-                  value={reviewerInput}
-                  onChange={(e) => setReviewerInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddReviewer();
-                    }
-                  }}
-                  disabled={submitting}
-                  placeholder="U..."
-                  style={{ ...styles.fullInput, ...styles.chipInput }}
-                />
-                <button
-                  type="button"
-                  onClick={handleAddReviewer}
-                  disabled={submitting || !reviewerInput.trim()}
-                  style={styles.chipAddBtn}
-                >
-                  追加
-                </button>
-              </div>
+              {reviewers.length >= MAX_REVIEWERS ? (
+                <div style={styles.reviewersHint}>
+                  レビュアーは上限（{MAX_REVIEWERS} 人）に達しています。
+                </div>
+              ) : (
+                <div style={styles.chipInputRow}>
+                  <input
+                    value={reviewerInput}
+                    onChange={(e) => setReviewerInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddReviewer();
+                      }
+                    }}
+                    disabled={submitting}
+                    placeholder="U..."
+                    style={{ ...styles.fullInput, ...styles.chipInput }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddReviewer}
+                    disabled={submitting || !reviewerInput.trim()}
+                    style={styles.chipAddBtn}
+                  >
+                    追加
+                  </button>
+                </div>
+              )}
               {reviewerError && (
                 <div style={{ color: colors.danger, fontSize: "0.75rem", marginTop: "0.25rem" }}>
                   {reviewerError}
