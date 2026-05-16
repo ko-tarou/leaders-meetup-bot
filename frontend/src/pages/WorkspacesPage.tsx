@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type {
   BotBulkInviteResult,
   GmailAccount,
@@ -19,6 +19,7 @@ import { GitHubIntegrationSection } from "../components/GitHubIntegrationSection
 // - bot_token / signing_secret は登録時のみ送信し、サーバーは AES-256-GCM で暗号化保存
 export function WorkspacesPage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const { confirm } = useConfirm();
   const isReadOnly = useIsReadOnly();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -220,8 +221,31 @@ export function WorkspacesPage() {
       <div style={{ padding: "1rem", color: colors.danger }}>エラー: {error}</div>
     );
 
+  // 直前画面（アクション一覧など元いた画面）へ戻る。
+  // 直接アクセス等で履歴が無い場合はホームへフォールバック。
+  const handleBack = () => {
+    if (window.history.length <= 1) navigate("/");
+    else navigate(-1);
+  };
+
   return (
     <div style={{ padding: "1rem" }}>
+      <button
+        type="button"
+        onClick={handleBack}
+        style={{
+          color: colors.primary,
+          cursor: "pointer",
+          padding: "4px 0",
+          fontSize: 14,
+          marginBottom: 8,
+          display: "inline-block",
+          background: "none",
+          border: "none",
+        }}
+      >
+        &#8592; 元の画面に戻る
+      </button>
       <div
         style={{
           display: "flex",
