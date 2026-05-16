@@ -671,6 +671,15 @@ export const api = {
         `/orgs/${eventId}/participation-forms/${id}`,
         { method: "PATCH", body: JSON.stringify({ status }) },
       ),
+    /**
+     * admin: 参加届に Slack user を手動紐付けする (Phase2 PR4)。
+     * 紐付け時に BE 側でロール自動付与も実行され assignedRoleIds が返る。
+     */
+    linkSlackUser: (eventId: string, id: string, slackUserId: string) =>
+      request<{ ok: boolean; slackUserId: string; assignedRoleIds: string[] }>(
+        `/orgs/${eventId}/participation-forms/${id}/slack-user`,
+        { method: "PATCH", body: JSON.stringify({ slackUserId }) },
+      ),
   },
 
   // 面接官 (005-interviewer-simplify / PR #139)

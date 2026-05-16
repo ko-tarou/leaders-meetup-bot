@@ -533,6 +533,10 @@ export type ParticipationForm = {
   devRoles: string[];
   /** 'submitted' = 通常 / 'rejected' = 却下 (PR2 で追加)。 */
   status: "submitted" | "rejected";
+  /** Phase2: 解決済み Slack user id。null = 表示名から解決できず未解決。 */
+  slackUserId: string | null;
+  /** Phase2: 自動 / 手動で付与済みの slack_roles.id 配列。 */
+  assignedRoleIds: string[];
   submittedAt: string;
   createdAt: string;
 };

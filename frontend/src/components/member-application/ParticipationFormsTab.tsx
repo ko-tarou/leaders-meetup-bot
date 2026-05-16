@@ -6,15 +6,20 @@ import { Button } from "../ui/Button";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
+import { ACTIVITY_LABEL, DEV_ROLE_LABEL } from "./roleAutoAssignConfig";
+import { RoleAutoAssignSettings } from "./RoleAutoAssignSettings";
+import { LinkSlackUserRow } from "./LinkSlackUserRow";
 
-// participation-form Phase1 PR4:
+// participation-form Phase2 PR4:
 // member_application action の「参加届」サブタブ。
 //
-// 合格者が合格メール内の共通 URL から提出した参加届を閲覧する (Phase1 は閲覧のみ)。
-// admin API GET /orgs/:eventId/participation-forms (x-admin-token) を呼び、
-// ParticipationForm[] を submittedAt 降順で受け取りカード表示する。
+// Phase1: 一覧閲覧 / 却下 / 削除。
+// Phase2: ロール自動割当の「マッピング設定」+ 各提出の解決状態 /
+//   手動紐付け / 付与ロール表示を追加。
 //
-// 提出種別: applicationId が非 null なら「応募紐付き」、null なら「直接応募」。
+// マッピング設定 UI 一式は RoleAutoAssignSettings に、手動紐付け行は
+// LinkSlackUserRow に分離済み。本コンポーネントは一覧本体 / shareBox /
+// 却下削除 / 3 状態表示 / 付与ロール表示を担う。
 
 type Props = {
   eventId: string;
@@ -29,27 +34,11 @@ const GRADE_LABEL: Record<string, string> = {
   "4": "4年",
   graduate: "院生",
 };
-
 const GENDER_LABEL: Record<string, string> = {
   male: "男性",
   female: "女性",
   other: "その他",
   prefer_not: "回答しない",
-};
-
-const ACTIVITY_LABEL: Record<string, string> = {
-  event: "イベント運営",
-  dev: "チーム開発",
-  both: "両方",
-};
-
-const DEV_ROLE_LABEL: Record<string, string> = {
-  pm: "PM",
-  frontend: "フロントエンド",
-  backend: "バックエンド",
-  android: "Android",
-  ios: "iOS",
-  infra: "インフラ",
 };
 
 const EMPTY = "—";
@@ -67,9 +56,6 @@ function label(map: Record<string, string>, value: string | null): string {
 }
 
 export function ParticipationFormsTab({ eventId, action }: Props) {
-  // action は member_application sub-tab の共通 props 形に合わせて受け取るが、
-  // Phase1 は eventId 単位の一覧のみ参照する (将来の action 別表示用に保持)。
-  void action;
   const toast = useToast();
   const { confirm } = useConfirm();
   const [forms, setForms] = useState<ParticipationForm[] | null>(null);
@@ -77,8 +63,22 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // RoleAutoAssignSettings が解決する値 (一覧表示で利用)。
+  const [rmActionId, setRmActionId] = useState("");
+  const [roleNameById, setRoleNameById] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+  const handleResolved = useCallback(
+    (resolved: { rmActionId: string; roleNameById: Map<string, string> }) => {
+      setRmActionId(resolved.rmActionId);
+      setRoleNameById(resolved.roleNameById);
+    },
+    [],
+  );
+
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
+  // 参加届一覧
   useEffect(() => {
     let cancelled = false;
     setForms(null);
@@ -105,7 +105,7 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
     async (f: ParticipationForm) => {
       const name = display(f.name);
       const ok = await confirm({
-        message: `「${name}」を却下しますか？\nPhase2 でロール自動割当が有効でも、却下者にはロールを付与せず剥奪します。`,
+        message: `「${name}」を却下しますか？\nロール自動割当が有効でも、却下者にはロールを付与せず剥奪します。`,
         variant: "danger",
         confirmLabel: "却下",
       });
@@ -202,6 +202,12 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
         </div>
       </section>
 
+      <RoleAutoAssignSettings
+        eventId={eventId}
+        action={action}
+        onResolved={handleResolved}
+      />
+
       <h3 style={s.h3}>参加届 ({forms.length}件)</h3>
 
       {error && (
@@ -238,6 +244,9 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
             ];
             const rejected = f.status === "rejected";
             const busy = busyId === f.id;
+            const assignedNames = f.assignedRoleIds
+              .map((id) => roleNameById.get(id) ?? id)
+              .filter((n) => n.length > 0);
             return (
               <div
                 key={f.id}
@@ -247,6 +256,11 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
                   <span style={s.name}>{display(f.name)}</span>
                   <div style={s.badges}>
                     {rejected && <span style={s.badgeRejected}>却下済み</span>}
+                    {f.slackUserId ? (
+                      <span style={s.badgeLinked}>Slack紐付け済み</span>
+                    ) : (
+                      <span style={s.badgeUnresolved}>未解決</span>
+                    )}
                     <span style={linked ? s.badgeLinked : s.badgeDirect}>
                       {linked ? "応募紐付き" : "直接応募"}
                     </span>
@@ -276,6 +290,31 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
                     </div>
                   )}
                 </div>
+
+                <div style={s.rolesRow}>
+                  <span style={s.fieldLabel}>付与ロール</span>
+                  {assignedNames.length === 0 ? (
+                    <span style={s.fieldValue}>{EMPTY}</span>
+                  ) : (
+                    <div style={s.chips}>
+                      {assignedNames.map((r) => (
+                        <span key={r} style={s.chipRole}>
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {!f.slackUserId && (
+                  <LinkSlackUserRow
+                    eventId={eventId}
+                    formId={f.id}
+                    roleManagementActionId={rmActionId}
+                    disabled={busy}
+                    onLinked={triggerRefresh}
+                  />
+                )}
 
                 <div style={s.submittedAt}>
                   提出日時: {new Date(f.submittedAt).toLocaleString("ja-JP")}
@@ -382,11 +421,21 @@ const s: Record<string, CSSProperties> = {
     gap: "0.5rem",
     marginBottom: "0.625rem",
   },
-  badges: { display: "flex", alignItems: "center", gap: "0.375rem" },
+  badges: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.375rem",
+    flexWrap: "wrap",
+  },
   badgeRejected: {
     ...badgeBase,
     background: colors.dangerSubtle,
     color: colors.danger,
+  },
+  badgeUnresolved: {
+    ...badgeBase,
+    background: colors.warningSubtle,
+    color: colors.warning,
   },
   actions: {
     display: "flex",
@@ -442,6 +491,13 @@ const s: Record<string, CSSProperties> = {
     fontSize: "0.75rem",
     background: colors.primarySubtle,
     color: colors.primary,
+  },
+  chipRole: {
+    padding: "0.125rem 0.5rem",
+    borderRadius: 4,
+    fontSize: "0.75rem",
+    background: colors.successSubtle,
+    color: colors.success,
   },
   submittedAt: {
     marginTop: "0.625rem",
