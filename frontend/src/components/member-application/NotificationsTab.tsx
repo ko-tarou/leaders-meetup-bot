@@ -37,11 +37,19 @@ type NotificationsConfig = {
 // 編集対象モード。
 //   application  → action.config.notifications (応募通知)
 //   participation → action.config.participationNotifications (参加届通知)
-type NotificationMode = "application" | "participation";
+//   participationUnresolved → action.config.participationUnresolvedNotifications
+//                             (参加届の Slack 表示名解決失敗 = 未解決通知)
+type NotificationMode =
+  | "application"
+  | "participation"
+  | "participationUnresolved";
 
 type ModeDef = {
   // 編集対象となる action.config 内のキー。
-  configKey: "notifications" | "participationNotifications";
+  configKey:
+    | "notifications"
+    | "participationNotifications"
+    | "participationUnresolvedNotifications";
   // セグメントに表示するラベル。
   label: string;
   // ヘッダ説明文 (fail-soft の文言含む)。
@@ -66,6 +74,14 @@ const PARTICIPATION_DEFAULT_TEMPLATE = `{mentions} 📋 参加届が提出され
 Slack表示名: {slackName}
 メール: {email}
 希望活動: {desiredActivity}`;
+
+// BE: src/services/participation-notification.ts:DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE と同期。
+const PARTICIPATION_UNRESOLVED_DEFAULT_TEMPLATE = `{mentions} ⚠️ 参加届の Slack 表示名が見つかりませんでした
+名前: {name}
+Slack表示名: {slackName}
+メール: {email}
+希望活動: {desiredActivity}
+手動でのロール紐付けが必要です（参加届タブ）`;
 
 // モードごとの定義テーブル (DRY: 同一エディタを configKey で切替)。
 const MODE_DEFS: Record<NotificationMode, ModeDef> = {
@@ -102,6 +118,41 @@ const MODE_DEFS: Record<NotificationMode, ModeDef> = {
     description:
       "参加届が提出された時に Slack 通知を送ります。通知失敗で参加届提出自体が失敗することはありません (fail-soft)。",
     defaultTemplate: PARTICIPATION_DEFAULT_TEMPLATE,
+    sampleVars: {
+      mentions: "<@U1>",
+      name: "鈴木 太郎",
+      slackName: "suzuki",
+      email: "suzuki@example.com",
+      studentId: "1EP1-1",
+      department: "情報工学科",
+      grade: "3",
+      gender: "male",
+      desiredActivity: "dev",
+      devRoles: "frontend, backend",
+      otherAffiliations: "なし",
+      submittedAt: "2026/05/11 14:30",
+    },
+    placeholders: [
+      { key: "mentions", desc: "メンション (<@U1> <@U2> ...)" },
+      { key: "name", desc: "氏名" },
+      { key: "slackName", desc: "Slack 表示名" },
+      { key: "email", desc: "メール" },
+      { key: "studentId", desc: "学生証番号" },
+      { key: "department", desc: "学科" },
+      { key: "grade", desc: "学年" },
+      { key: "gender", desc: "性別" },
+      { key: "desiredActivity", desc: "希望活動" },
+      { key: "devRoles", desc: "開発ロール (カンマ区切り)" },
+      { key: "otherAffiliations", desc: "他の所属" },
+      { key: "submittedAt", desc: "提出日時 (JST)" },
+    ],
+  },
+  participationUnresolved: {
+    configKey: "participationUnresolvedNotifications",
+    label: "参加届(未解決)通知",
+    description:
+      "参加届の Slack 表示名解決に失敗した時に Slack 通知を送ります。通知失敗で参加届提出自体が失敗することはありません (fail-soft)。",
+    defaultTemplate: PARTICIPATION_UNRESOLVED_DEFAULT_TEMPLATE,
     sampleVars: {
       mentions: "<@U1>",
       name: "鈴木 太郎",
