@@ -17,11 +17,12 @@
 // LGTM_THRESHOLD は routes/slack.ts から import されているので、ここで定義し続ける。
 
 import { drizzle } from "drizzle-orm/d1";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import {
   prReviews,
   prReviewLgtms,
   prReviewReviewers,
+  eventActions,
 } from "../db/schema";
 import { SlackClient } from "./slack-api";
 import { getUserName } from "./slack-names";
@@ -33,6 +34,7 @@ import {
   repostStickyBoardByChannel,
   type StickyBoardConfig,
 } from "./sticky-board-base";
+import { getSlackClientForChannel } from "./workspace";
 import type { Env } from "../types/env";
 
 // Sprint 17 PR1: 自動完了に必要な LGTM 数。
@@ -42,6 +44,94 @@ import type { Env } from "../types/env";
 // 理由: routes/slack.ts が `from "../services/sticky-pr-review-board"` で
 // この定数を import しているため、ここに置いておけば呼び出し側を一切触らずに済む。
 export const LGTM_THRESHOLD = 2;
+
+/**
+ * pr_review_list アクションの config から LGTM 自動完了しきい値を読む。
+ *
+ * - `config.lgtmThreshold` が 1 以上の整数なら採用
+ * - 未設定 / 不正値 (0 以下・小数・非数値・不正 JSON) は LGTM_THRESHOLD (=2) に
+ *   fallback（後方互換: 既存 config に lgtmThreshold が無ければ従来どおり 2）
+ */
+export function readLgtmThreshold(actionConfig: string | null): number {
+  if (!actionConfig) return LGTM_THRESHOLD;
+  try {
+    const parsed = JSON.parse(actionConfig) as { lgtmThreshold?: unknown };
+    const v = parsed.lgtmThreshold;
+    if (typeof v === "number" && Number.isInteger(v) && v >= 1) return v;
+    return LGTM_THRESHOLD;
+  } catch {
+    return LGTM_THRESHOLD;
+  }
+}
+
+/**
+ * 当該 PR レビューが属する event の pr_review_list アクション config から
+ * LGTM しきい値を解決する。
+ *
+ * pr_review_list アクションは event 単位 (event_actions の
+ * UNIQUE(event_id, action_type) で 1 event につき 1 行)。アクションが
+ * 引けない / config が不正なら readLgtmThreshold が 2 に fallback する。
+ */
+export async function resolveLgtmThreshold(
+  db: D1Database,
+  eventId: string,
+): Promise<number> {
+  try {
+    const action = await drizzle(db)
+      .select()
+      .from(eventActions)
+      .where(
+        and(
+          eq(eventActions.eventId, eventId),
+          eq(eventActions.actionType, "pr_review_list"),
+        ),
+      )
+      .get();
+    return readLgtmThreshold(action?.config ?? null);
+  } catch {
+    return LGTM_THRESHOLD;
+  }
+}
+
+/**
+ * 割当レビュアーへ「レビュー依頼が来た」明示メンション通知を送る。
+ *
+ * 新規作成 2 経路 (Slack モーダル / Web API) から共通で呼ぶ。
+ * - reviewerSlackIds が空なら no-op（通知しない）
+ * - fail-soft: Slack API 失敗・workspace 解決失敗でも例外を投げず warn で握りつぶす
+ *   （呼び出し側の作成処理をブロックしない）
+ * - sticky board と同じ channel（meetings 経由で workspace 解決）に post する
+ */
+export async function notifyReviewersAssigned(
+  env: Env,
+  params: {
+    channelId: string;
+    reviewerSlackIds: string[];
+    title: string;
+    url?: string | null;
+    requesterSlackId?: string | null;
+  },
+): Promise<void> {
+  try {
+    const ids = params.reviewerSlackIds.filter((s) => !!s);
+    if (ids.length === 0) return;
+    const client = await getSlackClientForChannel(env, params.channelId);
+    if (!client) {
+      console.warn(
+        `notifyReviewersAssigned: no SlackClient for channel ${params.channelId}`,
+      );
+      return;
+    }
+    const mentions = ids.map((id) => `<@${id}>`).join(" ");
+    const lines = [`${mentions} 🔍 レビュー依頼: ${params.title}`];
+    if (params.url) lines.push(`PR: ${params.url}`);
+    if (params.requesterSlackId)
+      lines.push(`依頼者: <@${params.requesterSlackId}>`);
+    await client.postMessage(params.channelId, lines.join("\n"));
+  } catch (e) {
+    console.warn("notifyReviewersAssigned failed (fail-soft):", e);
+  }
+}
 
 /**
  * PR レビュー sticky board の Block Kit を構築する。
@@ -58,6 +148,10 @@ export async function buildPRReviewBoardBlocks(
   showClosed = false,
 ): Promise<unknown[]> {
   const d1 = drizzle(db);
+
+  // 当該 event の pr_review_list config から LGTM しきい値を解決
+  // （未設定 / 不正は 2 に fallback して後方互換）
+  const lgtmThreshold = await resolveLgtmThreshold(db, eventId);
 
   const allReviews = await d1
     .select()
@@ -154,7 +248,7 @@ export async function buildPRReviewBoardBlocks(
     const statusLabel = PR_REVIEW_STATUS_LABEL[r.status] ?? r.status;
     // Sprint 17 PR1: LGTM 数を取得して表示
     const lgtmCount = lgtmMap.get(r.id) ?? 0;
-    const lgtmText = `LGTM ${lgtmCount}/${LGTM_THRESHOLD}`;
+    const lgtmText = `LGTM ${lgtmCount}/${lgtmThreshold}`;
     const sectionText = `*${statusEmoji} ${r.title}*\n${statusLabel} / ${lgtmText} / 依頼者: ${requesterName} / ${reviewerText}${urlText}`;
 
     blocks.push({
