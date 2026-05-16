@@ -12,6 +12,11 @@ import {
   sendParticipationNotification,
   type ParticipationFormLike,
 } from "../../services/participation-notification";
+import {
+  readRoleAutoAssignConfig,
+  resolveSlackUserId,
+  applyRoleAssignment,
+} from "../../services/role-auto-assign";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
 //
@@ -217,6 +222,58 @@ participationRouter.post("/participation/:eventId", async (c) => {
     }
   };
 
+  // 保存成功後のロール自動割当 (fail-soft)。member_application action の
+  // config.roleAutoAssign を参照し、slackName を Slack ユーザーへ解決して
+  // slack_user_id を保存、未却下なら付与ロールを assigned_role_ids へ保存する。
+  // 解決/付与の失敗は提出 API (201) を失敗させない。3 保存経路すべてで
+  // 確定した行 id を渡して呼ぶ。
+  const autoAssignOnSubmit = async (rowId: string) => {
+    try {
+      const action = await db
+        .select()
+        .from(eventActions)
+        .where(
+          and(
+            eq(eventActions.eventId, eventId),
+            eq(eventActions.actionType, "member_application"),
+          ),
+        )
+        .get();
+      if (!action) return; // member_application 不在 → no-op
+      const cfg = readRoleAutoAssignConfig(action.config);
+      if (!cfg || !cfg.enabled) return; // 無効/未設定 → no-op
+
+      const slackUserId = fields.slackName
+        ? await resolveSlackUserId(c.env, cfg.workspaceId, fields.slackName)
+        : null;
+      if (!slackUserId) return; // 未解決 → 手動紐付け待ち (デフォルト維持)
+
+      await db
+        .update(participationForms)
+        .set({ slackUserId })
+        .where(eq(participationForms.id, rowId));
+
+      const { assignedRoleIds } = await applyRoleAssignment(c.env, {
+        memberApplicationActionConfig: action.config,
+        form: {
+          id: rowId,
+          slackUserId,
+          desiredActivity: fields.desiredActivity,
+          devRoles: fields.devRoles,
+          status: "submitted",
+        },
+      });
+      if (assignedRoleIds.length > 0) {
+        await db
+          .update(participationForms)
+          .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
+          .where(eq(participationForms.id, rowId));
+      }
+    } catch (e) {
+      console.error("[participation] role auto-assign hook error:", e);
+    }
+  };
+
   // applicationId 非null: 既存行があれば UPDATE、無ければ INSERT (idempotent)。
   // partial unique index に依存せず先 SELECT で分岐 (roles.ts のメンバー
   // upsert と同思想 / 同時提出でも例外にならない)。
@@ -232,6 +289,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
         .set(fields)
         .where(eq(participationForms.id, existing.id));
       await notifyParticipation();
+      await autoAssignOnSubmit(existing.id);
       return c.json({ ok: true, id: existing.id }, 201);
     }
     const id = crypto.randomUUID();
@@ -239,6 +297,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
       .insert(participationForms)
       .values({ id, applicationId, createdAt: now, ...fields });
     await notifyParticipation();
+    await autoAssignOnSubmit(id);
     return c.json({ ok: true, id }, 201);
   }
 
@@ -248,6 +307,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
     .insert(participationForms)
     .values({ id, applicationId: null, createdAt: now, ...fields });
   await notifyParticipation();
+  await autoAssignOnSubmit(id);
   return c.json({ ok: true, id }, 201);
 });
 
