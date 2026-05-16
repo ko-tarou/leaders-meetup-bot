@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, APIError } from "../../api";
 import type { EventAction, SlackUser, Workspace } from "../../types";
 import { Button } from "../ui/Button";
@@ -241,8 +242,32 @@ export function NotificationsTab({ eventId, action, onSaved }: Props) {
   const isReadOnly = useIsReadOnly();
 
   // 編集対象モード (上部セグメントで切替)。
-  const [mode, setMode] = useState<NotificationMode>("application");
+  // URL クエリ ?nmode=<key> に永続化する (リロード復元・共有可能)。
+  // MODE_DEFS のキーでない値は "application" にフォールバック。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const resolveModeFromUrl = (): NotificationMode => {
+    const fromUrl = searchParams.get("nmode");
+    return fromUrl && fromUrl in MODE_DEFS
+      ? (fromUrl as NotificationMode)
+      : "application";
+  };
+  const [mode, setModeState] = useState<NotificationMode>(resolveModeFromUrl);
   const modeDef = MODE_DEFS[mode];
+
+  // mode 変更は state + URL クエリを同期する。
+  // 値が変わった時のみ書き込み、replace:true で履歴を汚さない (無限ループ防止)。
+  const setMode = (next: NotificationMode) => {
+    setModeState(next);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === "application") p.delete("nmode");
+        else p.set("nmode", next);
+        return p;
+      },
+      { replace: true },
+    );
+  };
 
   const initial = useMemo(
     () => readInitialConfig(action, modeDef.configKey),
