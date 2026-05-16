@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import { api } from "../../api";
-import type {
-  EventAction,
-  ParticipationForm,
-  SlackRole,
-  SlackUser,
-} from "../../types";
+import type { EventAction, ParticipationForm } from "../../types";
 import { Button } from "../ui/Button";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
+import { ACTIVITY_LABEL, DEV_ROLE_LABEL } from "./roleAutoAssignConfig";
+import { RoleAutoAssignSettings } from "./RoleAutoAssignSettings";
+import { LinkSlackUserRow } from "./LinkSlackUserRow";
 
 // participation-form Phase2 PR4:
 // member_application action の「参加届」サブタブ。
@@ -19,87 +17,14 @@ import { colors } from "../../styles/tokens";
 // Phase2: ロール自動割当の「マッピング設定」+ 各提出の解決状態 /
 //   手動紐付け / 付与ロール表示を追加。
 //
-// マッピング設定は member_application action.config の `roleAutoAssign` に保存。
-// 保存時は NotificationsTab と同じく parseConfig → 対象キーのみ差し替え →
-// JSON.stringify で他キー (notifications 等) を温存する。
+// マッピング設定 UI 一式は RoleAutoAssignSettings に、手動紐付け行は
+// LinkSlackUserRow に分離済み。本コンポーネントは一覧本体 / shareBox /
+// 却下削除 / 3 状態表示 / 付与ロール表示を担う。
 
 type Props = {
   eventId: string;
   action: EventAction;
 };
-
-// === roleAutoAssign config 型 (BE 仕様と一対一) ===
-const ACTIVITY_KEYS = ["event", "dev", "both"] as const;
-const DEV_ROLE_KEYS = [
-  "pm",
-  "frontend",
-  "backend",
-  "android",
-  "ios",
-  "infra",
-] as const;
-type ActivityKey = (typeof ACTIVITY_KEYS)[number];
-type DevRoleKey = (typeof DEV_ROLE_KEYS)[number];
-
-type RoleAutoAssignConfig = {
-  enabled: boolean;
-  roleManagementActionId: string;
-  workspaceId: string;
-  activity: Record<ActivityKey, string[]>;
-  devRole: Record<DevRoleKey, string[]>;
-};
-
-function emptyMap<K extends string>(keys: readonly K[]): Record<K, string[]> {
-  return keys.reduce(
-    (acc, k) => {
-      acc[k] = [];
-      return acc;
-    },
-    {} as Record<K, string[]>,
-  );
-}
-
-function strArr(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-}
-
-/** action.config.roleAutoAssign を安全に読む。未設定なら空の構造を返す。 */
-function readRoleAutoAssign(action: EventAction): RoleAutoAssignConfig {
-  let raw: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(action.config || "{}");
-    if (parsed && typeof parsed === "object") {
-      const r = (parsed as Record<string, unknown>).roleAutoAssign;
-      if (r && typeof r === "object") raw = r as Record<string, unknown>;
-    }
-  } catch {
-    raw = {};
-  }
-  const a = (raw.activity ?? {}) as Record<string, unknown>;
-  const d = (raw.devRole ?? {}) as Record<string, unknown>;
-  return {
-    enabled: Boolean(raw.enabled),
-    roleManagementActionId:
-      typeof raw.roleManagementActionId === "string"
-        ? raw.roleManagementActionId
-        : "",
-    workspaceId: typeof raw.workspaceId === "string" ? raw.workspaceId : "",
-    activity: ACTIVITY_KEYS.reduce(
-      (acc, k) => {
-        acc[k] = strArr(a[k]);
-        return acc;
-      },
-      emptyMap(ACTIVITY_KEYS),
-    ),
-    devRole: DEV_ROLE_KEYS.reduce(
-      (acc, k) => {
-        acc[k] = strArr(d[k]);
-        return acc;
-      },
-      emptyMap(DEV_ROLE_KEYS),
-    ),
-  };
-}
 
 // ラベル変換マップ。BE / フォームの選択肢キーと一対一対応。
 const GRADE_LABEL: Record<string, string> = {
@@ -114,19 +39,6 @@ const GENDER_LABEL: Record<string, string> = {
   female: "女性",
   other: "その他",
   prefer_not: "回答しない",
-};
-const ACTIVITY_LABEL: Record<string, string> = {
-  event: "イベント運営",
-  dev: "チーム開発",
-  both: "両方",
-};
-const DEV_ROLE_LABEL: Record<string, string> = {
-  pm: "PM",
-  frontend: "フロントエンド",
-  backend: "バックエンド",
-  android: "Android",
-  ios: "iOS",
-  infra: "インフラ",
 };
 
 const EMPTY = "—";
@@ -143,35 +55,6 @@ function label(map: Record<string, string>, value: string | null): string {
   return map[value] ?? value;
 }
 
-/** role 複数選択チェックボックス群 (マッピング設定で流用)。 */
-function RoleMultiSelect({
-  roles,
-  selected,
-  onToggle,
-}: {
-  roles: SlackRole[];
-  selected: string[];
-  onToggle: (id: string) => void;
-}) {
-  if (roles.length === 0) {
-    return <span style={s.mapMuted}>ロール未登録</span>;
-  }
-  return (
-    <div style={s.roleChecks}>
-      {roles.map((r) => (
-        <label key={r.id} style={s.roleCheck}>
-          <input
-            type="checkbox"
-            checked={selected.includes(r.id)}
-            onChange={() => onToggle(r.id)}
-          />
-          <span>{r.name}</span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
 export function ParticipationFormsTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -180,17 +63,18 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // マッピング設定 state (config 由来の確定値を編集 draft として扱う)
-  const initialCfg = useMemo(() => readRoleAutoAssign(action), [action]);
-  const [cfg, setCfg] = useState<RoleAutoAssignConfig>(initialCfg);
-  const [showSettings, setShowSettings] = useState(false);
-  const [savingCfg, setSavingCfg] = useState(false);
-  const [rmActions, setRmActions] = useState<EventAction[] | null>(null);
-  const [roles, setRoles] = useState<SlackRole[] | null>(null);
-
-  useEffect(() => {
-    setCfg(initialCfg);
-  }, [initialCfg]);
+  // RoleAutoAssignSettings が解決する値 (一覧表示で利用)。
+  const [rmActionId, setRmActionId] = useState("");
+  const [roleNameById, setRoleNameById] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+  const handleResolved = useCallback(
+    (resolved: { rmActionId: string; roleNameById: Map<string, string> }) => {
+      setRmActionId(resolved.rmActionId);
+      setRoleNameById(resolved.roleNameById);
+    },
+    [],
+  );
 
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
@@ -216,140 +100,6 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
       cancelled = true;
     };
   }, [eventId, refreshKey, toast]);
-
-  // role_management アクション一覧 (マッピング対象選択用)。1 回だけ取得。
-  useEffect(() => {
-    let cancelled = false;
-    api.events.actions
-      .list(eventId)
-      .then((list) => {
-        if (cancelled) return;
-        setRmActions(
-          (Array.isArray(list) ? list : []).filter(
-            (a) => a.actionType === "role_management",
-          ),
-        );
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRmActions([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
-
-  // role_management が 1 つだけなら自動選択。
-  useEffect(() => {
-    if (!rmActions || rmActions.length !== 1) return;
-    const only = rmActions[0];
-    setCfg((c) =>
-      c.roleManagementActionId === only.id
-        ? c
-        : { ...c, roleManagementActionId: only.id },
-    );
-  }, [rmActions]);
-
-  // 選択中 role_management の slack_roles を取得。
-  // roleManagementActionId 変化時のみ再取得 (無限ループ防止)。
-  const rmActionId = cfg.roleManagementActionId;
-  useEffect(() => {
-    if (!rmActionId) {
-      setRoles(null);
-      return;
-    }
-    let cancelled = false;
-    setRoles(null);
-    api.roles
-      .list(eventId, rmActionId)
-      .then((list) => {
-        if (cancelled) return;
-        setRoles(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRoles([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId, rmActionId]);
-
-  const roleNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const r of roles ?? []) m.set(r.id, r.name);
-    return m;
-  }, [roles]);
-
-  // 選択中 role_management の workspaceId (config 保存に必要)。
-  const selectedWorkspaceId = useMemo(() => {
-    const a = (rmActions ?? []).find((x) => x.id === rmActionId);
-    if (!a) return "";
-    try {
-      const parsed: unknown = JSON.parse(a.config || "{}");
-      if (parsed && typeof parsed === "object") {
-        const w = (parsed as Record<string, unknown>).workspaceId;
-        if (typeof w === "string") return w;
-      }
-    } catch {
-      // noop
-    }
-    return "";
-  }, [rmActions, rmActionId]);
-
-  const toggleActivity = (k: ActivityKey, roleId: string) =>
-    setCfg((c) => {
-      const cur = c.activity[k];
-      const next = cur.includes(roleId)
-        ? cur.filter((x) => x !== roleId)
-        : [...cur, roleId];
-      return { ...c, activity: { ...c.activity, [k]: next } };
-    });
-
-  const toggleDevRole = (k: DevRoleKey, roleId: string) =>
-    setCfg((c) => {
-      const cur = c.devRole[k];
-      const next = cur.includes(roleId)
-        ? cur.filter((x) => x !== roleId)
-        : [...cur, roleId];
-      return { ...c, devRole: { ...c.devRole, [k]: next } };
-    });
-
-  const handleSaveCfg = async () => {
-    if (cfg.enabled && !rmActionId) {
-      toast.error("ロール管理アクションを選択してください");
-      return;
-    }
-    // baseConfig を spread して roleAutoAssign のみ差し替え。
-    // notifications / participationNotifications / slackInvites 等は温存。
-    let baseConfig: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(action.config || "{}");
-      if (parsed && typeof parsed === "object") {
-        baseConfig = parsed as Record<string, unknown>;
-      }
-    } catch {
-      baseConfig = {};
-    }
-    const merged: RoleAutoAssignConfig = {
-      ...cfg,
-      roleManagementActionId: rmActionId,
-      workspaceId: selectedWorkspaceId || cfg.workspaceId,
-    };
-    const newConfig = { ...baseConfig, roleAutoAssign: merged };
-    setSavingCfg(true);
-    try {
-      await api.events.actions.update(eventId, action.id, {
-        config: JSON.stringify(newConfig),
-      });
-      setCfg(merged);
-      toast.success("ロール自動割当設定を保存しました");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存に失敗しました");
-    } finally {
-      setSavingCfg(false);
-    }
-  };
 
   const handleReject = useCallback(
     async (f: ParticipationForm) => {
@@ -452,123 +202,11 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
         </div>
       </section>
 
-      {/* === ロール自動割当設定 (折りたたみ) === */}
-      <section style={s.mapBox} aria-label="ロール自動割当設定">
-        <button
-          type="button"
-          style={s.mapToggle}
-          onClick={() => setShowSettings((v) => !v)}
-        >
-          <span style={s.mapTitle}>
-            ロール自動割当設定{cfg.enabled ? " (有効)" : ""}
-          </span>
-          <span style={s.mapCaret}>{showSettings ? "▲" : "▼"}</span>
-        </button>
-
-        {showSettings && (
-          <div style={s.mapBody}>
-            <label style={s.mapToggleRow}>
-              <input
-                type="checkbox"
-                checked={cfg.enabled}
-                onChange={(e) =>
-                  setCfg((c) => ({ ...c, enabled: e.target.checked }))
-                }
-              />
-              <span>有効化 (提出時に表示名解決してロールを自動付与)</span>
-            </label>
-
-            <div style={s.mapField}>
-              <span style={s.mapFieldLabel}>ロール管理アクション</span>
-              {rmActions === null ? (
-                <span style={s.mapMuted}>取得中...</span>
-              ) : rmActions.length === 0 ? (
-                <span style={s.mapMuted}>
-                  role_management アクションがありません。先に作成してください。
-                </span>
-              ) : rmActions.length === 1 ? (
-                <span style={s.mapValue}>
-                  {rmActions[0].id === rmActionId
-                    ? "(このイベントの role_management)"
-                    : ""}
-                </span>
-              ) : (
-                <select
-                  value={rmActionId}
-                  onChange={(e) =>
-                    setCfg((c) => ({
-                      ...c,
-                      roleManagementActionId: e.target.value,
-                    }))
-                  }
-                  style={s.mapSelect}
-                >
-                  <option value="">選択してください</option>
-                  {rmActions.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.id}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {!rmActionId ? (
-              <div style={s.mapNote}>
-                ロール管理アクションを選択するとマッピングを編集できます。
-              </div>
-            ) : roles === null ? (
-              <span style={s.mapMuted}>ロール取得中...</span>
-            ) : (
-              <>
-                <div style={s.mapSection}>
-                  <div style={s.mapSectionTitle}>希望活動 → 付与ロール</div>
-                  {ACTIVITY_KEYS.map((k) => (
-                    <div key={k} style={s.mapMapping}>
-                      <span style={s.mapKey}>{ACTIVITY_LABEL[k]}</span>
-                      <RoleMultiSelect
-                        roles={roles}
-                        selected={cfg.activity[k]}
-                        onToggle={(id) => toggleActivity(k, id)}
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <div style={s.mapSection}>
-                  <div style={s.mapSectionTitle}>開発役職 → 付与ロール</div>
-                  {DEV_ROLE_KEYS.map((k) => (
-                    <div key={k} style={s.mapMapping}>
-                      <span style={s.mapKey}>{DEV_ROLE_LABEL[k]}</span>
-                      <RoleMultiSelect
-                        roles={roles}
-                        selected={cfg.devRole[k]}
-                        onToggle={(id) => toggleDevRole(k, id)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {cfg.enabled && !rmActionId && (
-              <div style={s.mapWarn}>
-                有効化されていますが、ロール管理アクションが未選択です。
-              </div>
-            )}
-
-            <div style={s.mapActions}>
-              <Button
-                size="sm"
-                onClick={() => void handleSaveCfg()}
-                disabled={savingCfg}
-              >
-                {savingCfg ? "保存中..." : "保存"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </section>
+      <RoleAutoAssignSettings
+        eventId={eventId}
+        action={action}
+        onResolved={handleResolved}
+      />
 
       <h3 style={s.h3}>参加届 ({forms.length}件)</h3>
 
@@ -720,156 +358,6 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
   );
 }
 
-// 未解決 (slackUserId=null) の提出に対する手動紐付け UI。
-// roleManagementActionId が未設定なら注記のみ。設定済みなら workspace
-// メンバーを取得し、検索 → 選択 → 実行で linkSlackUser (付与は BE 側)。
-function LinkSlackUserRow({
-  eventId,
-  formId,
-  roleManagementActionId,
-  disabled,
-  onLinked,
-}: {
-  eventId: string;
-  formId: string;
-  roleManagementActionId: string;
-  disabled: boolean;
-  onLinked: () => void;
-}) {
-  const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const [members, setMembers] = useState<SlackUser[] | null>(null);
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  // open かつ actionId 設定済みのときだけ取得。actionId 変化時のみ再取得。
-  useEffect(() => {
-    if (!open || !roleManagementActionId) return;
-    let cancelled = false;
-    setMembers(null);
-    api.roles
-      .workspaceMembers(eventId, roleManagementActionId)
-      .then((list) => {
-        if (cancelled) return;
-        setMembers(Array.isArray(list) ? list : []);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setMembers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, eventId, roleManagementActionId]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const all = members ?? [];
-    if (!q) return all.slice(0, 100);
-    return all
-      .filter(
-        (u) =>
-          u.name.toLowerCase().includes(q) ||
-          (u.realName?.toLowerCase().includes(q) ?? false) ||
-          (u.displayName?.toLowerCase().includes(q) ?? false) ||
-          u.id.toLowerCase().includes(q),
-      )
-      .slice(0, 100);
-  }, [members, search]);
-
-  if (!roleManagementActionId) {
-    return (
-      <div style={s.linkNote}>
-        手動紐付けには「ロール自動割当設定」でロール管理アクションを先に設定してください。
-      </div>
-    );
-  }
-
-  if (!open) {
-    return (
-      <div style={s.linkRow}>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled}
-          onClick={() => setOpen(true)}
-        >
-          Slackユーザーを紐付け
-        </Button>
-      </div>
-    );
-  }
-
-  const handleLink = async () => {
-    if (!selected) {
-      toast.error("ユーザーを選択してください");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await api.participation.linkSlackUser(eventId, formId, selected);
-      toast.success("Slackユーザーを紐付け、ロールを付与しました");
-      onLinked();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "紐付けに失敗しました");
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div style={s.linkBox}>
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="名前 / @handle / User ID で検索..."
-        style={s.linkSearch}
-        disabled={submitting}
-      />
-      <div style={s.linkList}>
-        {members === null ? (
-          <div style={s.mapMuted}>メンバー取得中...</div>
-        ) : filtered.length === 0 ? (
-          <div style={s.mapMuted}>該当するメンバーがいません</div>
-        ) : (
-          filtered.map((u) => (
-            <label key={u.id} style={s.linkOption}>
-              <input
-                type="radio"
-                name={`link-${formId}`}
-                checked={selected === u.id}
-                onChange={() => setSelected(u.id)}
-                disabled={submitting}
-              />
-              <span>
-                {u.displayName || u.realName || u.name}{" "}
-                <span style={s.mapMuted}>@{u.name}</span>
-              </span>
-            </label>
-          ))
-        )}
-      </div>
-      <div style={s.linkActions}>
-        <Button
-          size="sm"
-          disabled={submitting || !selected}
-          onClick={() => void handleLink()}
-        >
-          {submitting ? "紐付け中..." : "紐付けて付与"}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={submitting}
-          onClick={() => setOpen(false)}
-        >
-          キャンセル
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 const badgeBase: CSSProperties = {
   flexShrink: 0,
   padding: "0.125rem 0.5rem",
@@ -917,92 +405,6 @@ const s: Record<string, CSSProperties> = {
     background: colors.background,
     color: colors.text,
   },
-  // === マッピング設定 ===
-  mapBox: {
-    border: `1px solid ${colors.border}`,
-    borderRadius: "0.5rem",
-    background: colors.surface,
-    marginBottom: "1rem",
-  },
-  mapToggle: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    padding: "0.75rem 1rem",
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    fontSize: "0.9rem",
-    color: colors.text,
-  },
-  mapTitle: { fontWeight: 600 },
-  mapCaret: { fontSize: "0.7rem", color: colors.textSecondary },
-  mapBody: {
-    padding: "0 1rem 1rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.75rem",
-  },
-  mapToggleRow: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    fontSize: "0.875rem",
-    cursor: "pointer",
-  },
-  mapField: { display: "flex", flexDirection: "column", gap: "0.25rem" },
-  mapFieldLabel: { fontSize: "0.75rem", color: colors.textSecondary },
-  mapValue: { fontSize: "0.875rem", color: colors.text },
-  mapMuted: { fontSize: "0.8rem", color: colors.textMuted },
-  mapSelect: {
-    padding: "0.4rem 0.5rem",
-    border: `1px solid ${colors.borderStrong}`,
-    borderRadius: "0.375rem",
-    fontSize: "0.875rem",
-    maxWidth: 360,
-    background: colors.background,
-    color: colors.text,
-  },
-  mapNote: {
-    fontSize: "0.8rem",
-    color: colors.textSecondary,
-    padding: "0.5rem 0",
-  },
-  mapSection: { display: "flex", flexDirection: "column", gap: "0.375rem" },
-  mapSectionTitle: {
-    fontSize: "0.8rem",
-    fontWeight: 600,
-    color: colors.text,
-    marginTop: "0.25rem",
-  },
-  mapMapping: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "0.75rem",
-    flexWrap: "wrap",
-  },
-  mapKey: {
-    fontSize: "0.8rem",
-    color: colors.text,
-    minWidth: 110,
-    paddingTop: "0.2rem",
-  },
-  roleChecks: { display: "flex", flexWrap: "wrap", gap: "0.5rem", flex: 1 },
-  roleCheck: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.25rem",
-    fontSize: "0.8rem",
-  },
-  mapWarn: {
-    padding: "0.5rem 0.75rem",
-    background: colors.warningSubtle,
-    border: `1px solid ${colors.warning}`,
-    borderRadius: 4,
-    fontSize: "0.8rem",
-  },
-  mapActions: { display: "flex", justifyContent: "flex-end" },
   h3: { margin: "0 0 0.75rem", fontSize: "1rem" },
   list: { display: "flex", flexDirection: "column", gap: "0.75rem" },
   card: {
@@ -1102,47 +504,6 @@ const s: Record<string, CSSProperties> = {
     fontSize: "0.75rem",
     color: colors.textMuted,
   },
-  // === 手動紐付け ===
-  linkRow: { marginTop: "0.625rem" },
-  linkNote: {
-    marginTop: "0.625rem",
-    fontSize: "0.75rem",
-    color: colors.textMuted,
-  },
-  linkBox: {
-    marginTop: "0.625rem",
-    padding: "0.625rem",
-    border: `1px solid ${colors.borderStrong}`,
-    borderRadius: 6,
-    background: colors.background,
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.5rem",
-  },
-  linkSearch: {
-    padding: "0.4rem 0.5rem",
-    border: `1px solid ${colors.borderStrong}`,
-    borderRadius: 4,
-    fontSize: "0.8rem",
-    background: colors.background,
-    color: colors.text,
-  },
-  linkList: {
-    maxHeight: 200,
-    overflowY: "auto",
-    border: `1px solid ${colors.border}`,
-    borderRadius: 4,
-    padding: "0.25rem",
-  },
-  linkOption: {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    padding: "0.25rem 0.375rem",
-    fontSize: "0.8rem",
-    cursor: "pointer",
-  },
-  linkActions: { display: "flex", gap: "0.5rem" },
   empty: {
     padding: "1.5rem",
     textAlign: "center",
