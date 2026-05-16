@@ -11,6 +11,7 @@
  *   テスト側が依存関係を明示できる)。
  */
 import { testDb } from "./db";
+import { encryptToken } from "../../src/services/crypto";
 import {
   workspaces,
   events,
@@ -21,6 +22,8 @@ import {
   pollOptions,
   slackRoles,
   slackRoleMembers,
+  interviewers,
+  interviewerSlots,
 } from "../../src/db/schema";
 
 let seq = 0;
@@ -182,5 +185,72 @@ export async function makeSlackRoleMember(
     addedAt: NOW,
   } satisfies typeof slackRoleMembers.$inferInsert;
   await db.insert(slackRoleMembers).values(row);
+  return row;
+}
+
+/**
+ * 006-0-2: 暗号化済みトークンを持つ workspace を seed する。
+ *
+ * `makeWorkspace` は botToken/signingSecret を平文 ("xoxb-test") で入れるため、
+ * 本番の `createSlackClientForWorkspace`(内部で `decryptToken`) を通す
+ * characterization テストでは復号に失敗する。ここでは test の
+ * `WORKSPACE_TOKEN_KEY`(env.ts と同値) で `encryptToken` し、本番の
+ * 復号パスをそのまま動かせる workspace を作る。
+ *
+ * tokenKey はデフォルトで `test/helpers/env.ts` の値と一致させる。
+ */
+const TEST_TOKEN_KEY = "dGVzdC10ZXN0LXRlc3QtdGVzdC10ZXN0LXRlc3QtMzI=";
+
+export async function makeEncryptedWorkspace(
+  over: Partial<typeof workspaces.$inferInsert> = {},
+  opts: { botToken?: string; signingSecret?: string; tokenKey?: string } = {},
+) {
+  const db = testDb();
+  const tokenKey = opts.tokenKey ?? TEST_TOKEN_KEY;
+  const botPlain = opts.botToken ?? "xoxb-decrypted-bot-token";
+  const secretPlain = opts.signingSecret ?? "decrypted-signing-secret";
+  const row = {
+    id: nextId("ws"),
+    name: "Encrypted Workspace",
+    slackTeamId: nextId("T"),
+    botToken: await encryptToken(botPlain, tokenKey),
+    signingSecret: await encryptToken(secretPlain, tokenKey),
+    createdAt: NOW,
+    ...over,
+  } satisfies typeof workspaces.$inferInsert;
+  await db.insert(workspaces).values(row);
+  return { row, botPlain, secretPlain };
+}
+
+export async function makeInterviewer(
+  eventActionId: string,
+  over: Partial<typeof interviewers.$inferInsert> = {},
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("itv"),
+    eventActionId,
+    name: "面接官 太郎",
+    enabled: 1,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...over,
+  } satisfies typeof interviewers.$inferInsert;
+  await db.insert(interviewers).values(row);
+  return row;
+}
+
+export async function makeInterviewerSlot(
+  interviewerId: string,
+  slotDatetime: string,
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("slot"),
+    interviewerId,
+    slotDatetime,
+    createdAt: NOW,
+  } satisfies typeof interviewerSlots.$inferInsert;
+  await db.insert(interviewerSlots).values(row);
   return row;
 }
