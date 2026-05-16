@@ -10,7 +10,8 @@ import { colors } from "../styles/tokens";
 // ADR-0008 / Sprint 12 PR2:
 // PR レビュー依頼の一覧 + 新規作成 + 編集 + 削除を行うタブコンポーネント。
 // タスク UI に近いカード一覧スタイルで、完了/クローズはトグルで非表示にできる。
-// Sprint 17 PR1: 各カードに LGTM 数 (N/2) を表示する。
+// 各カードに LGTM 数 (N / しきい値) を表示する。しきい値は action.config の
+// lgtmThreshold（未設定なら 2）で、設定タブ (PRReviewSettingsForm) から変更する。
 // Sprint 22: 担当レビュアーを N 人対応（チップ式 UI）。
 // 旧 PRReview.reviewerSlackId は後方互換のため残置するが、新 UI では未使用。
 
@@ -38,7 +39,14 @@ const styles = {
   } as CSSProperties,
 };
 
-export function PRReviewListTab({ eventId }: { eventId: string }) {
+export function PRReviewListTab({
+  eventId,
+  lgtmThreshold,
+}: {
+  eventId: string;
+  // action.config.lgtmThreshold（未設定なら 2）。カードの LGTM 表示に使う。
+  lgtmThreshold: number;
+}) {
   const [reviews, setReviews] = useState<PRReviewWithLgtm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +132,7 @@ export function PRReviewListTab({ eventId }: { eventId: string }) {
         <PRReviewCard
           key={r.id}
           review={r}
+          lgtmThreshold={lgtmThreshold}
           onSelect={() => setEditing(r)}
           eventId={eventId}
           onChanged={() => setRefreshKey((k) => k + 1)}

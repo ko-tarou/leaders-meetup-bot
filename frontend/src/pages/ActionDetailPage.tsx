@@ -8,7 +8,12 @@ import {
 } from "react-router-dom";
 import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
-import type { EventAction, EventActionType, Meeting } from "../types";
+import type {
+  EventAction,
+  EventActionType,
+  Meeting,
+  PRReviewListConfig,
+} from "../types";
 import { ACTION_META } from "../lib/eventTabs";
 import { TasksTab } from "../components/TasksTab";
 import { PRReviewListTab } from "../components/PRReviewListTab";
@@ -46,6 +51,20 @@ import { colors } from "../styles/tokens";
 // パンくずリスト + 一覧に戻るリンクで現在地と帰還動線を明確化。
 
 type SubTabDef = { id: string; label: string };
+
+// pr_review_list action.config (JSON 文字列) から LGTM しきい値を取り出す。
+// 未設定 / 不正値はデフォルト 2。BE のデフォルトと一致させる。
+const DEFAULT_LGTM_THRESHOLD = 2;
+function resolveLgtmThreshold(configJson: string): number {
+  try {
+    const cfg = JSON.parse(configJson || "{}") as PRReviewListConfig;
+    const v = cfg?.lgtmThreshold;
+    if (typeof v === "number" && Number.isInteger(v) && v >= 1) return v;
+  } catch {
+    // 壊れた config は無視してデフォルトにフォールバック
+  }
+  return DEFAULT_LGTM_THRESHOLD;
+}
 
 // channel 管理サブタブを持つ action 種別
 const ACTION_TYPES_WITH_CHANNELS: EventActionType[] = [
@@ -516,7 +535,12 @@ function ActionMainContent({
     case "task_management":
       return <TasksTab eventId={eventId} />;
     case "pr_review_list":
-      return <PRReviewListTab eventId={eventId} />;
+      return (
+        <PRReviewListTab
+          eventId={eventId}
+          lgtmThreshold={resolveLgtmThreshold(action.config)}
+        />
+      );
     case "member_application":
       return <MemberApplicationListTab eventId={eventId} />;
     case "schedule_polling":
@@ -563,8 +587,8 @@ function ActionSettingsContent({
         <PlaceholderContent label="将来の追加設定がここに表示されます。チャンネル管理は「チャンネル管理」タブから行ってください。" />
       );
     case "pr_review_list":
-      // 005-github-webhook: pr_review_list 専用の汎用設定。
-      // 現状は config.githubRepo (連携先 GitHub repo) のみ。
+      // pr_review_list 専用の汎用設定。PR レビューは Slack 中心の設計に
+      // 移行したため、ここで設定するのは LGTM しきい値 (config.lgtmThreshold) のみ。
       return (
         <PRReviewSettingsForm
           eventId={eventId}

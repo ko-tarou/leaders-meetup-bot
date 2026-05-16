@@ -226,12 +226,12 @@ export function PRReviewForm({
             style={styles.fullInput}
           />
         </Field>
-        <Field label="URL（任意、PR/Issue リンク等）">
+        <Field label="参考リンク（任意）">
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             disabled={submitting}
-            placeholder="https://github.com/..."
+            placeholder="https://..."
             style={styles.fullInput}
           />
         </Field>

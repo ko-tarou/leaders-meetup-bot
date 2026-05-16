@@ -11,9 +11,6 @@ import { useConfirm } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
 import { useIsReadOnly } from "../../hooks/usePublicMode";
 
-// Sprint 17 PR1: 自動完了に必要な LGTM 数（backend と一致させる）
-const LGTM_THRESHOLD = 2;
-
 const STATUS_LABEL: Record<PRReviewStatus, string> = {
   open: "未着手",
   in_review: "レビュー中",
@@ -82,6 +79,8 @@ export type PRReviewWithLgtm = PRReview & {
 
 type PRReviewCardProps = {
   review: PRReviewWithLgtm;
+  // 自動完了に必要な LGTM 数（action.config.lgtmThreshold、未設定なら 2）。
+  lgtmThreshold: number;
   onSelect: () => void;
   // 005-pr-rereview: 再レビュー依頼用。eventId 未指定ならボタン非表示。
   eventId?: string;
@@ -90,6 +89,7 @@ type PRReviewCardProps = {
 
 export function PRReviewCard({
   review: r,
+  lgtmThreshold,
   onSelect,
   eventId,
   onChanged,
@@ -185,7 +185,7 @@ export function PRReviewCard({
             color: colors.text,
           }}
         >
-          👍 LGTM {r.lgtmCount}/{LGTM_THRESHOLD}
+          👍 LGTM {r.lgtmCount}/{lgtmThreshold}
         </span>
         <span style={{ ...styles.badge, background: STATUS_COLOR[r.status] }}>
           {STATUS_LABEL[r.status]}
