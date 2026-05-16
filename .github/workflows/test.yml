@@ -1,0 +1,31 @@
+name: test
+
+# 006-0-1: テスト基盤 CI。
+# push / PR で typecheck と vitest (miniflare D1) を実行する。
+# secrets 不要 (本番 D1 / Cloudflare には接続しない。miniflare のプロセス内
+# SQLite のみ使用)。
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (production tsconfig)
+        run: npm run typecheck
+
+      - name: Run tests (vitest + miniflare D1)
+        run: npm run test
