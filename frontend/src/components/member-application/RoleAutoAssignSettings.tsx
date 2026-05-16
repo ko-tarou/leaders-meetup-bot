@@ -189,7 +189,15 @@ export function RoleAutoAssignSettings({
     });
 
   const handleSaveCfg = async () => {
-    if (cfg.enabled && !rmActionId) {
+    // role_management が 1 件だけならその id を確定的に採用する。
+    // auto-select の useEffect は render 後に走るため、有効化トグル直後に
+    // 保存すると rmActionId が空のまま early-return し roleAutoAssign が
+    // 一切保存されない race があった (運営しか割り当てられない/子ロールが
+    // 保存できないと見える根本原因)。保存時に決定論的に解決して回避する。
+    const resolvedRmActionId =
+      rmActionId ||
+      (rmActions && rmActions.length === 1 ? rmActions[0].id : "");
+    if (cfg.enabled && !resolvedRmActionId) {
       toast.error("ロール管理アクションを選択してください");
       return;
     }
@@ -204,10 +212,29 @@ export function RoleAutoAssignSettings({
     } catch {
       baseConfig = {};
     }
+    // workspaceId も resolvedRmActionId に対応するものを引き直す
+    // (rmActionId 空時 selectedWorkspaceId が "" になる race を回避)。
+    const resolvedWorkspaceId =
+      (() => {
+        const a = (rmActions ?? []).find((x) => x.id === resolvedRmActionId);
+        if (!a) return "";
+        try {
+          const parsed: unknown = JSON.parse(a.config || "{}");
+          if (parsed && typeof parsed === "object") {
+            const w = (parsed as Record<string, unknown>).workspaceId;
+            if (typeof w === "string") return w;
+          }
+        } catch {
+          // noop
+        }
+        return "";
+      })() ||
+      selectedWorkspaceId ||
+      cfg.workspaceId;
     const merged: RoleAutoAssignConfig = {
       ...cfg,
-      roleManagementActionId: rmActionId,
-      workspaceId: selectedWorkspaceId || cfg.workspaceId,
+      roleManagementActionId: resolvedRmActionId,
+      workspaceId: resolvedWorkspaceId,
     };
     const newConfig = { ...baseConfig, roleAutoAssign: merged };
     setSavingCfg(true);
