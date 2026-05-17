@@ -21,7 +21,12 @@ export type SlackUser = {
   is_ultra_restricted?: boolean;
 };
 
-export class SlackClient {
+import type { SlackPort } from "./ports/slack-port";
+
+// Phase 1-A: 実装は一切変更せず、現行 public メソッドが SlackPort と
+// 厳密一致することを型レベルで保証する（implements がコンパイルを通る
+// こと自体が「Port が現状を歪めず写している」ことの機械的証明）。
+export class SlackClient implements SlackPort {
   private token: string;
   private signingSecret: string;
 
