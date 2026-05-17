@@ -15,7 +15,15 @@
  */
 import { createSlackClientForWorkspace } from "./workspace";
 import { utcToJstFormat } from "./time-utils";
-import { renderTemplate } from "../domain/email/template";
+// Phase 3-2: 通知送信フローの純粋共通部（config 解釈・送信可否判定・
+// mention prefix 構築・テンプレ選択+render+trim）を src/domain/notification
+// へ抽出統合済み。application-notification と同一 domain を共有する。
+import {
+  readNotificationConfigByKey,
+  isNotificationSendable,
+  buildMentionPrefix,
+  buildNotificationText,
+} from "../domain/notification/builder";
 import type { Env } from "../types/env";
 
 export type ParticipationNotificationConfig = {
@@ -76,36 +84,15 @@ type ParticipationNotificationConfigKey =
   | "participationUnresolvedNotifications";
 
 /**
- * action.config を parse して指定キーの通知設定を取り出す。
- * 不正な JSON / 欠損は undefined を返す (= 通知無効扱い)。
- * readNotificationsConfig が parsed.notifications を返すのと対。
- */
-function readParticipationNotificationConfigByKey(
-  rawConfig: string | null | undefined,
-  configKey: ParticipationNotificationConfigKey,
-): ParticipationNotificationConfig | undefined {
-  if (!rawConfig) return undefined;
-  try {
-    const parsed = JSON.parse(rawConfig) as Partial<
-      Record<ParticipationNotificationConfigKey, ParticipationNotificationConfig>
-    >;
-    return parsed[configKey];
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * action.config を parse して participationNotifications 設定を取り出す。
  * 既存 export の後方互換維持 (シグネチャ・挙動不変)。
+ * Phase 3-2: parse 本体は domain/notification/builder の generic
+ * readNotificationConfigByKey に統合済み。
  */
 export function readParticipationNotificationsConfig(
   rawConfig: string | null | undefined,
 ): ParticipationNotificationConfig | undefined {
-  return readParticipationNotificationConfigByKey(
-    rawConfig,
-    "participationNotifications",
-  );
+  return readNotificationConfigByKey(rawConfig, "participationNotifications");
 }
 
 /**
@@ -122,12 +109,8 @@ async function sendParticipationNotificationGeneric(
     defaultTemplate: string;
   },
 ): Promise<void> {
-  const notif = readParticipationNotificationConfigByKey(
-    actionConfig,
-    opts.configKey,
-  );
-  if (!notif?.enabled) return;
-  if (!notif.workspaceId || !notif.channelId) return;
+  const notif = readNotificationConfigByKey(actionConfig, opts.configKey);
+  if (!isNotificationSendable(notif)) return;
 
   try {
     const slack = await createSlackClientForWorkspace(env, notif.workspaceId);
@@ -139,17 +122,12 @@ async function sendParticipationNotificationGeneric(
       return;
     }
 
-    const mentionIds = Array.isArray(notif.mentionUserIds)
-      ? notif.mentionUserIds.filter((u) => typeof u === "string" && u.length > 0)
-      : [];
-    const mentionPrefix = mentionIds.map((u) => `<@${u}>`).join(" ");
-
     const devRoles = Array.isArray(form.devRoles)
       ? form.devRoles.filter((r) => typeof r === "string" && r.length > 0)
       : [];
 
     const vars: Record<string, string> = {
-      mentions: mentionPrefix,
+      mentions: buildMentionPrefix(notif.mentionUserIds),
       name: form.name,
       slackName: form.slackName ?? "",
       email: form.email,
@@ -163,10 +141,11 @@ async function sendParticipationNotificationGeneric(
       submittedAt: utcToJstFormat(form.submittedAt),
     };
 
-    const template = notif.messageTemplate?.trim()
-      ? notif.messageTemplate
-      : opts.defaultTemplate;
-    const text = renderTemplate(template, vars).trim();
+    const text = buildNotificationText(
+      notif.messageTemplate,
+      opts.defaultTemplate,
+      vars,
+    );
 
     const res = await slack.postMessage(notif.channelId, text);
     if (!res.ok) {
