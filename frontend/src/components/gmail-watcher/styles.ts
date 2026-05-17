@@ -1,0 +1,245 @@
+import type { CSSProperties } from "react";
+import { colors } from "../../styles/tokens";
+
+// Phase4-6: GmailWatcherEditor.tsx から純抽出した style 定義。
+// 値・キー・順序は一字一句不変。GmailWatcherEditor 本体 / RuleCard /
+// AutoReplySection が参照する共有 style。
+
+export const styles: Record<string, CSSProperties> = {
+  wrapper: {
+    marginTop: "0.5rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 6,
+    background: colors.surface,
+  },
+  toggleHeader: {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.5rem 0.75rem",
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    textAlign: "left",
+    fontSize: "0.875rem",
+  },
+  toggleArrow: {
+    color: colors.textSecondary,
+    width: "1rem",
+  },
+  toggleLabel: {
+    fontWeight: 500,
+  },
+  toggleSummary: {
+    color: colors.textSecondary,
+    fontSize: "0.8125rem",
+    marginLeft: "auto",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  body: {
+    padding: "0.75rem",
+    borderTop: `1px solid ${colors.border}`,
+    background: colors.background,
+  },
+  sectionHeader: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: "0.5rem",
+    marginBottom: "0.5rem",
+    flexWrap: "wrap",
+  },
+  field: {
+    marginBottom: "0.75rem",
+  },
+  label: {
+    display: "block",
+    marginBottom: "0.25rem",
+    fontSize: "0.875rem",
+    fontWeight: 500,
+  },
+  toggleRow: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+  },
+  input: {
+    padding: "8px 12px",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: 4,
+    fontSize: "0.875rem",
+    width: "100%",
+    maxWidth: "500px",
+    boxSizing: "border-box",
+    background: colors.background,
+    color: colors.text,
+  },
+  textarea: {
+    padding: "8px 12px",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: 4,
+    fontSize: "0.875rem",
+    width: "100%",
+    maxWidth: "500px",
+    boxSizing: "border-box",
+    background: colors.background,
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    resize: "vertical",
+    lineHeight: 1.5,
+  },
+  memberList: {
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    padding: "0.5rem",
+    maxHeight: "240px",
+    overflowY: "auto",
+    background: colors.background,
+  },
+  memberRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.25rem 0.5rem",
+    cursor: "pointer",
+    fontSize: "0.875rem",
+  },
+  metaInline: {
+    color: colors.textMuted,
+    fontSize: "0.75rem",
+  },
+  metaSmall: {
+    color: colors.textMuted,
+    fontSize: "0.75rem",
+    marginTop: "0.25rem",
+  },
+  muted: {
+    color: colors.textMuted,
+    fontSize: "0.875rem",
+  },
+  warn: {
+    padding: "0.5rem",
+    background: colors.warningSubtle,
+    border: `1px solid ${colors.warning}`,
+    borderRadius: 4,
+    fontSize: "0.875rem",
+  },
+  placeholderList: {
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    columnGap: "0.5rem",
+    rowGap: "0.125rem",
+    padding: "0.5rem",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.surface,
+    fontSize: "0.75rem",
+    maxWidth: "500px",
+    marginTop: "0.5rem",
+  },
+  placeholderRow: {
+    display: "contents",
+  },
+  placeholderKey: {
+    color: colors.text,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  },
+  placeholderDesc: {
+    color: colors.textSecondary,
+  },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.75rem",
+    marginTop: "0.5rem",
+  },
+  noticeBox: {
+    marginTop: "0.75rem",
+    padding: "0.5rem 0.75rem",
+    background: colors.warningSubtle,
+    border: `1px solid ${colors.warning}`,
+    borderRadius: 4,
+    fontSize: "0.8125rem",
+    color: colors.text,
+    lineHeight: 1.5,
+  },
+  // Sprint 27: 自動返信セクション。messageTemplate との視覚的境界をつけるため
+  // 上方向に余白 + 上 border。
+  autoReplySection: {
+    marginTop: "1rem",
+    paddingTop: "0.75rem",
+    borderTop: `1px dashed ${colors.border}`,
+  },
+};
+
+export const ruleStyles: Record<string, CSSProperties> = {
+  card: {
+    border: `1px solid ${colors.border}`,
+    borderRadius: 4,
+    background: colors.surface,
+    marginBottom: "0.5rem",
+  },
+  cardHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    padding: "0.25rem 0.5rem",
+  },
+  cardToggle: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    background: "transparent",
+    border: "none",
+    padding: "0.25rem",
+    cursor: "pointer",
+    textAlign: "left",
+    fontSize: "0.8125rem",
+    minWidth: 0,
+  },
+  cardArrow: {
+    color: colors.textSecondary,
+    width: "1rem",
+  },
+  cardTitle: {
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+  },
+  cardSummary: {
+    color: colors.textSecondary,
+    fontSize: "0.75rem",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+    flex: 1,
+  },
+  cardActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.125rem",
+  },
+  iconButton: {
+    width: "1.75rem",
+    height: "1.75rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "transparent",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 3,
+    cursor: "pointer",
+    fontSize: "0.875rem",
+    color: colors.text,
+  },
+  cardBody: {
+    borderTop: `1px solid ${colors.border}`,
+    padding: "0.75rem",
+    background: colors.background,
+  },
+};
