@@ -10,6 +10,11 @@ import { tasks, taskAssignees } from "../db/schema";
 import { scheduleTaskReminders } from "./devhub-task-reminder";
 import { stickyRepostByChannel } from "./sticky-task-board";
 import type { DecryptedWorkspace } from "./workspace";
+import {
+  plainText,
+  mrkdwnText,
+  divider,
+} from "../domain/slack-blocks/builders";
 
 export type TaskAddModalMetadata = {
   eventId: string;
@@ -22,14 +27,14 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
     type: "modal",
     callback_id: "devhub_task_add_submit",
     private_metadata: JSON.stringify(meta),
-    title: { type: "plain_text", text: "タスクを作成" },
-    submit: { type: "plain_text", text: "作成" },
-    close: { type: "plain_text", text: "キャンセル" },
+    title: plainText("タスクを作成"),
+    submit: plainText("作成"),
+    close: plainText("キャンセル"),
     blocks: [
       {
         type: "input",
         block_id: "title_block",
-        label: { type: "plain_text", text: "タスク名" },
+        label: plainText("タスク名"),
         element: {
           type: "plain_text_input",
           action_id: "title_input",
@@ -40,7 +45,7 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
         type: "input",
         block_id: "desc_block",
         optional: true,
-        label: { type: "plain_text", text: "詳細" },
+        label: plainText("詳細"),
         element: {
           type: "plain_text_input",
           action_id: "desc_input",
@@ -52,18 +57,18 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
         type: "input",
         block_id: "assignees_block",
         optional: true,
-        label: { type: "plain_text", text: "担当者" },
+        label: plainText("担当者"),
         element: {
           type: "multi_users_select",
           action_id: "assignees_input",
-          placeholder: { type: "plain_text", text: "担当者を選択" },
+          placeholder: plainText("担当者を選択"),
         },
       },
       {
         type: "input",
         block_id: "start_date_block",
         optional: true,
-        label: { type: "plain_text", text: "開始日（任意）" },
+        label: plainText("開始日（任意）"),
         element: {
           type: "datepicker",
           action_id: "start_date_input",
@@ -73,10 +78,7 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
         type: "input",
         block_id: "start_time_block",
         optional: true,
-        label: {
-          type: "plain_text",
-          text: "開始時刻（JST、任意。日付指定時のみ有効）",
-        },
+        label: plainText("開始時刻（JST、任意。日付指定時のみ有効）"),
         element: {
           type: "timepicker",
           action_id: "start_time_input",
@@ -86,7 +88,7 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
         type: "input",
         block_id: "due_date_block",
         optional: true,
-        label: { type: "plain_text", text: "期限日（任意）" },
+        label: plainText("期限日（任意）"),
         element: {
           type: "datepicker",
           action_id: "due_date_input",
@@ -96,10 +98,7 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
         type: "input",
         block_id: "due_time_block",
         optional: true,
-        label: {
-          type: "plain_text",
-          text: "期限時刻（JST、任意。日付指定時のみ有効）",
-        },
+        label: plainText("期限時刻（JST、任意。日付指定時のみ有効）"),
         element: {
           type: "timepicker",
           action_id: "due_time_input",
@@ -108,18 +107,18 @@ export function buildTaskAddModalView(meta: TaskAddModalMetadata) {
       {
         type: "input",
         block_id: "priority_block",
-        label: { type: "plain_text", text: "優先度" },
+        label: plainText("優先度"),
         element: {
           type: "static_select",
           action_id: "priority_input",
           initial_option: {
-            text: { type: "plain_text", text: "中" },
+            text: plainText("中"),
             value: "mid",
           },
           options: [
-            { text: { type: "plain_text", text: "低" }, value: "low" },
-            { text: { type: "plain_text", text: "中" }, value: "mid" },
-            { text: { type: "plain_text", text: "高" }, value: "high" },
+            { text: plainText("低"), value: "low" },
+            { text: plainText("中"), value: "mid" },
+            { text: plainText("高"), value: "high" },
           ],
         },
       },
@@ -176,14 +175,14 @@ export function buildPRReviewAddModal(
     type: "modal",
     callback_id: "sticky_pr_review_add_submit",
     private_metadata: JSON.stringify(meta),
-    title: { type: "plain_text", text: "レビュー依頼を作成" },
-    submit: { type: "plain_text", text: "作成" },
-    close: { type: "plain_text", text: "キャンセル" },
+    title: plainText("レビュー依頼を作成"),
+    submit: plainText("作成"),
+    close: plainText("キャンセル"),
     blocks: [
       {
         type: "input",
         block_id: "title_block",
-        label: { type: "plain_text", text: "タイトル" },
+        label: plainText("タイトル"),
         element: {
           type: "plain_text_input",
           action_id: "title_input",
@@ -194,7 +193,7 @@ export function buildPRReviewAddModal(
         type: "input",
         block_id: "url_block",
         optional: true,
-        label: { type: "plain_text", text: "URL（PR/Issue リンク）" },
+        label: plainText("URL（PR/Issue リンク）"),
         element: {
           type: "plain_text_input",
           action_id: "url_input",
@@ -204,7 +203,7 @@ export function buildPRReviewAddModal(
         type: "input",
         block_id: "desc_block",
         optional: true,
-        label: { type: "plain_text", text: "説明" },
+        label: plainText("説明"),
         element: {
           type: "plain_text_input",
           action_id: "desc_input",
@@ -216,12 +215,12 @@ export function buildPRReviewAddModal(
         type: "input",
         block_id: "reviewer_block",
         optional: true,
-        label: { type: "plain_text", text: "レビュアー（任意・最大5人）" },
+        label: plainText("レビュアー（任意・最大5人）"),
         element: {
           type: "multi_users_select",
           action_id: "reviewer_input",
           max_selected_items: PR_REVIEW_MAX_REVIEWERS,
-          placeholder: { type: "plain_text", text: "レビュアーを選択" },
+          placeholder: plainText("レビュアーを選択"),
         },
       },
     ],
@@ -284,14 +283,14 @@ export function buildPRReviewEditModal(params: {
     type: "modal",
     callback_id: "sticky_pr_review_edit_submit",
     private_metadata: JSON.stringify(meta),
-    title: { type: "plain_text", text: "レビュー依頼を編集" },
-    submit: { type: "plain_text", text: "保存" },
-    close: { type: "plain_text", text: "閉じる" },
+    title: plainText("レビュー依頼を編集"),
+    submit: plainText("保存"),
+    close: plainText("閉じる"),
     blocks: [
       {
         type: "input",
         block_id: "title_block",
-        label: { type: "plain_text", text: "タイトル" },
+        label: plainText("タイトル"),
         element: {
           type: "plain_text_input",
           action_id: "title_input",
@@ -303,7 +302,7 @@ export function buildPRReviewEditModal(params: {
         type: "input",
         block_id: "desc_block",
         optional: true,
-        label: { type: "plain_text", text: "詳細（説明）" },
+        label: plainText("詳細（説明）"),
         element: {
           type: "plain_text_input",
           action_id: "desc_input",
@@ -318,7 +317,7 @@ export function buildPRReviewEditModal(params: {
         type: "input",
         block_id: "url_block",
         optional: true,
-        label: { type: "plain_text", text: "参考リンク" },
+        label: plainText("参考リンク"),
         element: {
           type: "plain_text_input",
           action_id: "url_input",
@@ -329,50 +328,48 @@ export function buildPRReviewEditModal(params: {
         type: "input",
         block_id: "reviewer_block",
         optional: true,
-        label: { type: "plain_text", text: "レビュアー（最大5人）" },
+        label: plainText("レビュアー（最大5人）"),
         element: {
           type: "multi_users_select",
           action_id: "reviewer_input",
           max_selected_items: PR_REVIEW_MAX_REVIEWERS,
-          placeholder: { type: "plain_text", text: "レビュアーを選択" },
+          placeholder: plainText("レビュアーを選択"),
           ...(reviewers.length > 0
             ? { initial_users: reviewers }
             : {}),
         },
       },
-      { type: "divider" },
+      divider(),
       {
         type: "actions",
         elements: [
           {
             type: "button",
             action_id: `sticky_pr_done_${params.reviewId}`,
-            text: { type: "plain_text", text: "✓ 強制完了" },
+            text: plainText("✓ 強制完了"),
             value: actionValue,
             confirm: {
-              title: { type: "plain_text", text: "強制完了" },
-              text: {
-                type: "mrkdwn",
-                text: "このレビュー依頼を完了（マージ済）にします。よろしいですか？",
-              },
-              confirm: { type: "plain_text", text: "完了にする" },
-              deny: { type: "plain_text", text: "キャンセル" },
+              title: plainText("強制完了"),
+              text: mrkdwnText(
+                "このレビュー依頼を完了（マージ済）にします。よろしいですか？",
+              ),
+              confirm: plainText("完了にする"),
+              deny: plainText("キャンセル"),
             },
           },
           {
             type: "button",
             action_id: `sticky_pr_rereview_${params.reviewId}`,
-            text: { type: "plain_text", text: "🔄 再レビュー依頼" },
+            text: plainText("🔄 再レビュー依頼"),
             value: actionValue,
             style: "danger",
             confirm: {
-              title: { type: "plain_text", text: "再レビュー依頼" },
-              text: {
-                type: "mrkdwn",
-                text: "LGTM をリセットして再レビュー依頼します。よろしいですか？",
-              },
-              confirm: { type: "plain_text", text: "依頼する" },
-              deny: { type: "plain_text", text: "キャンセル" },
+              title: plainText("再レビュー依頼"),
+              text: mrkdwnText(
+                "LGTM をリセットして再レビュー依頼します。よろしいですか？",
+              ),
+              confirm: plainText("依頼する"),
+              deny: plainText("キャンセル"),
             },
           },
         ],
