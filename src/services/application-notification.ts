@@ -26,6 +26,15 @@ import { utcToJstFormat } from "./time-utils";
 // 参照しているため、テスト無改変 green を担保する目的でのみ温存している
 // （本番コードはどこからもこの shim を参照しない）。
 import { renderTemplate } from "../domain/email/template";
+// Phase 3-2: 通知送信フローの純粋共通部（config 解釈・送信可否判定・
+// mention prefix 構築・テンプレ選択+render+trim）を src/domain/notification
+// へ抽出統合済み。participation-notification と同一 domain を共有する。
+import {
+  readNotificationConfigByKey,
+  isNotificationSendable,
+  buildMentionPrefix,
+  buildNotificationText,
+} from "../domain/notification/builder";
 import type { Env } from "../types/env";
 
 // テスト経路温存用 re-export shim（上記コメント参照）。本番未参照。
@@ -79,15 +88,7 @@ export const DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
 export function readNotificationsConfig(
   rawConfig: string | null | undefined,
 ): ApplicationNotificationConfig | undefined {
-  if (!rawConfig) return undefined;
-  try {
-    const parsed = JSON.parse(rawConfig) as {
-      notifications?: ApplicationNotificationConfig;
-    };
-    return parsed.notifications;
-  } catch {
-    return undefined;
-  }
+  return readNotificationConfigByKey(rawConfig, "notifications");
 }
 
 /**
@@ -100,8 +101,7 @@ export async function sendApplicationNotification(
   application: ApplicationLike,
 ): Promise<void> {
   const notif = readNotificationsConfig(actionConfig);
-  if (!notif?.enabled) return;
-  if (!notif.workspaceId || !notif.channelId) return;
+  if (!isNotificationSendable(notif)) return;
 
   try {
     const slack = await createSlackClientForWorkspace(env, notif.workspaceId);
@@ -113,13 +113,8 @@ export async function sendApplicationNotification(
       return;
     }
 
-    const mentionIds = Array.isArray(notif.mentionUserIds)
-      ? notif.mentionUserIds.filter((u) => typeof u === "string" && u.length > 0)
-      : [];
-    const mentionPrefix = mentionIds.map((u) => `<@${u}>`).join(" ");
-
     const vars: Record<string, string> = {
-      mentions: mentionPrefix,
+      mentions: buildMentionPrefix(notif.mentionUserIds),
       name: application.name,
       email: application.email,
       appliedAt: utcToJstFormat(application.appliedAt),
@@ -131,10 +126,11 @@ export async function sendApplicationNotification(
         : "",
     };
 
-    const template = notif.messageTemplate?.trim()
-      ? notif.messageTemplate
-      : DEFAULT_TEMPLATE;
-    const text = renderTemplate(template, vars).trim();
+    const text = buildNotificationText(
+      notif.messageTemplate,
+      DEFAULT_TEMPLATE,
+      vars,
+    );
 
     const res = await slack.postMessage(notif.channelId, text);
     if (!res.ok) {
