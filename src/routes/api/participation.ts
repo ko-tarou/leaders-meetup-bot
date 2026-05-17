@@ -20,6 +20,16 @@ import {
 // characterization は無改変で green。eventActions など他テーブルアクセス・
 // 副作用（通知/ロール付与）の呼び出し位置は route の責務のまま据え置く。
 import { getParticipationFormRepository } from "../../repositories/participation-form-repository";
+// Phase 2-A: 提出ハンドラの純粋な判断/変換ロジックを domain へ抽出。
+// バリデーション・devRoles 正規化・token→applicationId 判定・fields 組み立て
+// は副作用ゼロの純関数。I/O（DB/Slack/通知/ロール付与）と時刻取得・
+// トランザクション/fail-soft 境界・呼び出し順序は route のまま据え置く。
+import {
+  validateSubmission,
+  normalizeDevRoles,
+  resolveApplicationId,
+  buildParticipationFields,
+} from "../../domain/participation/submission";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
 //
@@ -28,11 +38,9 @@ import { getParticipationFormRepository } from "../../repositories/participation
 // 判定するため、そこに "/participation/" prefix を除外登録している
 // (実際の bypass 判定は api.ts:56-82 / 除外登録は api.ts の sub.startsWith)。
 export const participationRouter = new Hono<{ Bindings: Env }>();
-
-const VALID_GRADE = ["1", "2", "3", "4", "graduate"];
-const VALID_GENDER = ["male", "female", "other", "prefer_not"];
-const VALID_ACTIVITY = ["event", "dev", "both"];
-const VALID_DEV_ROLES = ["pm", "frontend", "backend", "android", "ios", "infra"];
+// 提出ボディの検証ルール（VALID_GRADE/GENDER/ACTIVITY/DEV_ROLES）と
+// その判定・正規化は Phase 2-A で domain/participation/submission.ts へ
+// 移設（振る舞い不変）。route はここで純関数を呼ぶだけに薄くする。
 
 // ---------------------------------------------------------------------------
 // (a) 公開: token から prefill 用の応募情報を返す。
@@ -110,36 +118,11 @@ participationRouter.post("/participation/:eventId", async (c) => {
     devRoles?: string[];
   }>();
 
-  // 必須: name / email
-  if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
-    return c.json({ error: "name is required" }, 400);
-  }
-  if (!body.email || typeof body.email !== "string" || !body.email.trim()) {
-    return c.json({ error: "email is required" }, 400);
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) {
-    return c.json({ error: "invalid email format" }, 400);
-  }
-  if (
-    body.grade !== undefined &&
-    body.grade !== "" &&
-    !VALID_GRADE.includes(body.grade)
-  ) {
-    return c.json({ error: "invalid grade" }, 400);
-  }
-  if (
-    body.gender !== undefined &&
-    body.gender !== "" &&
-    !VALID_GENDER.includes(body.gender)
-  ) {
-    return c.json({ error: "invalid gender" }, 400);
-  }
-  if (
-    body.desiredActivity !== undefined &&
-    body.desiredActivity !== "" &&
-    !VALID_ACTIVITY.includes(body.desiredActivity)
-  ) {
-    return c.json({ error: "invalid desiredActivity" }, 400);
+  // 純粋なバリデーション判定は domain へ委譲（順序・条件・エラー文字列・
+  // 短絡順すべて現状と同一）。400 応答の生成だけ route の責務に残す。
+  const validation = validateSubmission(body);
+  if (!validation.ok) {
+    return c.json({ error: validation.error }, 400);
   }
 
   // event 存在確認
@@ -152,6 +135,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
 
   // token 解決: 一致 & eventId 一致のときのみ applicationId に紐づける。
   // 不正 token は 400 にせず直接提出扱い (applicationId=null)。
+  // DB SELECT（副作用）は route に残し、紐付け判定だけ domain 純関数へ。
   let applicationId: string | null = null;
   if (body.token) {
     const app = await db
@@ -159,35 +143,15 @@ participationRouter.post("/participation/:eventId", async (c) => {
       .from(applications)
       .where(eq(applications.participationToken, body.token))
       .get();
-    if (app && app.eventId === eventId) applicationId = app.id;
+    applicationId = resolveApplicationId(app, eventId);
   }
 
-  // devRoles は配列なら許可ロールだけにフィルタ、それ以外は空配列。
-  const devRoles = Array.isArray(body.devRoles)
-    ? body.devRoles.filter(
-        (r): r is string =>
-          typeof r === "string" && VALID_DEV_ROLES.includes(r),
-      )
-    : [];
-
+  // devRoles 正規化と fields 組み立ては純関数へ委譲（trim/空→null/
+  // boolean→0|1/JSON.stringify すべて現状の式と byte-identical）。
+  // 時刻取得 new Date() は副作用なので route に残し now を渡す。
+  const devRoles = normalizeDevRoles(body.devRoles);
   const now = new Date().toISOString();
-  const fields = {
-    eventId,
-    name: body.name.trim(),
-    // 任意入力。空/未指定は null (student_id 等の任意文字列と同扱い)
-    slackName: body.slackName?.trim() || null,
-    studentId: body.studentId?.trim() || null,
-    department: body.department?.trim() || null,
-    grade: body.grade || null,
-    email: body.email.trim(),
-    gender: body.gender || null,
-    hasAllergy: body.hasAllergy ? 1 : 0,
-    allergyDetail: body.allergyDetail?.trim() || null,
-    otherAffiliations: body.otherAffiliations?.trim() || null,
-    desiredActivity: body.desiredActivity || null,
-    devRoles: JSON.stringify(devRoles),
-    submittedAt: now,
-  };
+  const fields = buildParticipationFields(body, eventId, devRoles, now);
 
   // 保存成功後の Slack 通知 (fail-soft)。member_application アクション config の
   // participationNotifications を参照。sendApplicationNotification と完全に対の
