@@ -49,6 +49,10 @@ import {
   type SyncOperation,
 } from "../../services/role-sync";
 import type { SlackUser } from "../../services/slack-api";
+// Phase 2-B: 子⊆親 invariant の連鎖削除・循環検出に使う子孫列挙は
+// 副作用ゼロの純関数なので domain/role へ抽出。route は Repository/DB で
+// I/O → domain 純関数で判断 → I/O で反映、の薄い application フローに。
+import { collectDescendantRoleIds } from "../../domain/role/role-assign";
 
 export const rolesRouter = new Hono<{ Bindings: Env }>();
 
@@ -96,33 +100,6 @@ async function findRoleInAction(
   if (role.eventActionId !== actionId)
     return { error: "actionId mismatch", status: 400 as const };
   return { role };
-}
-
-/**
- * roles 集合から parent_role_id の子マップを構築し、roleId の全子孫
- * (自身は含まない) を BFS で列挙する。循環があっても visited で停止する。
- */
-function collectDescendantRoleIds(
-  roles: { id: string; parentRoleId: string | null }[],
-  roleId: string,
-): Set<string> {
-  const childMap = new Map<string, string[]>();
-  for (const r of roles) {
-    if (r.parentRoleId) {
-      const arr = childMap.get(r.parentRoleId) ?? [];
-      arr.push(r.id);
-      childMap.set(r.parentRoleId, arr);
-    }
-  }
-  const out = new Set<string>();
-  const queue = [...(childMap.get(roleId) ?? [])];
-  while (queue.length > 0) {
-    const cur = queue.shift() as string;
-    if (out.has(cur)) continue;
-    out.add(cur);
-    for (const child of childMap.get(cur) ?? []) queue.push(child);
-  }
-  return out;
 }
 
 /** role のメンバー slackUserId 集合を取得する。 */
