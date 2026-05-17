@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Routes, Route } from "react-router-dom";
 import { ActionDetailPage } from "../src/pages/ActionDetailPage";
 import type { Event, EventAction } from "../src/types";
@@ -33,7 +34,10 @@ function makeAction(actionType: EventAction["actionType"]): EventAction {
   };
 }
 
-function renderActionPage(actionType: EventAction["actionType"]) {
+function renderActionPage(
+  actionType: EventAction["actionType"],
+  search = "",
+) {
   return renderWithProviders(
     <Routes>
       <Route
@@ -42,7 +46,7 @@ function renderActionPage(actionType: EventAction["actionType"]) {
       />
     </Routes>,
     {
-      initialEntries: [`/events/${EVENT_ID}/actions/${actionType}`],
+      initialEntries: [`/events/${EVENT_ID}/actions/${actionType}${search}`],
       routes: {
         "/orgs": [event],
         [`/orgs/${EVENT_ID}/actions`]: [makeAction(actionType)],
@@ -155,5 +159,79 @@ describe("ActionDetailPage smoke (Phase4-0 番人)", () => {
     await waitFor(() => {
       expect(screen.getByText("アクション一覧")).toBeInTheDocument();
     });
+  });
+
+  // --- Phase4-3 で追加した分割回帰の番人 (既存 7 は無改変) ---
+
+  it("member_welcome: main は状態なしプレースホルダ、subTab クリックで設定へ切替", async () => {
+    renderActionPage("member_welcome");
+    await screen.findByRole("heading", { name: /新メンバー対応/ });
+    // main タブの ActionMainContent (placeholder)
+    expect(
+      screen.getByText(/新メンバー対応に状態画面はありません/),
+    ).toBeInTheDocument();
+    // 「設定」サブタブをクリック → ActionSettingsContent
+    // (MemberWelcomeConfigForm) に切り替わる
+    await userEvent.click(screen.getByRole("button", { name: "設定" }));
+    await waitFor(() => {
+      expect(screen.getByText("ワークスペース")).toBeInTheDocument();
+    });
+    // 設定タブ末尾の 有効化/削除 操作が wiring されている
+    expect(screen.getByRole("button", { name: "削除" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "無効化" })).toBeInTheDocument();
+  });
+
+  it("URL ?tab=settings を初期表示で尊重し設定タブを開く", async () => {
+    renderActionPage("member_welcome", "?tab=settings");
+    await screen.findByRole("heading", { name: /新メンバー対応/ });
+    // 初期 subTab が URL から settings に解決される
+    await waitFor(() => {
+      expect(screen.getByText("ワークスペース")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "削除" })).toBeInTheDocument();
+  });
+
+  it("URL の不正な ?tab= は main にフォールバックする", async () => {
+    renderActionPage("member_welcome", "?tab=__nope__");
+    await screen.findByRole("heading", { name: /新メンバー対応/ });
+    // 無効 id は getSubTabs に照合されず main に落ちる
+    expect(
+      screen.getByText(/新メンバー対応に状態画面はありません/),
+    ).toBeInTheDocument();
+  });
+
+  it("パンくずにイベント名と説明文 (ACTION_META) が出る", async () => {
+    renderActionPage("task_management");
+    await screen.findByRole("heading", { name: /タスク管理/ });
+    // パンくず 2 つ目はイベント名リンク
+    expect(
+      screen.getByRole("link", { name: "テストイベント" }),
+    ).toBeInTheDocument();
+    // ACTION_META.description が見出し直下に出る
+    expect(
+      screen.getByText(/sticky bot でチャンネルに常時表示/),
+    ).toBeInTheDocument();
+  });
+
+  it("enabled=0 のとき「無効」バッジが出る", async () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/events/:eventId/actions/:actionType"
+          element={<ActionDetailPage />}
+        />
+      </Routes>,
+      {
+        initialEntries: [`/events/${EVENT_ID}/actions/task_management`],
+        routes: {
+          "/orgs": [event],
+          [`/orgs/${EVENT_ID}/actions`]: [
+            { ...makeAction("task_management"), enabled: 0 },
+          ],
+        },
+      },
+    );
+    await screen.findByRole("heading", { name: /タスク管理/ });
+    expect(screen.getByText("無効")).toBeInTheDocument();
   });
 });
