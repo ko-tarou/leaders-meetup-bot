@@ -10,11 +10,12 @@
  * - 設定が enabled でない / workspace / channel が空 の場合は no-op で抜ける。
  * - mention は <@U...> 形式で連結し、{mentions} placeholder で template に埋め込む。
  * - messageTemplate 未設定 or 空文字なら DEFAULT_PARTICIPATION_TEMPLATE を使う。
- * - renderTemplate は application-notification.ts から import 再利用 (重複定義しない)。
+ * - renderTemplate は domain 正典 (src/domain/email/template.ts) から直接 import
+ *   再利用する (重複定義しない / Phase3-3 で shim 経由から domain 直 import 化)。
  */
 import { createSlackClientForWorkspace } from "./workspace";
 import { utcToJstFormat } from "./time-utils";
-import { renderTemplate } from "./application-notification";
+import { renderTemplate } from "../domain/email/template";
 import type { Env } from "../types/env";
 
 export type ParticipationNotificationConfig = {

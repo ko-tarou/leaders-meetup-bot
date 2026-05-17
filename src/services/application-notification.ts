@@ -15,14 +15,20 @@
 import { createSlackClientForWorkspace } from "./workspace";
 import { utcToJstFormat } from "./time-utils";
 // Phase 2-E: placeholder 置換の純粋ロジックは src/domain/email/template.ts へ
-// 抽出済み。renderTemplate は application-notification /
-// participation-notification / application-email の 3 service が共有するため
-// domain/email に置き、service は後方互換のため re-export する（既存 import
-// パス `from "../services/application-notification"`・characterization テストを
-// 無改変のまま維持する＝振る舞い byte-identical）。共通化の本格統合は Phase3。
+// 抽出済み（renderTemplate 正典）。
+// Phase 3-3: 本番側の消費者（participation-notification / gmail-watcher /
+// routes/slack/interactions）は domain 正典を直接 import するよう整理済み。
+// 下の `export { renderTemplate }` re-export shim は
+// characterization テスト
+// (`test/characterization/applications/application-notification.test.ts` /
+// `test/sample/render-template.test.ts`) が
+// `from "../../../src/services/application-notification"` で renderTemplate を
+// 参照しているため、テスト無改変 green を担保する目的でのみ温存している
+// （本番コードはどこからもこの shim を参照しない）。
 import { renderTemplate } from "../domain/email/template";
 import type { Env } from "../types/env";
 
+// テスト経路温存用 re-export shim（上記コメント参照）。本番未参照。
 export { renderTemplate };
 
 export type ApplicationNotificationConfig = {
