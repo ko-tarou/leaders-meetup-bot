@@ -33,8 +33,8 @@ jobs:
   # Phase4-0: FE 安全網ジョブ。BE job (workerd pool) とは別 job に分離し、
   # jsdom 実行環境が BE と干渉しないようにする。secrets 不要
   # (API は fetch を stub。本番 D1 / Cloudflare / Slack には接続しない)。
-  # typecheck:frontend が現状 FE 型エラーで落ちる場合は Phase4 で解消する
-  # 技術的負債 (本 PR では安全網の新設のみが目的)。
+  # Phase4-1 で types.ts ドメイン分割 + 既存 FE 型エラー解消済み。
+  # typecheck:frontend は必須ゲート。
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -48,14 +48,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 既知の FE 型エラー (Phase4-0 で可視化した技術的負債) が解消されるまで
-      # この step は赤になるが、安全網の中核であるスモーク (下) を
-      # ブロックしないよう continue-on-error にする。
-      # Phase4 の最初の PR で 0 件にしたら continue-on-error を外し、
-      # 以降 Phase4 全 PR の必須ゲートに昇格させる。
+      # Phase4-1 で FE 型エラーを 0 件にしたため必須ゲートに昇格。
+      # 以降 Phase4 全 PR で typecheck:frontend が緑であることを強制する。
       - name: Typecheck (frontend tsconfig)
         run: npm run typecheck:frontend
-        continue-on-error: true
 
       - name: Run FE smoke tests (vitest + jsdom)
         run: npm run test:fe
