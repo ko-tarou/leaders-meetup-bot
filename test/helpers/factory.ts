@@ -25,6 +25,9 @@ import {
   interviewers,
   interviewerSlots,
   participationForms,
+  prReviews,
+  prReviewReviewers,
+  prReviewLgtms,
 } from "../../src/db/schema";
 
 let seq = 0;
@@ -250,6 +253,67 @@ export async function makeParticipationForm(
     ...over,
   } satisfies typeof participationForms.$inferInsert;
   await db.insert(participationForms).values(row);
+  return row;
+}
+
+/**
+ * Phase0-5: PR レビューを seed する。
+ *
+ * status default は schema 上 'open'、reviewRound default 1。characterization で
+ * 状態遷移を固定するため必須カラムを決定的に埋める。url/description は任意。
+ */
+export async function makePRReview(
+  eventId: string,
+  over: Partial<typeof prReviews.$inferInsert> = {},
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("pr"),
+    eventId,
+    title: "PR レビュー依頼",
+    url: null,
+    description: null,
+    status: "open",
+    requesterSlackId: "U-REQ",
+    reviewerSlackId: null,
+    reviewRound: 1,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...over,
+  } satisfies typeof prReviews.$inferInsert;
+  await db.insert(prReviews).values(row);
+  return row;
+}
+
+/** Phase0-5: pr_review_reviewers (多対多 reviewer) を 1 行 seed する。 */
+export async function makePRReviewReviewer(
+  reviewId: string,
+  slackUserId: string,
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("prr"),
+    reviewId,
+    slackUserId,
+    createdAt: NOW,
+  } satisfies typeof prReviewReviewers.$inferInsert;
+  await db.insert(prReviewReviewers).values(row);
+  return row;
+}
+
+/** Phase0-5: pr_review_lgtms (多対多 LGTM) を 1 行 seed する。 */
+export async function makePRReviewLgtm(
+  reviewId: string,
+  slackUserId: string,
+) {
+  const db = testDb();
+  const row = {
+    id: nextId("prl"),
+    reviewId,
+    slackUserId,
+    createdAt: NOW,
+  } satisfies typeof prReviewLgtms.$inferInsert;
+  await db.insert(prReviewLgtms).values(row);
   return row;
 }
 
