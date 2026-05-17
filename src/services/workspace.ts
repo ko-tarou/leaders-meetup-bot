@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import { workspaces, meetings } from "../db/schema";
 import { decryptToken } from "./crypto";
 import { SlackClient } from "./slack-api";
+import type { SlackPort } from "./ports/slack-port";
 
 type Env = {
   DB: D1Database;
@@ -94,15 +95,69 @@ export async function getDecryptedWorkspace(
 }
 
 /**
- * workspace_id から SlackClient を生成
+ * Phase 1-A DI seam: workspace_id から SlackPort を解決する関数の型。
+ *
+ * デフォルトは `defaultSlackClientProvider`（= 従来の decrypt → new SlackClient
+ * と完全に同一の振る舞い）。テストや将来の context 移行で
+ * `setSlackClientProvider` により差し替え可能にする 1 点だけの注入点。
+ *
+ * 既存の characterization テストは `vi.mock("...slack-api")` で SlackClient
+ * クラス自体を差し替えており provider override は使わない。デフォルト
+ * provider が `new SlackClient(...)` を呼ぶ実装のままなので、その mock は
+ * これまで通り機能する（＝振る舞い不変・テスト無改変で green を維持）。
+ */
+export type SlackClientProvider = (
+  env: Env,
+  workspaceId: string,
+) => Promise<SlackPort | null>;
+
+/**
+ * デフォルト実装。従来 `createSlackClientForWorkspace` の本体だったロジックを
+ * そのまま移したもの（decrypt 失敗時の例外伝播・null ケースも同一）。
+ */
+const defaultSlackClientProvider: SlackClientProvider = async (
+  env,
+  workspaceId,
+) => {
+  const ws = await getDecryptedWorkspace(env, workspaceId);
+  if (!ws) return null;
+  return new SlackClient(ws.botToken, ws.signingSecret);
+};
+
+let slackClientProvider: SlackClientProvider = defaultSlackClientProvider;
+
+/**
+ * Slack クライアント生成を差し替える（DI seam）。
+ * 戻り値で「元の provider に戻す」復元関数を返すので、テストの
+ * afterEach 等で安全に巻き戻せる。
+ */
+export function setSlackClientProvider(
+  provider: SlackClientProvider,
+): () => void {
+  const prev = slackClientProvider;
+  slackClientProvider = provider;
+  return () => {
+    slackClientProvider = prev;
+  };
+}
+
+/** provider を初期状態（デフォルト実装）に戻す。 */
+export function resetSlackClientProvider(): void {
+  slackClientProvider = defaultSlackClientProvider;
+}
+
+/**
+ * workspace_id から SlackPort を生成（DI seam 経由）。
+ *
+ * 戻り型は後方互換のため `SlackClient | null` を維持する
+ * （`SlackClient implements SlackPort` なのでデフォルト経路の実体は不変。
+ * 呼び出し側は SlackPort のメソッドしか使わないため安全な型表明）。
  */
 export async function createSlackClientForWorkspace(
   env: Env,
   workspaceId: string,
 ): Promise<SlackClient | null> {
-  const ws = await getDecryptedWorkspace(env, workspaceId);
-  if (!ws) return null;
-  return new SlackClient(ws.botToken, ws.signingSecret);
+  return slackClientProvider(env, workspaceId) as Promise<SlackClient | null>;
 }
 
 /**
