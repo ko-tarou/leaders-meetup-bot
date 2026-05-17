@@ -42,7 +42,7 @@ import {
   parseFromHeader,
   sendGmailReply,
 } from "../../services/gmail-reply";
-import { renderTemplate } from "../../services/application-notification";
+import { renderTemplate } from "../../domain/email/template";
 import { utcToJstFormat } from "../../services/time-utils";
 
 export const interactionsRouter = new Hono<{

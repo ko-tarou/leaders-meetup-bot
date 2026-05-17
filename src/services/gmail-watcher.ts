@@ -35,7 +35,7 @@ import { and, eq } from "drizzle-orm";
 import { gmailAccounts, gmailProcessedMessages } from "../db/schema";
 import { decryptToken, encryptToken } from "./crypto";
 import { createSlackClientForWorkspace } from "./workspace";
-import { renderTemplate } from "./application-notification";
+import { renderTemplate } from "../domain/email/template";
 import { utcToJstFormat } from "./time-utils";
 import type { Env } from "../types/env";
 
