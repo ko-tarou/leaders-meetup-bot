@@ -191,3 +191,133 @@ describe("EmailTemplatesEditor smoke (Phase4-4 分割対象 番人)", () => {
     expect(screen.getByText("不合格時")).toBeInTheDocument();
   });
 });
+
+// Phase4-5 番人 (本PRで純抽出する slackInvites 編集サブツリーの観測面固定)。
+// 抽出対象: Slack 招待リンクの追加 / 名前・URL 編集 / 監視トグル / 削除 /
+//           collapse 時サマリー / expand 時編集 UI。
+// 分割前後で観測可能挙動が一字一句変わらないことを保証する。
+describe("EmailTemplatesEditor smoke (Phase4-5 slackInvites 番人)", () => {
+  function inviteSection(): HTMLElement {
+    return screen.getByText("Slack 招待リンク").closest("div")!
+      .parentElement as HTMLElement;
+  }
+
+  it("collapse 時は招待リンクのサマリーのみ表示し、編集 UI は出ない", () => {
+    const action: EventAction = {
+      ...baseAction,
+      config: JSON.stringify({
+        slackInvites: [
+          { id: "i1", name: "DevHub", url: "https://join.slack.com/t/x/zt-1" },
+        ],
+      }),
+    };
+    renderEditor(action);
+    const section = inviteSection();
+    // サマリーに登録件数と表示名/URL が出る
+    expect(within(section).getByText(/1 件登録/)).toBeInTheDocument();
+    expect(within(section).getByText("DevHub")).toBeInTheDocument();
+    expect(
+      within(section).getByText("https://join.slack.com/t/x/zt-1"),
+    ).toBeInTheDocument();
+    // collapse 時は URL 入力欄 (編集 UI) は出ない
+    expect(
+      within(section).queryByPlaceholderText(
+        "https://join.slack.com/t/.../zt-xxxx",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("展開トグルで編集 UI が現れ、未登録なら空メッセージが出る", async () => {
+    const user = userEvent.setup();
+    renderEditor(baseAction);
+    const section = inviteSection();
+    await user.click(
+      within(section).getByRole("button", { name: /Slack 招待リンク/ }),
+    );
+    expect(
+      within(section).getByText("招待リンクが登録されていません"),
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByRole("button", { name: "+ 招待リンクを追加" }),
+    ).toBeInTheDocument();
+  });
+
+  it("招待リンク追加 → カードが現れ、名前・URL 編集が反映される", async () => {
+    const user = userEvent.setup();
+    renderEditor(baseAction);
+    const section = inviteSection();
+    await user.click(
+      within(section).getByRole("button", { name: /Slack 招待リンク/ }),
+    );
+    await user.click(
+      within(section).getByRole("button", { name: "+ 招待リンクを追加" }),
+    );
+    const nameInput = within(section).getByPlaceholderText(
+      "表示名（例: DevelopersHub）",
+    );
+    await user.type(nameInput, "DevHub");
+    expect(within(section).getByDisplayValue("DevHub")).toBeInTheDocument();
+    const urlInput = within(section).getByPlaceholderText(
+      "https://join.slack.com/t/.../zt-xxxx",
+    );
+    await user.type(urlInput, "https://join.slack.com/t/x/zt-9");
+    expect(
+      within(section).getByDisplayValue("https://join.slack.com/t/x/zt-9"),
+    ).toBeInTheDocument();
+  });
+
+  it("監視を有効化すると通知先 Workspace セレクタが現れる", async () => {
+    const user = userEvent.setup();
+    const action: EventAction = {
+      ...baseAction,
+      config: JSON.stringify({
+        slackInvites: [{ id: "i1", name: "DevHub", url: "https://x/zt-1" }],
+      }),
+    };
+    renderEditor(action);
+    const section = inviteSection();
+    await user.click(
+      within(section).getByRole("button", { name: /Slack 招待リンク/ }),
+    );
+    expect(
+      within(section).queryByText("通知先 Workspace"),
+    ).not.toBeInTheDocument();
+    await user.click(
+      within(section).getByRole("checkbox", {
+        name: /監視を有効化/,
+      }),
+    );
+    expect(
+      within(section).getByText("通知先 Workspace"),
+    ).toBeInTheDocument();
+  });
+
+  it("削除ボタンで招待リンクが一覧から消える", async () => {
+    const user = userEvent.setup();
+    const action: EventAction = {
+      ...baseAction,
+      config: JSON.stringify({
+        slackInvites: [
+          { id: "i1", name: "消す対象", url: "https://x/zt-1" },
+        ],
+      }),
+    };
+    renderEditor(action);
+    const section = inviteSection();
+    await user.click(
+      within(section).getByRole("button", { name: /Slack 招待リンク/ }),
+    );
+    expect(
+      within(section).getByDisplayValue("消す対象"),
+    ).toBeInTheDocument();
+    await user.click(
+      within(section).getByRole("button", { name: /「消す対象」を削除/ }),
+    );
+    expect(
+      within(section).queryByDisplayValue("消す対象"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(section).getByText("招待リンクが登録されていません"),
+    ).toBeInTheDocument();
+  });
+});
