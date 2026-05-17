@@ -14,7 +14,16 @@
  */
 import { createSlackClientForWorkspace } from "./workspace";
 import { utcToJstFormat } from "./time-utils";
+// Phase 2-E: placeholder 置換の純粋ロジックは src/domain/email/template.ts へ
+// 抽出済み。renderTemplate は application-notification /
+// participation-notification / application-email の 3 service が共有するため
+// domain/email に置き、service は後方互換のため re-export する（既存 import
+// パス `from "../services/application-notification"`・characterization テストを
+// 無改変のまま維持する＝振る舞い byte-identical）。共通化の本格統合は Phase3。
+import { renderTemplate } from "../domain/email/template";
 import type { Env } from "../types/env";
+
+export { renderTemplate };
 
 export type ApplicationNotificationConfig = {
   enabled?: boolean;
@@ -56,19 +65,6 @@ export const DEFAULT_TEMPLATE = `{mentions} 新しい応募がありました
 名前: {name}
 メール: {email}
 応募日時: {appliedAt} (JST)`;
-
-/**
- * `{key}` 形式の placeholder を vars[key] で置換する。
- * 未定義 key はそのまま残す ({unknown} → {unknown})。
- */
-export function renderTemplate(
-  template: string,
-  vars: Record<string, string>,
-): string {
-  return template.replace(/\{(\w+)\}/g, (m, key: string) =>
-    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : m,
-  );
-}
 
 /**
  * action.config を parse して notifications 設定を取り出す。
