@@ -33,8 +33,15 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     setupFiles: ["./test/setup.ts"],
+    // Phase0-8: `@cloudflare/vitest-pool-workers` は coverage provider に
+    // **istanbul のみ対応**。v8 provider は workerd ランタイムの V8 coverage が
+    // host プロセスへ伝播しないため pool 側で明示的に拒否され (内部メッセージ:
+    // `provider "v8" is not supported by @cloudflare/vitest-pool-workers`)、
+    // 結果として全モジュール 0% になっていた。istanbul は instrumentation を
+    // テスト対象コードへ注入し workerd 内で計測値を収集できるため pool-workers
+    // 上で正しく数値が出る。
     coverage: {
-      provider: "v8",
+      provider: "istanbul",
       reportsDirectory: "./coverage",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.d.ts", "test/**"],
