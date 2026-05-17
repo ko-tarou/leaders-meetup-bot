@@ -354,7 +354,7 @@ interviewersRouter.get(
 /**
  * PUT /orgs/:eventId/actions/:actionId/interviewers/:interviewerId/slots
  *   admin が任意 entry の slots を上書き編集する。
- *   body: { slots: string[] } (UTC ISO + Z 終端、最大 100 件)
+ *   body: { slots: string[] } (UTC ISO + Z 終端、件数上限なし。D1 bind 上限は chunk 分割で回避)
  *   レスポンス: { ok: true }
  *
  *   PR #139 で削除した admin slot 編集 endpoint を復活。
@@ -385,9 +385,6 @@ interviewersRouter.put(
     const body = await c.req.json<{ slots?: unknown }>();
     if (!Array.isArray(body.slots)) {
       return c.json({ error: "slots must be an array" }, 400);
-    }
-    if (body.slots.length > 100) {
-      return c.json({ error: "slots must be <= 100 entries" }, 400);
     }
     for (const s of body.slots) {
       if (!isValidUtcIso(s)) {
@@ -649,7 +646,7 @@ interviewersRouter.get("/interviewer-form/:token", async (c) => {
  *   公開フォームから提出 (認証不要)。
  *   body: { name, slots: string[] }
  *   - name で upsert (同 action 内に同名があれば slots を上書き、なければ新規作成)。
- *   - slots は ISO 8601 UTC + Z 終端、最大 100 件。
+ *   - slots は ISO 8601 UTC + Z 終端、件数上限なし (D1 bind 上限は chunk 分割で回避)。
  *   レスポンス: { ok: true, interviewerId }
  */
 interviewersRouter.post("/interviewer-form/:token", async (c) => {
@@ -667,12 +664,9 @@ interviewersRouter.post("/interviewer-form/:token", async (c) => {
   if (name.length > 50) {
     return c.json({ error: "name must be <= 50 chars" }, 400);
   }
-  // slots: 配列、各要素 ISO 8601 + Z、最大 100 件
+  // slots: 配列、各要素 ISO 8601 + Z (件数上限なし。D1 bind 上限は chunk 分割で回避)
   if (!Array.isArray(body.slots)) {
     return c.json({ error: "slots must be an array" }, 400);
-  }
-  if (body.slots.length > 100) {
-    return c.json({ error: "slots must be <= 100 entries" }, 400);
   }
   for (const s of body.slots) {
     if (!isValidUtcIso(s)) {
