@@ -19,6 +19,10 @@ import {
   applyRoleAssignment,
   revokeRoleAssignment,
 } from "../../services/role-auto-assign";
+// Phase 1-C: D1 Repository seam（最小・パターン確立）。一覧の read のみ
+// Repository 経由に移行。デフォルト実装は現状 drizzle クエリと完全等価
+// （SQL・戻り値・順序不変）なので characterization は無改変で green。
+import { getParticipationFormRepository } from "../../repositories/participation-form-repository";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
 //
@@ -357,11 +361,13 @@ participationRouter.get("/orgs/:eventId/participation-forms", async (c) => {
     .get();
   if (!event) return c.json({ error: "event not found" }, 404);
 
-  const rows = await db
-    .select()
-    .from(participationForms)
-    .where(eq(participationForms.eventId, eventId))
-    .all();
+  // Phase 1-C: 一覧 read を Repository 経由に移行（call site 1 点のみ）。
+  // デフォルト実装は従来の drizzle クエリと同一 SQL・同一戻り値なので
+  // 並び替え・整形は従来どおり route 側の責務のまま据え置く。
+  const rows = await getParticipationFormRepository().listByEventId(
+    db,
+    eventId,
+  );
   rows.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 
   return c.json(
