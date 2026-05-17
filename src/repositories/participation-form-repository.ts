@@ -1,9 +1,12 @@
 /**
- * DevHub Ops 大規模リファクタ Phase 1-C: D1 Repository seam（最小・パターン確立）。
+ * DevHub Ops 大規模リファクタ Phase 1-C/1-D: D1 Repository seam。
  *
  * 全 route/service が `drizzle(env.DB)` を直接呼び DI 無しの現状に対し、
- * Phase 1-A/B の provider seam と同型の差し替え可能点を **最小 1 集合**
- * だけ導入してパターンを確立する（全面 Repository 化は後続）。
+ * Phase 1-A/B の provider seam と同型の差し替え可能点を導入する。
+ * Phase 1-C で一覧 read を移行（パターン確立）。Phase 1-D で
+ * participation_forms の残り read/write をすべて Repository 経由へ拡張する
+ * （eventActions など他テーブルアクセスは route の責務のまま据え置き、
+ * Repository は participation_forms の純粋な DB アクセスのみ切り出す）。
  *
  * 重要な不変条件（振る舞い不変の根拠）:
  * - メソッドは現状 route で実行している drizzle クエリを **同一クエリ・
@@ -32,6 +35,13 @@ type Db = ReturnType<typeof drizzle>;
 export type ParticipationFormRow = typeof participationForms.$inferSelect;
 
 /**
+ * participation_forms への insert 値型。drizzle の `$inferInsert` で
+ * schema 定義から導出する（現状 route が `db.insert(...).values({...})` /
+ * `db.update(...).set({...})` に渡していたオブジェクト型と等価）。
+ */
+type ParticipationFormInsert = typeof participationForms.$inferInsert;
+
+/**
  * participation_forms への DB アクセスを抽象化する Repository。
  *
  * 現状 route が直接発行しているクエリと 1:1 で対応する。drizzle
@@ -47,6 +57,28 @@ export interface ParticipationFormRepository {
    * クエリ・戻り値・順序が完全に一致する（並び替えは呼び出し元の責務）。
    */
   listByEventId(db: Db, eventId: string): Promise<ParticipationFormRow[]>;
+
+  /** id 一致行を返す（無ければ undefined）。`...where(eq(id,id)).get()` と等価。eventId 所属検証は呼び出し元の責務。 */
+  findById(db: Db, id: string): Promise<ParticipationFormRow | undefined>;
+
+  /** applicationId 一致行を返す（無ければ undefined）。submit upsert の先 SELECT と等価（分岐は呼び出し元の責務）。 */
+  findByApplicationId(
+    db: Db,
+    applicationId: string,
+  ): Promise<ParticipationFormRow | undefined>;
+
+  /** 新規行を INSERT する。`db.insert(participationForms).values(values)` と等価（値組み立ては呼び出し元の責務）。 */
+  insert(db: Db, values: ParticipationFormInsert): Promise<void>;
+
+  /** id 一致行を `values` で UPDATE する。`...set(values).where(eq(id,id))` と等価（set 内容は呼び出し元の責務）。 */
+  updateById(
+    db: Db,
+    id: string,
+    values: Partial<ParticipationFormInsert>,
+  ): Promise<void>;
+
+  /** id 一致行を DELETE する。`db.delete(participationForms).where(eq(id,id))` と等価。 */
+  deleteById(db: Db, id: string): Promise<void>;
 }
 
 /**
@@ -65,6 +97,39 @@ const defaultParticipationFormRepository: ParticipationFormRepository = {
       .from(participationForms)
       .where(eq(participationForms.eventId, eventId))
       .all() as Promise<ParticipationFormRow[]>;
+  },
+  findById(db, id) {
+    // 現状 route の findParticipationForm 内 SELECT と同一クエリ。
+    return db
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get() as Promise<ParticipationFormRow | undefined>;
+  },
+  findByApplicationId(db, applicationId) {
+    // 現状 submit upsert の先 SELECT と同一クエリ。
+    return db
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.applicationId, applicationId))
+      .get() as Promise<ParticipationFormRow | undefined>;
+  },
+  async insert(db, values) {
+    // 現状 route の db.insert(participationForms).values(...) と同一。
+    await db.insert(participationForms).values(values);
+  },
+  async updateById(db, id, values) {
+    // 現状 route の db.update(participationForms).set(...)
+    //   .where(eq(participationForms.id, id)) と同一。
+    await db
+      .update(participationForms)
+      .set(values)
+      .where(eq(participationForms.id, id));
+  },
+  async deleteById(db, id) {
+    // 現状 route の db.delete(participationForms)
+    //   .where(eq(participationForms.id, id)) と同一。
+    await db.delete(participationForms).where(eq(participationForms.id, id));
   },
 };
 

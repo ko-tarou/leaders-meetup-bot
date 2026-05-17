@@ -2,12 +2,7 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import {
-  events,
-  applications,
-  participationForms,
-  eventActions,
-} from "../../db/schema";
+import { events, applications, eventActions } from "../../db/schema";
 import {
   sendParticipationNotification,
   sendParticipationUnresolvedNotification,
@@ -19,9 +14,11 @@ import {
   applyRoleAssignment,
   revokeRoleAssignment,
 } from "../../services/role-auto-assign";
-// Phase 1-C: D1 Repository seam（最小・パターン確立）。一覧の read のみ
-// Repository 経由に移行。デフォルト実装は現状 drizzle クエリと完全等価
-// （SQL・戻り値・順序不変）なので characterization は無改変で green。
+// Phase 1-C/1-D: D1 Repository seam。participation_forms の read/write を
+// すべて Repository 経由に移行。デフォルト実装は現状 drizzle クエリと完全
+// 等価（SQL・戻り値・順序・副作用順序・トランザクション境界不変）なので
+// characterization は無改変で green。eventActions など他テーブルアクセス・
+// 副作用（通知/ロール付与）の呼び出し位置は route の責務のまま据え置く。
 import { getParticipationFormRepository } from "../../repositories/participation-form-repository";
 
 // participation-form Phase1 PR2: 参加届フォームの公開 API + admin 一覧。
@@ -283,10 +280,9 @@ participationRouter.post("/participation/:eventId", async (c) => {
         return; // 未解決 → 手動紐付け待ち (デフォルト維持)
       }
 
-      await db
-        .update(participationForms)
-        .set({ slackUserId })
-        .where(eq(participationForms.id, rowId));
+      await getParticipationFormRepository().updateById(db, rowId, {
+        slackUserId,
+      });
 
       const { assignedRoleIds } = await applyRoleAssignment(c.env, {
         memberApplicationActionConfig: action.config,
@@ -299,10 +295,9 @@ participationRouter.post("/participation/:eventId", async (c) => {
         },
       });
       if (assignedRoleIds.length > 0) {
-        await db
-          .update(participationForms)
-          .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
-          .where(eq(participationForms.id, rowId));
+        await getParticipationFormRepository().updateById(db, rowId, {
+          assignedRoleIds: JSON.stringify(assignedRoleIds),
+        });
       }
     } catch (e) {
       console.error("[participation] role auto-assign hook error:", e);
@@ -313,24 +308,27 @@ participationRouter.post("/participation/:eventId", async (c) => {
   // partial unique index に依存せず先 SELECT で分岐 (roles.ts のメンバー
   // upsert と同思想 / 同時提出でも例外にならない)。
   if (applicationId !== null) {
-    const existing = await db
-      .select()
-      .from(participationForms)
-      .where(eq(participationForms.applicationId, applicationId))
-      .get();
+    const existing = await getParticipationFormRepository().findByApplicationId(
+      db,
+      applicationId,
+    );
     if (existing) {
-      await db
-        .update(participationForms)
-        .set(fields)
-        .where(eq(participationForms.id, existing.id));
+      await getParticipationFormRepository().updateById(
+        db,
+        existing.id,
+        fields,
+      );
       await notifyParticipation();
       await autoAssignOnSubmit(existing.id);
       return c.json({ ok: true, id: existing.id }, 201);
     }
     const id = crypto.randomUUID();
-    await db
-      .insert(participationForms)
-      .values({ id, applicationId, createdAt: now, ...fields });
+    await getParticipationFormRepository().insert(db, {
+      id,
+      applicationId,
+      createdAt: now,
+      ...fields,
+    });
     await notifyParticipation();
     await autoAssignOnSubmit(id);
     return c.json({ ok: true, id }, 201);
@@ -338,9 +336,12 @@ participationRouter.post("/participation/:eventId", async (c) => {
 
   // 直接提出: 常に新規 INSERT。
   const id = crypto.randomUUID();
-  await db
-    .insert(participationForms)
-    .values({ id, applicationId: null, createdAt: now, ...fields });
+  await getParticipationFormRepository().insert(db, {
+    id,
+    applicationId: null,
+    createdAt: now,
+    ...fields,
+  });
   await notifyParticipation();
   await autoAssignOnSubmit(id);
   return c.json({ ok: true, id }, 201);
@@ -405,11 +406,7 @@ async function findParticipationForm(
   eventId: string,
   id: string,
 ) {
-  const form = await db
-    .select()
-    .from(participationForms)
-    .where(eq(participationForms.id, id))
-    .get();
+  const form = await getParticipationFormRepository().findById(db, id);
   if (!form) return { error: "participation form not found", status: 404 as const };
   if (form.eventId !== eventId)
     return { error: "eventId mismatch", status: 400 as const };
@@ -451,7 +448,7 @@ participationRouter.delete(
     const found = await findParticipationForm(db, eventId, id);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
-    await db.delete(participationForms).where(eq(participationForms.id, id));
+    await getParticipationFormRepository().deleteById(db, id);
     return c.json({ ok: true });
   },
 );
@@ -481,10 +478,9 @@ participationRouter.patch(
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
     // status DB 更新は従来どおり確実に行う (ロール操作はその後の付加処理)。
-    await db
-      .update(participationForms)
-      .set({ status: body.status })
-      .where(eq(participationForms.id, id));
+    await getParticipationFormRepository().updateById(db, id, {
+      status: body.status,
+    });
 
     // ロール剥奪 / 再付与 (fail-soft)。ロール操作失敗で status 更新を
     // 失敗させない。config 無効ならスキップ (status 更新自体は成功)。
@@ -511,10 +507,9 @@ participationRouter.patch(
               slackUserId: form.slackUserId,
               assignedRoleIds: ids,
             });
-            await db
-              .update(participationForms)
-              .set({ assignedRoleIds: "[]" })
-              .where(eq(participationForms.id, id));
+            await getParticipationFormRepository().updateById(db, id, {
+              assignedRoleIds: "[]",
+            });
           }
         } else if (body.status === "submitted") {
           // 却下解除 (復帰): 解決済みなら再付与する。
@@ -529,10 +524,9 @@ participationRouter.patch(
             },
           });
           if (assignedRoleIds.length > 0) {
-            await db
-              .update(participationForms)
-              .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
-              .where(eq(participationForms.id, id));
+            await getParticipationFormRepository().updateById(db, id, {
+              assignedRoleIds: JSON.stringify(assignedRoleIds),
+            });
           }
         }
       }
@@ -570,10 +564,7 @@ participationRouter.patch(
     const found = await findParticipationForm(db, eventId, id);
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
-    await db
-      .update(participationForms)
-      .set({ slackUserId })
-      .where(eq(participationForms.id, id));
+    await getParticipationFormRepository().updateById(db, id, { slackUserId });
 
     // 却下でなく config 有効なら即付与 (fail-soft: 付与失敗で 200 不変)。
     let assignedRoleIds: string[] = [];
@@ -595,10 +586,9 @@ participationRouter.patch(
           });
           assignedRoleIds = res.assignedRoleIds;
           if (assignedRoleIds.length > 0) {
-            await db
-              .update(participationForms)
-              .set({ assignedRoleIds: JSON.stringify(assignedRoleIds) })
-              .where(eq(participationForms.id, id));
+            await getParticipationFormRepository().updateById(db, id, {
+              assignedRoleIds: JSON.stringify(assignedRoleIds),
+            });
           }
         }
       }
