@@ -28,6 +28,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "latest",
+    "@vitest/coverage-istanbul": "^4.1.6",
     "@vitest/coverage-v8": "^4.1.6",
     "drizzle-kit": "^0.31.10",
     "typescript": "latest",
