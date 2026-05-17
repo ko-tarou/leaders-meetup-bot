@@ -143,6 +143,14 @@ export class MockSlackClient {
   async listAllChannelMembers(channel: string): Promise<SlackResponse> {
     return this.record("listAllChannelMembers", [channel]);
   }
+
+  async getChannelInfo(channel: string): Promise<SlackResponse> {
+    return this.record("getChannelInfo", [channel]);
+  }
+
+  async authTest(): Promise<SlackResponse> {
+    return this.record("authTest", []);
+  }
 }
 
 /** 新しい MockSlackClient を生成するファクトリ。 */
