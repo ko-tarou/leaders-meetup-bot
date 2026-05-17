@@ -10,8 +10,10 @@ import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
-import { GmailWatcherEditor } from "../components/GmailWatcherEditor";
 import { FeedbackSettingsSection } from "../components/feedback/FeedbackSettingsSection";
+import { WorkspaceCard } from "./workspaces/WorkspaceCard";
+import { GmailAccountsSection } from "./workspaces/GmailAccountsSection";
+import { WorkspaceCreateForm } from "./workspaces/WorkspaceCreateForm";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
 // - 一覧 / OAuth 1-click インストール / 手動登録 / 削除
@@ -295,152 +297,24 @@ export function WorkspacesPage() {
       )}
 
       {workspaces.map((ws) => (
-        <div
+        <WorkspaceCard
           key={ws.id}
-          style={{
-            border: `1px solid ${colors.border}`,
-            borderRadius: "0.375rem",
-            padding: "0.75rem",
-            marginBottom: "0.5rem",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ flex: 1 }}>
-            <strong>{ws.name}</strong>
-            <div style={{ fontSize: "0.75rem", color: colors.textSecondary }}>
-              team_id: {ws.slackTeamId} / 登録日: {ws.createdAt.slice(0, 10)}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <button
-              onClick={() => handleBulkInvite(ws)}
-              disabled={isReadOnly || bulkInviteLoading === ws.id}
-              style={{
-                background: colors.primary,
-                color: colors.textInverse,
-                border: "none",
-                padding: "0.375rem 0.75rem",
-                borderRadius: "0.25rem",
-                cursor:
-                  isReadOnly || bulkInviteLoading === ws.id
-                    ? "not-allowed"
-                    : "pointer",
-                fontSize: "0.875rem",
-              }}
-              title="このワークスペースの全 channel に bot を一括招待します"
-            >
-              {bulkInviteLoading === ws.id ? "招待中..." : "bot を一括招待"}
-            </button>
-            <button
-              onClick={() => handleDelete(ws)}
-              style={{ background: colors.danger, color: colors.textInverse }}
-              disabled={ws.id === "ws_default"}
-              title={
-                ws.id === "ws_default"
-                  ? "default workspace は削除できません"
-                  : ""
-              }
-            >
-              削除
-            </button>
-          </div>
-        </div>
+          ws={ws}
+          isReadOnly={isReadOnly}
+          bulkInviteLoading={bulkInviteLoading}
+          onBulkInvite={handleBulkInvite}
+          onDelete={handleDelete}
+        />
       ))}
 
       {/* Sprint 26: Gmail 連携 — 応募者への自動メール送信に使う Gmail アカウント */}
-      <section
-        style={{
-          marginTop: "2rem",
-          paddingTop: "1rem",
-          borderTop: `1px solid ${colors.border}`,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            marginBottom: "0.5rem",
-            gap: "0.5rem",
-          }}
-        >
-          <h2 style={{ margin: 0 }}>
-            Gmail 連携 ({gmailAccounts.length}件)
-          </h2>
-          <button
-            onClick={handleGmailInstall}
-            disabled={isReadOnly || gmailInstallLoading}
-            style={{
-              marginLeft: "auto",
-              background: colors.primary,
-              color: colors.textInverse,
-              border: "none",
-              padding: "0.5rem 1rem",
-              borderRadius: "0.375rem",
-              fontWeight: "bold",
-              fontSize: "0.95rem",
-              cursor:
-                isReadOnly || gmailInstallLoading ? "not-allowed" : "pointer",
-            }}
-          >
-            {gmailInstallLoading ? "遷移中..." : "+ Gmail を連携"}
-          </button>
-        </div>
-        <p
-          style={{
-            fontSize: "0.85rem",
-            color: colors.textSecondary,
-            marginTop: 0,
-            marginBottom: "0.75rem",
-          }}
-        >
-          応募者への自動メール送信に使う Gmail アカウントを連携します。連携後、メールタブの「自動送信設定」から有効化してください。
-        </p>
-
-        {gmailAccounts.length === 0 ? (
-          <div style={{ color: colors.textSecondary }}>
-            未連携です。「+ Gmail を連携」から OAuth 認証を行ってください。
-          </div>
-        ) : (
-          gmailAccounts.map((acc) => (
-            <div
-              key={acc.id}
-              style={{
-                border: `1px solid ${colors.border}`,
-                borderRadius: "0.375rem",
-                padding: "0.75rem",
-                marginBottom: "0.5rem",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center" }}>
-                <div style={{ flex: 1 }}>
-                  <strong>{acc.email}</strong>
-                  <div
-                    style={{
-                      fontSize: "0.75rem",
-                      color: colors.textSecondary,
-                    }}
-                  >
-                    連携日: {new Date(acc.createdAt).toLocaleString("ja-JP")}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleGmailDelete(acc)}
-                  disabled={isReadOnly}
-                  style={{
-                    background: colors.danger,
-                    color: colors.textInverse,
-                  }}
-                >
-                  解除
-                </button>
-              </div>
-              {/* 005-gmail-watcher: メール監視設定 (展開式) */}
-              <GmailWatcherEditor account={acc} />
-            </div>
-          ))
-        )}
-      </section>
+      <GmailAccountsSection
+        gmailAccounts={gmailAccounts}
+        gmailInstallLoading={gmailInstallLoading}
+        isReadOnly={isReadOnly}
+        onInstall={handleGmailInstall}
+        onDelete={handleGmailDelete}
+      />
 
       {/* 005-feedback: フィードバックウィジェットの通知先と AI 有効化を設定 */}
       <FeedbackSettingsSection
@@ -489,143 +363,6 @@ export function WorkspacesPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function WorkspaceCreateForm({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [botToken, setBotToken] = useState("");
-  const [signingSecret, setSigningSecret] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    if (!botToken.trim() || !signingSecret.trim()) {
-      setError("Bot Token と Signing Secret は必須です");
-      return;
-    }
-    setSubmitting(true);
-    setError(null);
-    try {
-      await api.workspaces.create({
-        name: name.trim() || undefined,
-        botToken: botToken.trim(),
-        signingSecret: signingSecret.trim(),
-      });
-      onCreated();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "登録に失敗しました");
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: "white",
-          padding: "1.5rem",
-          borderRadius: "0.5rem",
-          width: "min(500px, 90vw)",
-          maxHeight: "90vh",
-          overflow: "auto",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ marginTop: 0 }}>ワークスペース手動登録</h3>
-        <p style={{ fontSize: "0.8rem", color: colors.textSecondary, marginTop: 0 }}>
-          通常は OAuth フロー（「Slack でインストール」ボタン）を使用してください。
-          既存 App の Bot Token / Signing Secret を直接登録する場合のみこちらを利用します。
-        </p>
-
-        {error && (
-          <div style={{ color: colors.danger, marginBottom: "0.5rem" }}>
-            {error}
-          </div>
-        )}
-
-        <div style={{ marginBottom: "0.75rem" }}>
-          <label>表示名（任意、空ならSlackから取得）</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={submitting}
-            style={{ width: "100%" }}
-          />
-        </div>
-        <div style={{ marginBottom: "0.75rem" }}>
-          <label>Bot Token (xoxb-...) *</label>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={botToken}
-            onChange={(e) => setBotToken(e.target.value)}
-            disabled={submitting}
-            style={{ width: "100%" }}
-            placeholder="xoxb-..."
-          />
-        </div>
-        <div style={{ marginBottom: "0.75rem" }}>
-          <label>Signing Secret *</label>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={signingSecret}
-            onChange={(e) => setSigningSecret(e.target.value)}
-            disabled={submitting}
-            style={{ width: "100%" }}
-          />
-        </div>
-        <div
-          style={{
-            fontSize: "0.75rem",
-            color: colors.textSecondary,
-            marginBottom: "1rem",
-          }}
-        >
-          Bot Token と Signing Secret は AES-256-GCM で暗号化して保存されます。
-          team_id は登録時に Slack auth.test で自動取得されます。
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            justifyContent: "flex-end",
-          }}
-        >
-          <button onClick={onClose} disabled={submitting}>
-            キャンセル
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={
-              submitting || !botToken.trim() || !signingSecret.trim()
-            }
-            style={{ background: colors.primary, color: colors.textInverse }}
-          >
-            {submitting ? "登録中..." : "登録"}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
