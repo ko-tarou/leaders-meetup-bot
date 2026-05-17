@@ -35,6 +35,12 @@ import {
   type StickyBoardConfig,
 } from "./sticky-board-base";
 import { getSlackClientForChannel } from "./workspace";
+import {
+  plainText,
+  divider,
+  headerBlock,
+  mrkdwnSection,
+} from "../domain/slack-blocks/builders";
 import type { Env } from "../types/env";
 // Phase 2-C: LGTM しきい値の pure domain は src/domain/pr-review/lgtm.ts に
 // 抽出済み。後方互換のためここから re-export する（routes/slack.ts が
@@ -152,21 +158,12 @@ export async function buildPRReviewBoardBlocks(
   activeReviews.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   const blocks: unknown[] = [
-    {
-      type: "header",
-      text: {
-        type: "plain_text",
-        text: `🔍 PR レビュー依頼 (${activeReviews.length}件)`,
-      },
-    },
-    { type: "divider" },
+    headerBlock(`🔍 PR レビュー依頼 (${activeReviews.length}件)`),
+    divider(),
   ];
 
   if (activeReviews.length === 0) {
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: "_未対応のレビュー依頼はありません_" },
-    });
+    blocks.push(mrkdwnSection("_未対応のレビュー依頼はありません_"));
   }
 
   // N+1 解消: ループに入る前に reviewers / lgtms / userName を一括取得して
@@ -235,10 +232,7 @@ export async function buildPRReviewBoardBlocks(
     const lgtmText = `LGTM ${lgtmCount}/${lgtmThreshold}`;
     const sectionText = `*${statusEmoji} ${r.title}*\n${statusLabel} / ${lgtmText} / 依頼者: ${requesterName} / ${reviewerText}${urlText}`;
 
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: sectionText },
-    });
+    blocks.push(mrkdwnSection(sectionText));
 
     // Slack 完結 BE PR1: 未完了レビュー（merged/closed 以外。changes_requested
     // を含む）には常に 3 ボタン（👍 LGTM / 💬 コメント / ✏️ 編集）のみ出す。
@@ -254,26 +248,26 @@ export async function buildPRReviewBoardBlocks(
           {
             type: "button",
             action_id: `sticky_pr_lgtm_${r.id}`,
-            text: { type: "plain_text", text: "👍 LGTM" },
+            text: plainText("👍 LGTM"),
             value: r.id,
           },
           {
             type: "button",
             action_id: `sticky_pr_comment_${r.id}`,
-            text: { type: "plain_text", text: "💬 コメント" },
+            text: plainText("💬 コメント"),
             value: r.id,
           },
           {
             type: "button",
             action_id: `sticky_pr_edit_${r.id}`,
-            text: { type: "plain_text", text: "✏️ 編集" },
+            text: plainText("✏️ 編集"),
             value: r.id,
             style: "primary",
           },
         ],
       });
     }
-    blocks.push({ type: "divider" });
+    blocks.push(divider());
   }
 
   // 新規作成ボタン
@@ -283,7 +277,7 @@ export async function buildPRReviewBoardBlocks(
       {
         type: "button",
         action_id: "sticky_pr_create",
-        text: { type: "plain_text", text: "+ 新規レビュー依頼" },
+        text: plainText("+ 新規レビュー依頼"),
         value: meetingId,
         style: "primary",
       },

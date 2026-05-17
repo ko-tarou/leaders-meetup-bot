@@ -30,6 +30,12 @@ import {
   repostStickyBoardByChannel,
   type StickyBoardConfig,
 } from "./sticky-board-base";
+import {
+  plainText,
+  divider,
+  headerBlock,
+  mrkdwnSection,
+} from "../domain/slack-blocks/builders";
 import type { Env } from "../types/env";
 
 /**
@@ -104,14 +110,8 @@ export async function buildBoardBlocks(
     : `📋 タスクボード (${startedWithNames.length}件)`;
 
   const blocks: unknown[] = [
-    {
-      type: "header",
-      text: {
-        type: "plain_text",
-        text: headerText,
-      },
-    },
-    { type: "divider" },
+    headerBlock(headerText),
+    divider(),
   ];
 
   const renderTask = (task: TaskWithNames) => {
@@ -129,29 +129,26 @@ export async function buildBoardBlocks(
     const statusLabel = TASK_STATUS_LABEL[task.status] ?? task.status;
     const sectionText = `*${priorityEmoji} ${task.title}*\n${startText}${dueText} / ${statusLabel}\n${assigneeText}`;
 
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: sectionText },
-    });
+    blocks.push(mrkdwnSection(sectionText));
     blocks.push({
       type: "actions",
       elements: [
         {
           type: "button",
           action_id: `sticky_assign_${task.id}`,
-          text: { type: "plain_text", text: "担当する/解除" },
+          text: plainText("担当する/解除"),
           value: task.id,
         },
         {
           type: "button",
           action_id: `sticky_done_${task.id}`,
-          text: { type: "plain_text", text: "✓ 完了" },
+          text: plainText("✓ 完了"),
           value: task.id,
           style: "primary",
         },
       ],
     });
-    blocks.push({ type: "divider" });
+    blocks.push(divider());
   };
 
   if (startedWithNames.length === 0 && unstartedWithNames.length === 0) {
@@ -160,10 +157,7 @@ export async function buildBoardBlocks(
       !showUnstarted && unstartedTasks.length > 0
         ? `_進行中のタスクはありません_（未開始 ${unstartedTasks.length} 件は「未開始も表示」で確認できます）`
         : "_未完了タスクはありません_";
-    blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: emptyMsg },
-    });
+    blocks.push(mrkdwnSection(emptyMsg));
   }
 
   for (const task of startedWithNames) {
@@ -171,14 +165,10 @@ export async function buildBoardBlocks(
   }
 
   if (unstartedWithNames.length > 0) {
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*── 未開始タスク (${unstartedWithNames.length}件) ──*`,
-      },
-    });
-    blocks.push({ type: "divider" });
+    blocks.push(
+      mrkdwnSection(`*── 未開始タスク (${unstartedWithNames.length}件) ──*`),
+    );
+    blocks.push(divider());
     for (const task of unstartedWithNames) {
       renderTask(task);
     }
@@ -191,7 +181,7 @@ export async function buildBoardBlocks(
       {
         type: "button",
         action_id: "sticky_create",
-        text: { type: "plain_text", text: "+ 新規タスク" },
+        text: plainText("+ 新規タスク"),
         value: meetingId,
         style: "primary",
       },
@@ -200,10 +190,7 @@ export async function buildBoardBlocks(
         action_id: showUnstarted
           ? `sticky_hide_unstarted_${meetingId}`
           : `sticky_show_unstarted_${meetingId}`,
-        text: {
-          type: "plain_text",
-          text: showUnstarted ? "進行中のみ表示" : "未開始も表示",
-        },
+        text: plainText(showUnstarted ? "進行中のみ表示" : "未開始も表示"),
         value: meetingId,
       },
     ],
