@@ -16,10 +16,14 @@ import {
   readAutoSendConfig,
   resolveTemplateIdForTrigger,
 } from "../../services/application-email";
-import {
-  createCalendarEvent,
-  CalendarEventError,
-} from "../../services/gcal-event";
+// Phase 2-F 条件2: GCal call-site を Phase1-B seam (getGCalPort) 経由へ
+// 型移行する。default provider (gcal.ts:defaultGCalPort) が既存
+// `createCalendarEvent` をそのまま委譲するため、`vi.mock("...gcal-event")`
+// を partial mock している既存 characterization は無改変で green を維持する
+// （副作用順序・fail-soft・例外伝播 不変）。CalendarEventError は型/instanceof
+// 判定にのみ用いるため引き続き直 import する（Port 化対象外）。
+import { getGCalPort } from "../../services/gcal";
+import { CalendarEventError } from "../../services/gcal-event";
 
 // 005-meet: interviewLocation ごとの Calendar event 設定。
 //   - online → Meet 生成あり、location は付けない
@@ -527,7 +531,7 @@ async function handleScheduledTransition(
       const locCfg =
         INTERVIEW_LOCATION_CONFIG[app.interviewLocation ?? ""] ??
         INTERVIEW_LOCATION_CONFIG.online;
-      const result = await createCalendarEvent(
+      const result = await getGCalPort().createCalendarEvent(
         env,
         cfg.gmailAccountId,
         {
