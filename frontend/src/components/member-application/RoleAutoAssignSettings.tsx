@@ -65,7 +65,8 @@ function RoleMultiSelect({
       <div style={s.roleCheckList}>
         {roles.map((r) => {
           const isChild = r.parentRoleId != null;
-          const gated = isChild && !selected.includes(r.parentRoleId);
+          const gated =
+            r.parentRoleId != null && !selected.includes(r.parentRoleId);
           const parentName =
             r.parentRoleId != null
               ? (nameById.get(r.parentRoleId) ?? r.parentRoleId)
