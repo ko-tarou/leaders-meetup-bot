@@ -36,33 +36,17 @@ import {
 } from "./sticky-board-base";
 import { getSlackClientForChannel } from "./workspace";
 import type { Env } from "../types/env";
+// Phase 2-C: LGTM しきい値の pure domain は src/domain/pr-review/lgtm.ts に
+// 抽出済み。後方互換のためここから re-export する（routes/slack.ts が
+// `from "../services/sticky-pr-review-board"` で LGTM_THRESHOLD を、
+// characterization テストが readLgtmThreshold を import しているため、
+// 呼び出し側・テストを一切触らずに済む）。値・挙動は byte-identical。
+import {
+  LGTM_THRESHOLD,
+  readLgtmThreshold,
+} from "../domain/pr-review/lgtm";
 
-// Sprint 17 PR1: 自動完了に必要な LGTM 数。
-// このしきい値に達した時点で sticky bot が status='merged' に自動更新する。
-//
-// 注意: PR 005-6 で labels.ts に集約しなかった。
-// 理由: routes/slack.ts が `from "../services/sticky-pr-review-board"` で
-// この定数を import しているため、ここに置いておけば呼び出し側を一切触らずに済む。
-export const LGTM_THRESHOLD = 2;
-
-/**
- * pr_review_list アクションの config から LGTM 自動完了しきい値を読む。
- *
- * - `config.lgtmThreshold` が 1 以上の整数なら採用
- * - 未設定 / 不正値 (0 以下・小数・非数値・不正 JSON) は LGTM_THRESHOLD (=2) に
- *   fallback（後方互換: 既存 config に lgtmThreshold が無ければ従来どおり 2）
- */
-export function readLgtmThreshold(actionConfig: string | null): number {
-  if (!actionConfig) return LGTM_THRESHOLD;
-  try {
-    const parsed = JSON.parse(actionConfig) as { lgtmThreshold?: unknown };
-    const v = parsed.lgtmThreshold;
-    if (typeof v === "number" && Number.isInteger(v) && v >= 1) return v;
-    return LGTM_THRESHOLD;
-  } catch {
-    return LGTM_THRESHOLD;
-  }
-}
+export { LGTM_THRESHOLD, readLgtmThreshold };
 
 /**
  * 当該 PR レビューが属する event の pr_review_list アクション config から
