@@ -3,6 +3,7 @@ import { api } from "../../api";
 import type { RosterMember } from "../../types";
 import { colors } from "../../styles/tokens";
 import { RosterDetailPanel } from "./RosterDetailPanel";
+import { RosterColumnsModal } from "./RosterColumnsModal";
 
 // 名簿管理 (member_roster) PR3-FE: 一覧表 read-only 表示。
 // 列ソート / 検索 / 退会済み非表示トグルのみ実装する。編集系は PR4 以降。
@@ -39,6 +40,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
   const [sortKey, setSortKey] = useState<SortKey>("grade");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<RosterMember | null>(null);
+  const [showCols, setShowCols] = useState(false);
 
   // hideInactive=false の時のみ includeInactive=1 を送る。
   useEffect(() => {
@@ -88,6 +90,9 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
             onChange={(e) => setHideInactive(e.target.checked)} />
           <span>退会済みを非表示</span>
         </label>
+        <button type="button" onClick={() => setShowCols(true)} style={S.colsBtn}>
+          カスタム列管理
+        </button>
       </div>
 
       {error && <div style={S.error}>{error}</div>}
@@ -152,6 +157,9 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
           </table>
         </div>
       )}
+      {showCols && (
+        <RosterColumnsModal actionId={actionId} onClose={() => setShowCols(false)} />
+      )}
       {selected && (
         <RosterDetailPanel
           eventId={eventId} actionId={actionId} member={selected}
@@ -201,4 +209,7 @@ const S = {
     marginBottom: "0.75rem" } as CSSProperties,
   bAct: { ...badge, background: colors.successSubtle, color: colors.success },
   bInact: { ...badge, background: colors.surface, color: colors.textSecondary },
+  colsBtn: { padding: "0.4rem 0.8rem", background: colors.surface, color: colors.text,
+    border: `1px solid ${colors.borderStrong}`, borderRadius: "0.375rem",
+    fontSize: "0.875rem", cursor: "pointer" } as CSSProperties,
 } as const;
