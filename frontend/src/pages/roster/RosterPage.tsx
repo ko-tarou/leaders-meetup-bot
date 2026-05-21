@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api";
 import type { RosterMember } from "../../types";
 import { colors } from "../../styles/tokens";
+import { RosterDetailPanel } from "./RosterDetailPanel";
 
 // 名簿管理 (member_roster) PR3-FE: 一覧表 read-only 表示。
 // 列ソート / 検索 / 退会済み非表示トグルのみ実装する。編集系は PR4 以降。
@@ -30,13 +31,14 @@ function cmp(a: string | null, b: string | null, dir: SortDir): number {
   return dir === "asc" ? r : -r;
 }
 
-export function RosterPage({ actionId }: { actionId: string }) {
+export function RosterPage({ eventId, actionId }: { eventId: string; actionId: string }) {
   const [members, setMembers] = useState<RosterMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [hideInactive, setHideInactive] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>("grade");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [selected, setSelected] = useState<RosterMember | null>(null);
 
   // hideInactive=false の時のみ includeInactive=1 を送る。
   useEffect(() => {
@@ -121,7 +123,16 @@ export function RosterPage({ actionId }: { actionId: string }) {
                 const td: CSSProperties = m.status === "inactive"
                   ? { ...S.td, opacity: 0.55 } : S.td;
                 return (
-                  <tr key={m.id}>
+                  <tr
+                    key={m.id} style={S.row} tabIndex={0} role="button"
+                    aria-label={`${m.name} を編集`}
+                    onClick={() => setSelected(m)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault(); setSelected(m);
+                      }
+                    }}
+                  >
                     <td style={td}>{m.name}</td>
                     <td style={td}>{m.nameKana ?? "-"}</td>
                     <td style={td}>{m.email ?? "-"}</td>
@@ -140,6 +151,19 @@ export function RosterPage({ actionId }: { actionId: string }) {
             </tbody>
           </table>
         </div>
+      )}
+      {selected && (
+        <RosterDetailPanel
+          eventId={eventId} actionId={actionId} member={selected}
+          onClose={() => setSelected(null)}
+          onChanged={(next) => {
+            setMembers((prev) => {
+              if (!prev) return prev;
+              if (next === null) return prev.filter((x) => x.id !== selected.id);
+              return prev.map((x) => (x.id === next.id ? next : x));
+            });
+          }}
+        />
       )}
     </div>
   );
@@ -168,6 +192,7 @@ const S = {
   arrow: { width: "0.75em", display: "inline-block", color: colors.primary } as CSSProperties,
   td: { padding: "0.5rem 0.75rem", borderBottom: `1px solid ${colors.border}`,
     verticalAlign: "middle", whiteSpace: "nowrap" } as CSSProperties,
+  row: { cursor: "pointer" } as CSSProperties,
   empty: { padding: "1.5rem", textAlign: "center", color: colors.textSecondary,
     background: colors.surface, border: `1px dashed ${colors.border}`,
     borderRadius: "0.375rem" } as CSSProperties,
