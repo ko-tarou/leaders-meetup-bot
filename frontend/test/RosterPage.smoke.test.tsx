@@ -130,6 +130,21 @@ describe("RosterPage smoke", () => {
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
+  // PR6: 取り込み / 追加ボタンが描画され、押下でモーダルが開く。
+  it("「合格者から取り込み」ボタンと「+ メンバー追加」ボタンが表示される (PR6)", async () => {
+    render();
+    await screen.findByText("Alice");
+    expect(screen.getByRole("button", { name: /合格者から取り込み/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /メンバー追加/ })).toBeInTheDocument();
+  });
+
+  it("「+ メンバー追加」ボタン押下でモーダルが開く (PR6)", async () => {
+    render();
+    await screen.findByText("Alice");
+    await userEvent.click(screen.getByRole("button", { name: /メンバー追加/ }));
+    expect(await screen.findByRole("dialog", { name: "メンバー追加" })).toBeInTheDocument();
+  });
+
   // PR5b: カスタム列ヘッダとセル値が一覧表に出る。util の route map (path.endsWith) で 3 種を分岐。
   it("カスタム列の見出しと値が一覧表に表示される (PR5b)", async () => {
     const aliceId = members[0]!.id;
