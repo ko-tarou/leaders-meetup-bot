@@ -76,6 +76,21 @@ describe("RosterColumnsModal smoke", () => {
     });
   });
 
+  it("編集ボタン → ラベル変更 → 保存で PUT が発火する (PR5b)", async () => {
+    mount();
+    await screen.findByText("役職");
+    await userEvent.click(screen.getByRole("button", { name: "役職 を編集" }));
+    const labelInput = await screen.findByLabelText("役職 のラベル");
+    await userEvent.clear(labelInput);
+    await userEvent.type(labelInput, "新役職");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "PUT"
+        && c.url.endsWith(`/event-actions/${ACTION_ID}/roster/columns/c-1`)
+        && c.body?.includes("新役職"))).toBe(true);
+    });
+  });
+
   it("× ボタンで onClose 発火", async () => {
     const { onClose } = mount();
     await screen.findByText("役職");

@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api";
-import type { RosterMember } from "../../types";
+import type {
+  RosterCustomColumn, RosterMember, RosterMemberValue,
+} from "../../types";
 import { colors } from "../../styles/tokens";
 import { RosterDetailPanel } from "./RosterDetailPanel";
 import { RosterColumnsModal } from "./RosterColumnsModal";
+import { formatCustomValue } from "./customValue";
 
 // 名簿管理 (member_roster) PR3-FE: 一覧表 read-only 表示。
 // 列ソート / 検索 / 退会済み非表示トグルのみ実装する。編集系は PR4 以降。
+// PR5b: カスタム列を固定列の後ろに sortOrder 順で表示 (read-only)。
+// 値編集はサイドパネル側で行う。
 
 type SortKey =
   | "name" | "nameKana" | "email" | "grade"
@@ -34,6 +39,9 @@ function cmp(a: string | null, b: string | null, dir: SortDir): number {
 
 export function RosterPage({ eventId, actionId }: { eventId: string; actionId: string }) {
   const [members, setMembers] = useState<RosterMember[] | null>(null);
+  const [customCols, setCustomCols] = useState<RosterCustomColumn[]>([]);
+  // values は (memberId,columnId) → parsed value のマップで持つ。
+  const [valueMap, setValueMap] = useState<Map<string, unknown>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [hideInactive, setHideInactive] = useState(true);
@@ -41,15 +49,30 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<RosterMember | null>(null);
   const [showCols, setShowCols] = useState(false);
+  // panel 内でカスタム値を編集したら increment → 値を再取得する。
+  const [valuesVersion, setValuesVersion] = useState(0);
 
   // hideInactive=false の時のみ includeInactive=1 を送る。
+  // カスタム列 / 値も同時に再取得する (列追加・削除モーダル close 後の整合性のため)。
   useEffect(() => {
     let cancelled = false;
     setMembers(null);
     setError(null);
-    api.roster.listMembers(actionId, { includeInactive: !hideInactive })
-      .then((rows) => {
-        if (!cancelled) setMembers(Array.isArray(rows) ? rows : []);
+    Promise.all([
+      api.roster.listMembers(actionId, { includeInactive: !hideInactive }),
+      api.roster.listColumns(actionId).catch(() => [] as RosterCustomColumn[]),
+      api.roster.listValues(actionId).catch(() => [] as RosterMemberValue[]),
+    ])
+      .then(([rows, cols, vals]) => {
+        if (cancelled) return;
+        setMembers(Array.isArray(rows) ? rows : []);
+        setCustomCols(cols);
+        const m = new Map<string, unknown>();
+        for (const v of vals) {
+          try { m.set(`${v.memberId}:${v.columnId}`, JSON.parse(v.valueJson)); }
+          catch { /* skip invalid JSON */ }
+        }
+        setValueMap(m);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -57,7 +80,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
         setMembers([]);
       });
     return () => { cancelled = true; };
-  }, [actionId, hideInactive]);
+  }, [actionId, hideInactive, showCols, valuesVersion]);
 
   const visible = useMemo(() => {
     if (!members) return [];
@@ -122,6 +145,9 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
                 );
               })}
               <th style={S.th}>備考</th>
+              {customCols.map((c) => (
+                <th key={c.id} style={S.th} title={c.columnKey}>{c.label}</th>
+              ))}
             </tr></thead>
             <tbody>
               {visible.map((m) => {
@@ -150,6 +176,11 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
                       </span>
                     </td>
                     <td style={td}>{m.note ?? "-"}</td>
+                    {customCols.map((c) => (
+                      <td key={c.id} style={td}>
+                        {formatCustomValue(c.type, valueMap.get(`${m.id}:${c.id}`))}
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
@@ -163,6 +194,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
       {selected && (
         <RosterDetailPanel
           eventId={eventId} actionId={actionId} member={selected}
+          customColumns={customCols}
           onClose={() => setSelected(null)}
           onChanged={(next) => {
             setMembers((prev) => {
@@ -171,6 +203,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
               return prev.map((x) => (x.id === next.id ? next : x));
             });
           }}
+          onValuesChanged={() => setValuesVersion((n) => n + 1)}
         />
       )}
     </div>

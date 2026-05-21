@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   eventActions,
@@ -442,6 +442,37 @@ rosterRouter.delete(
 // ----------------------------------------------------------------------------
 // Member values (member × column upsert)
 // ----------------------------------------------------------------------------
+
+/**
+ * GET /api/event-actions/:actionId/roster/values
+ *   action 配下の全カスタム値を返す。一覧表で 1 リクエストで全行の値を引くため
+ *   メンバー単位ではなく action 単位で bulk fetch する。
+ *   レスポンス: [{ memberId, columnId, valueJson }, ...]
+ */
+rosterRouter.get("/event-actions/:actionId/roster/values", async (c) => {
+  const db = drizzle(c.env.DB);
+  const actionId = c.req.param("actionId");
+  const found = await findAction(db, actionId);
+  if ("error" in found) return c.json({ error: found.error }, found.status);
+
+  // 同 action 配下の column id だけ拾って、その値だけ返す。
+  const cols = await db
+    .select({ id: rosterCustomColumns.id })
+    .from(rosterCustomColumns)
+    .where(eq(rosterCustomColumns.eventActionId, actionId))
+    .all();
+  if (cols.length === 0) return c.json([]);
+  const rows = await db
+    .select({
+      memberId: rosterMemberValues.memberId,
+      columnId: rosterMemberValues.columnId,
+      valueJson: rosterMemberValues.valueJson,
+    })
+    .from(rosterMemberValues)
+    .where(inArray(rosterMemberValues.columnId, cols.map((r) => r.id)))
+    .all();
+  return c.json(rows);
+});
 
 /**
  * PUT /api/event-actions/:actionId/roster/members/:id/values/:columnId

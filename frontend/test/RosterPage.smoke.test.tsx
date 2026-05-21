@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RosterPage } from "../src/pages/roster/RosterPage";
-import type { RosterMember } from "../src/types";
+import type { RosterCustomColumn, RosterMember } from "../src/types";
 import { AppProviders, renderWithProviders } from "./util";
 
 // 名簿管理 (member_roster) PR3-FE: RosterPage の read-only スモーク。
@@ -128,5 +128,26 @@ describe("RosterPage smoke", () => {
     // active 2 名 + (デフォルトでは inactive 除外) → 「在籍」が 2 個
     const badges = screen.getAllByText("在籍");
     expect(badges.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // PR5b: カスタム列ヘッダとセル値が一覧表に出る。util の route map (path.endsWith) で 3 種を分岐。
+  it("カスタム列の見出しと値が一覧表に表示される (PR5b)", async () => {
+    const aliceId = members[0]!.id;
+    const cols: RosterCustomColumn[] = [{
+      id: "col-1", eventActionId: ACTION_ID, columnKey: "size", label: "サイズ",
+      type: "select", optionsJson: JSON.stringify(["S", "M", "L"]), sortOrder: 0,
+      createdAt: "x", updatedAt: "x",
+    }];
+    renderWithProviders(<RosterPage eventId="ev-1" actionId={ACTION_ID} />, {
+      routes: {
+        [ROUTE]: members,
+        [`/event-actions/${ACTION_ID}/roster/columns`]: cols,
+        [`/event-actions/${ACTION_ID}/roster/values`]: [
+          { memberId: aliceId, columnId: "col-1", valueJson: JSON.stringify("M") },
+        ],
+      },
+    });
+    expect(await screen.findByText("サイズ")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("M").length).toBeGreaterThan(0));
   });
 });
