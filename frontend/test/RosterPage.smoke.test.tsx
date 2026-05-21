@@ -45,7 +45,7 @@ const members: RosterMember[] = [
 ];
 
 function render(rows: RosterMember[] = members) {
-  return renderWithProviders(<RosterPage actionId={ACTION_ID} />, {
+  return renderWithProviders(<RosterPage eventId="ev-1" actionId={ACTION_ID} />, {
     routes: { [ROUTE]: rows },
   });
 }
@@ -99,7 +99,7 @@ describe("RosterPage smoke", () => {
     );
     rtlRender(
       <AppProviders>
-        <RosterPage actionId={ACTION_ID} />
+        <RosterPage eventId="ev-1" actionId={ACTION_ID} />
       </AppProviders>,
     );
     await screen.findByText("Alice");

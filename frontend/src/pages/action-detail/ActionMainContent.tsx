@@ -43,7 +43,7 @@ export function ActionMainContent({
     case "role_management":
       return <RoleMainTab eventId={eventId} action={action} />;
     case "member_roster":
-      return <RosterPage actionId={action.id} />;
+      return <RosterPage eventId={eventId} actionId={action.id} />;
     default:
       return null;
   }
