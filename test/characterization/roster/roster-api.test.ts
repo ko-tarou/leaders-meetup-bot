@@ -395,4 +395,29 @@ describe("member values upsert", () => {
       .all();
     expect(rows).toHaveLength(1);
   });
+
+  it("GET /roster/values: action 配下の全値を bulk fetch (PR5b)", async () => {
+    const { action } = await setup();
+    const mc = await reqJson(
+      `/event-actions/${action.id}/roster/members`, "POST", { name: "M" });
+    const mId = ((await mc.json()) as { id: string }).id;
+    const cc = await reqJson(
+      `/event-actions/${action.id}/roster/columns`, "POST",
+      { columnKey: "k", label: "L", type: "text" });
+    const cId = ((await cc.json()) as { id: string }).id;
+    await reqJson(
+      `/event-actions/${action.id}/roster/members/${mId}/values/${cId}`,
+      "PUT", { value: "hi" });
+
+    const res = await app().request(
+      `/event-actions/${action.id}/roster/values`, {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{
+      memberId: string; columnId: string; valueJson: string;
+    }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]!.memberId).toBe(mId);
+    expect(body[0]!.columnId).toBe(cId);
+    expect(JSON.parse(body[0]!.valueJson)).toBe("hi");
+  });
 });

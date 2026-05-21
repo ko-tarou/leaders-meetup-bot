@@ -20,6 +20,14 @@ export type RosterCustomColumn = {
   updatedAt: string;
 };
 
+// PR5b: action 配下の全カスタム値を 1 リクエストで取るための行型。
+// 値は backend で JSON 文字列 (`valueJson`) として返るので FE で parse する。
+export type RosterMemberValue = {
+  memberId: string;
+  columnId: string;
+  valueJson: string;
+};
+
 export type RosterMember = {
   id: string;
   eventActionId: string;

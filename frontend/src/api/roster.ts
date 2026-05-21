@@ -2,6 +2,7 @@ import type {
   RosterColumnType,
   RosterCustomColumn,
   RosterMember,
+  RosterMemberValue,
 } from "../types";
 import { request } from "./client";
 
@@ -60,4 +61,21 @@ export const roster = {
   deleteColumn: (actionId: string, columnId: string) =>
     request<{ ok: boolean }>(`/event-actions/${actionId}/roster/columns/${columnId}`,
       { method: "DELETE" }),
+  /** PR5b: action 配下の全カスタム値を bulk fetch (一覧表用)。 */
+  listValues: (actionId: string) =>
+    request<RosterMemberValue[]>(`/event-actions/${actionId}/roster/values`),
+  /** PR5b: メンバー × 列の値を upsert。`value` は string|number|null 等の JSON 値。 */
+  setMemberValue: (
+    actionId: string, memberId: string, columnId: string, value: unknown,
+  ) =>
+    request<RosterMemberValue>(
+      `/event-actions/${actionId}/roster/members/${memberId}/values/${columnId}`,
+      { method: "PUT", body: JSON.stringify({ value }) },
+    ),
+  /** PR5b: メンバー × 列の値を物理削除 (値クリア。列定義は残る)。 */
+  deleteMemberValue: (actionId: string, memberId: string, columnId: string) =>
+    request<{ ok: boolean }>(
+      `/event-actions/${actionId}/roster/members/${memberId}/values/${columnId}`,
+      { method: "DELETE" },
+    ),
 };
