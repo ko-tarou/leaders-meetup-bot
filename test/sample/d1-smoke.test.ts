@@ -1,7 +1,7 @@
 /**
  * 006-0-1 サンプル (b): D1 ハーネス integration スモーク。
  *
- * setup.ts が miniflare の使い捨て D1 へ全 46 migration を適用済みである
+ * setup.ts が miniflare の使い捨て D1 へ全 49 migration を適用済みである
  * ことを前提に、(1) 主要テーブルが存在し (2) factory で insert したレコードを
  * select で読めることを確認する。テスト基盤 (D1 ハーネス + factory) が機能する
  * 証拠。本番 D1 には一切接続しない (miniflare in-process SQLite)。
@@ -18,11 +18,11 @@ describe("D1 harness smoke", () => {
     resetSeq();
   });
 
-  it("全 46 migration を連番順に検出する", () => {
+  it("全 49 migration を連番順に検出する", () => {
     const names = migrationFileNames();
-    expect(names.length).toBe(46);
+    expect(names.length).toBe(49);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0047_participation_role_assign");
+    expect(names[names.length - 1]).toBe("0050_create_roster_member_values");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);
