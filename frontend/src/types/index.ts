@@ -15,4 +15,5 @@ export * from "./slack-invite";
 export * from "./participation";
 export * from "./interviewer";
 export * from "./role";
+export * from "./roster";
 export * from "./common";

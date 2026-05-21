@@ -4,6 +4,7 @@ import { PRReviewListTab } from "../../components/PRReviewListTab";
 import { MemberApplicationListTab } from "../../components/MemberApplicationListTab";
 import { AttendanceCheckMain } from "../../components/AttendanceCheckForm";
 import { RoleMainTab } from "../../components/role-management/RoleMainTab";
+import { RosterPage } from "../roster/RosterPage";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
 
@@ -41,6 +42,8 @@ export function ActionMainContent({
       return <AttendanceCheckMain action={action} />;
     case "role_management":
       return <RoleMainTab eventId={eventId} action={action} />;
+    case "member_roster":
+      return <RosterPage actionId={action.id} />;
     default:
       return null;
   }

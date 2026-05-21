@@ -56,6 +56,11 @@ export const ACTION_META: Record<
       "ロール定義・メンバー割当・チャンネル管理を一元化（Slack 無料プラン代替）",
     icon: "🛡",
   },
+  member_roster: {
+    label: "名簿管理",
+    description: "メンバー名簿を Excel ライクに一覧 / 編集できます",
+    icon: "📒",
+  },
 };
 
 // 共通タブ (イベント直下)
