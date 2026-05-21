@@ -1,10 +1,22 @@
-import type { RosterMember } from "../types";
+import type {
+  RosterColumnType,
+  RosterCustomColumn,
+  RosterMember,
+} from "../types";
 import { request } from "./client";
 
 // 名簿管理 (member_roster) roster API クライアント。
 // backend ルート:
 //   /api/event-actions/:actionId/roster/...           (PR1: CRUD)
 //   /api/orgs/:eventId/actions/:actionId/roster/...   (PR2: roles 連携)
+// PR5: カスタム列 CRUD。`options` (array) を BE の `optionsJson` キーに詰め替える。
+type ColInput = {
+  columnKey?: string; label: string; type: RosterColumnType;
+  options?: string[] | null; sortOrder?: number;
+};
+const colBody = ({ options, ...rest }: ColInput): Record<string, unknown> =>
+  options !== undefined ? { ...rest, optionsJson: options } : rest;
+
 export const roster = {
   /** 名簿メンバー一覧。includeInactive=true で 退会済みも含む。soft-deleted は常時除外。 */
   listMembers: (actionId: string, opts?: { includeInactive?: boolean }) => {
@@ -36,4 +48,16 @@ export const roster = {
       `/orgs/${eventId}/actions/${actionId}/roster/members/${memberId}/roles`,
       { method: "PUT", body: JSON.stringify({ roleIds }) },
     ),
+  /** PR5: カスタム列 CRUD。BE 側で削除時は member_values も連鎖削除される。 */
+  listColumns: (actionId: string) =>
+    request<RosterCustomColumn[]>(`/event-actions/${actionId}/roster/columns`),
+  createColumn: (actionId: string, body: ColInput) =>
+    request<RosterCustomColumn>(`/event-actions/${actionId}/roster/columns`,
+      { method: "POST", body: JSON.stringify(colBody(body)) }),
+  updateColumn: (actionId: string, columnId: string, body: ColInput) =>
+    request<RosterCustomColumn>(`/event-actions/${actionId}/roster/columns/${columnId}`,
+      { method: "PUT", body: JSON.stringify(colBody(body)) }),
+  deleteColumn: (actionId: string, columnId: string) =>
+    request<{ ok: boolean }>(`/event-actions/${actionId}/roster/columns/${columnId}`,
+      { method: "DELETE" }),
 };

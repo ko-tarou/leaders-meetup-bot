@@ -5,6 +5,21 @@
 
 export type RosterMemberStatus = "active" | "inactive";
 
+// PR5: カスタム列定義。BE は `roster_custom_columns` の drizzle row を素返しする
+// (`optionsJson` は string|null の JSON 文字列)。FE 側で parse する。
+export type RosterColumnType = "text" | "number" | "select" | "date";
+export type RosterCustomColumn = {
+  id: string;
+  eventActionId: string;
+  columnKey: string;
+  label: string;
+  type: RosterColumnType;
+  optionsJson: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type RosterMember = {
   id: string;
   eventActionId: string;
