@@ -16,6 +16,7 @@ import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
 import { feedbackRouter } from "./api/feedback";
 import { participationRouter } from "./api/participation";
+import { rosterRouter } from "./api/roster";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -99,5 +100,6 @@ api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
 api.route("/", feedbackRouter);
 api.route("/", participationRouter);
+api.route("/", rosterRouter);
 
 export { api };
