@@ -132,6 +132,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
   }>();
 
   // バリデーション: action_type は限定リスト
+  // member_roster: 名簿管理 (Phase 1)。config は schemaVersion 1 を採用予定だが、
+  // 詳細スキーマは PR1 のテーブル設計に従い空 ({}) でも作成可能。
   const VALID_TYPES = [
     "schedule_polling",
     "task_management",
@@ -141,6 +143,7 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "weekly_reminder",
     "attendance_check",
     "role_management",
+    "member_roster",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -177,13 +180,20 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     }
   }
 
+  // action type 毎の default config (body.config 未指定時のみ採用)。
+  // member_roster は schemaVersion を持たせて将来の論理マイグレーションに備える。
+  const DEFAULT_CONFIG: Record<string, string> = {
+    member_roster: JSON.stringify({ schemaVersion: 1 }),
+  };
+  const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const action = {
     id,
     eventId,
     actionType: body.actionType,
-    config: body.config ?? "{}",
+    config: body.config ?? defaultConfig,
     enabled: body.enabled ?? 1,
     createdAt: now,
     updatedAt: now,
