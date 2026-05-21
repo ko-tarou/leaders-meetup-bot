@@ -12,6 +12,7 @@ import { meetings } from "./meetings";
 import { participation } from "./participation";
 import { prReviews } from "./pr-reviews";
 import { publicTokens, roles } from "./roles";
+import { roster } from "./roster";
 import { slack } from "./slack";
 import { tasks } from "./tasks";
 import { applications } from "./applications";
@@ -35,6 +36,7 @@ export const api = {
   participation,
   interviewers,
   roles,
+  roster,
   publicTokens,
   workspaces,
   gmailAccounts,
