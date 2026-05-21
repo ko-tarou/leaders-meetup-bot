@@ -16,6 +16,7 @@ import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
 import { feedbackRouter } from "./api/feedback";
 import { participationRouter } from "./api/participation";
+import { rosterRouter } from "./api/roster";
 import { rosterExtrasRouter } from "./api/roster-extras";
 
 const api = new Hono<{ Bindings: Env }>();
@@ -100,6 +101,7 @@ api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
 api.route("/", feedbackRouter);
 api.route("/", participationRouter);
+api.route("/", rosterRouter);
 // 名簿管理 (member_roster) 拡張 API: 合格者取り込み候補 + ロール連携
 // PR1 (roster_members CRUD) と同 prefix にぶら下がる。マージ時にルーターを統合してもよい。
 api.route("/", rosterExtrasRouter);

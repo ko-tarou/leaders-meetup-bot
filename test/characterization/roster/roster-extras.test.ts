@@ -5,11 +5,16 @@
  *  - orgs router で actionType='member_roster' を作成できる (default config)
  *  - GET /roster/import-candidates: status='passed' のみ + slackName join
  *  - GET /roster/import-candidates: action 型不一致は 400
- *  - GET /roster/members/:id/roles: roster_members 未デプロイ時 503
+ *  - GET /roster/members/:id/roles: 存在しない member は 404
  *  - PUT /roster/members/:id/roles: event scope 内 role の入れ替え
  *  - PUT /roster/members/:id/roles: roleIds 非配列 → 400
  *
- * roster_members は PR1 未マージのため、必要なテストで動的に CREATE する。
+ * roster_members テーブルは PR1 (migration 0048) でマージ済みのため、
+ * setup.ts の applyMigrations により自動で作成される。
+ * 本ファイルでは INSERT のみ行う (CREATE TABLE 不要)。
+ *
+ * 注: roster-extras.ts の rosterMembersExists() による 503 fail-soft path は
+ * PR1 マージ後はデッドコード化している。クリーンアップは別 PR で実施予定。
  */
 import { describe, it, expect } from "vitest";
 import { Hono } from "hono";
@@ -38,15 +43,13 @@ async function req(path: string, method = "GET", body?: unknown) {
   }, env);
 }
 
-async function createRosterMembersTable() {
-  await testD1().exec(
-    "CREATE TABLE IF NOT EXISTS roster_members (id TEXT PRIMARY KEY, event_action_id TEXT NOT NULL, name TEXT NOT NULL, email TEXT, slack_user_id TEXT)",
-  );
-}
 async function insertRosterMember(id: string, actionId: string, slackUserId: string | null) {
+  const now = new Date().toISOString();
   await testD1()
-    .prepare("INSERT INTO roster_members (id, event_action_id, name, email, slack_user_id) VALUES (?, ?, ?, NULL, ?)")
-    .bind(id, actionId, "Test Member", slackUserId).run();
+    .prepare(
+      "INSERT INTO roster_members (id, event_action_id, name, email, slack_user_id, status, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, 'active', ?, ?)",
+    )
+    .bind(id, actionId, "Test Member", slackUserId, now, now).run();
 }
 
 describe("orgs: actionType='member_roster'", () => {
@@ -86,15 +89,14 @@ describe("GET /roster/import-candidates", () => {
 });
 
 describe("/roster/members/:memberId/roles", () => {
-  it("GET: roster_members 未デプロイ時は 503", async () => {
+  it("GET: 存在しない member は 404", async () => {
     const ev = await makeEvent();
     const action = await makeEventAction(ev.id, { actionType: "member_roster" });
     const res = await req(`/orgs/${ev.id}/actions/${action.id}/roster/members/ghost/roles`);
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
   });
 
   it("PUT: event scope 内 role の入れ替えが動作する", async () => {
-    await createRosterMembersTable();
     const ev = await makeEvent();
     const ra = await makeEventAction(ev.id, { actionType: "member_roster" });
     const rolesAction = await makeEventAction(ev.id, { actionType: "role_management" });
@@ -111,7 +113,6 @@ describe("/roster/members/:memberId/roles", () => {
   });
 
   it("PUT: roleIds が配列でないと 400", async () => {
-    await createRosterMembersTable();
     const ev = await makeEvent();
     const action = await makeEventAction(ev.id, { actionType: "member_roster" });
     await insertRosterMember("m-bad", action.id, "U_X");
