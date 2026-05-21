@@ -1,10 +1,24 @@
 import type {
   RosterColumnType,
   RosterCustomColumn,
+  RosterImportCandidate,
   RosterMember,
   RosterMemberValue,
 } from "../types";
 import { request } from "./client";
+
+// PR6: 手動追加 / 取り込み 用の POST body。email/grade などは任意。
+export type RosterMemberCreateInput = {
+  name: string;
+  nameKana?: string | null;
+  email?: string | null;
+  grade?: string | null;
+  slackUserId?: string | null;
+  slackName?: string | null;
+  joinedAt?: string | null;
+  note?: string | null;
+  status?: "active" | "inactive";
+};
 
 // 名簿管理 (member_roster) roster API クライアント。
 // backend ルート:
@@ -24,6 +38,15 @@ export const roster = {
     const qs = opts?.includeInactive ? "?includeInactive=1" : "";
     return request<RosterMember[]>(`/event-actions/${actionId}/roster/members${qs}`);
   },
+  /** PR6: 名簿メンバーを新規作成。手動追加 / 合格者取り込みの両方で利用。 */
+  createMember: (actionId: string, body: RosterMemberCreateInput) =>
+    request<RosterMember>(`/event-actions/${actionId}/roster/members`,
+      { method: "POST", body: JSON.stringify(body) }),
+  /** PR6: 合格者取り込み候補 (applications.status='passed' で email 未取り込み)。 */
+  listImportCandidates: (eventId: string, actionId: string) =>
+    request<RosterImportCandidate[]>(
+      `/orgs/${eventId}/actions/${actionId}/roster/import-candidates`,
+    ),
   /** 部分更新 (PR4)。BE が更新後の row を返す。 */
   updateMember: (actionId: string, memberId: string, patch: Partial<RosterMember>) =>
     request<RosterMember>(
