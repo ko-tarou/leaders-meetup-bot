@@ -6,6 +6,8 @@ import type {
 import { colors } from "../../styles/tokens";
 import { RosterDetailPanel } from "./RosterDetailPanel";
 import { RosterColumnsModal } from "./RosterColumnsModal";
+import { RosterImportModal } from "./RosterImportModal";
+import { RosterMemberAddModal } from "./RosterMemberAddModal";
 import { formatCustomValue } from "./customValue";
 
 // 名簿管理 (member_roster) PR3-FE: 一覧表 read-only 表示。
@@ -49,7 +51,10 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [selected, setSelected] = useState<RosterMember | null>(null);
   const [showCols, setShowCols] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   // panel 内でカスタム値を編集したら increment → 値を再取得する。
+  // 取り込み / 追加モーダル close 時にも increment して名簿を再 fetch する。
   const [valuesVersion, setValuesVersion] = useState(0);
 
   // hideInactive=false の時のみ includeInactive=1 を送る。
@@ -113,6 +118,12 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
             onChange={(e) => setHideInactive(e.target.checked)} />
           <span>退会済みを非表示</span>
         </label>
+        <button type="button" onClick={() => setShowImport(true)} style={S.primaryBtn}>
+          合格者から取り込み
+        </button>
+        <button type="button" onClick={() => setShowAdd(true)} style={S.primaryBtn}>
+          ＋ メンバー追加
+        </button>
         <button type="button" onClick={() => setShowCols(true)} style={S.colsBtn}>
           カスタム列管理
         </button>
@@ -191,6 +202,21 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
       {showCols && (
         <RosterColumnsModal actionId={actionId} onClose={() => setShowCols(false)} />
       )}
+      {showImport && (
+        <RosterImportModal
+          eventId={eventId} actionId={actionId}
+          onClose={() => setShowImport(false)}
+          onImported={() => setValuesVersion((n) => n + 1)}
+        />
+      )}
+      {showAdd && (
+        <RosterMemberAddModal
+          actionId={actionId}
+          onClose={() => setShowAdd(false)}
+          onCreated={(m) =>
+            setMembers((prev) => (prev ? [...prev, m] : [m]))}
+        />
+      )}
       {selected && (
         <RosterDetailPanel
           eventId={eventId} actionId={actionId} member={selected}
@@ -245,4 +271,7 @@ const S = {
   colsBtn: { padding: "0.4rem 0.8rem", background: colors.surface, color: colors.text,
     border: `1px solid ${colors.borderStrong}`, borderRadius: "0.375rem",
     fontSize: "0.875rem", cursor: "pointer" } as CSSProperties,
+  primaryBtn: { padding: "0.4rem 0.8rem", background: colors.primary, color: "#fff",
+    border: "none", borderRadius: "0.375rem", fontSize: "0.875rem",
+    cursor: "pointer" } as CSSProperties,
 } as const;

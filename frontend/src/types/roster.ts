@@ -28,6 +28,16 @@ export type RosterMemberValue = {
   valueJson: string;
 };
 
+// PR6: 合格者取り込み候補。BE は applications.status='passed' のうち
+// roster_members に email 重複の無いものを返す。
+export type RosterImportCandidate = {
+  id: string;
+  name: string;
+  email: string;
+  decidedAt: string | null;
+  slackName: string | null;
+};
+
 export type RosterMember = {
   id: string;
   eventActionId: string;
