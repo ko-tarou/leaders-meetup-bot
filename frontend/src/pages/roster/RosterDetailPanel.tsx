@@ -1,13 +1,16 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../../api";
-import type { RosterMember, SlackRole } from "../../types";
+import type { RosterCustomColumn, RosterMember, SlackRole } from "../../types";
 import { useToast } from "../../components/ui/Toast";
 import { useConfirm } from "../../components/ui/ConfirmDialog";
 import { colors } from "../../styles/tokens";
+import {
+  fromInputValue, parseOptions, toInputValue,
+} from "./customValue";
 
 // 名簿管理 PR4-FE: メンバー編集サイドパネル。
 // 行クリックで右からスライドイン → フィールド編集 + ロール選択 + 退会。
-// セル単位インライン編集は別 PR (PR4-b 予定)。
+// PR5b: カスタム列値の編集セクションを追加 (type に応じた input)。
 
 type Editable = "name" | "nameKana" | "email" | "grade" | "slackName" | "note";
 const FIELDS: { key: Editable; label: string }[] = [
@@ -17,10 +20,14 @@ const FIELDS: { key: Editable; label: string }[] = [
 ];
 
 export function RosterDetailPanel({
-  eventId, actionId, member, onClose, onChanged,
+  eventId, actionId, member, customColumns = [], onClose, onChanged,
+  onValuesChanged,
 }: {
   eventId: string; actionId: string; member: RosterMember;
+  // PR5b: 親 (RosterPage) から渡される。未指定なら panel 内で取得する。
+  customColumns?: RosterCustomColumn[];
   onClose: () => void; onChanged: (next: RosterMember | null) => void;
+  onValuesChanged?: () => void;
 }) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -29,6 +36,10 @@ export function RosterDetailPanel({
   const [roleIds, setRoleIds] = useState<Set<string>>(new Set());
   const [initialRoleIds, setInitialRoleIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // PR5b: カスタム値 (columnId → JS 値, 文字列で input に持つ)。
+  // BE は string|number 等の JSON 値を valueJson に保存するので、編集中も string で扱う。
+  const [valueDraft, setValueDraft] = useState<Record<string, string>>({});
+  const [initialValues, setInitialValues] = useState<Record<string, string>>({});
 
   useEffect(() => setDraft(member), [member]);
   useEffect(() => {
@@ -37,9 +48,20 @@ export function RosterDetailPanel({
       api.roles.list(eventId, actionId).catch(() => [] as SlackRole[]),
       api.roster.getMemberRoles(eventId, actionId, member.id)
         .catch(() => ({ roleIds: [] as string[] })),
-    ]).then(([rs, mr]) => {
+      // PR5b: カスタム値を fetch。失敗時 / 配列でない時は空扱い (列が無い環境を許容)。
+      api.roster.listValues(actionId).catch(() => []),
+    ]).then(([rs, mr, vals]) => {
       if (off) return;
       setRoles(rs); setRoleIds(new Set(mr.roleIds)); setInitialRoleIds(mr.roleIds);
+      const init: Record<string, string> = {};
+      const list = Array.isArray(vals) ? vals : [];
+      for (const v of list) {
+        if (v.memberId !== member.id) continue;
+        try { init[v.columnId] = toInputValue(JSON.parse(v.valueJson)); }
+        catch { /* skip */ }
+      }
+      setValueDraft(init);
+      setInitialValues(init);
     });
     return () => { off = true; };
   }, [eventId, actionId, member.id]);
@@ -68,7 +90,22 @@ export function RosterDetailPanel({
       if (initialRoleIds.slice().sort().join(",") !== target.join(",")) {
         await api.roster.setMemberRoles(eventId, actionId, member.id, target);
       }
+      // PR5b: カスタム値の差分を upsert / delete する。
+      let valuesChanged = false;
+      for (const col of customColumns) {
+        const before = initialValues[col.id] ?? "";
+        const after = valueDraft[col.id] ?? "";
+        if (before === after) continue;
+        valuesChanged = true;
+        if (after === "") {
+          await api.roster.deleteMemberValue(actionId, member.id, col.id);
+        } else {
+          await api.roster.setMemberValue(actionId, member.id, col.id,
+            fromInputValue(col.type, after));
+        }
+      }
       onChanged(updated);
+      if (valuesChanged) onValuesChanged?.();
       toast.success("保存しました");
       onClose();
     } catch (e) {
@@ -127,6 +164,35 @@ export function RosterDetailPanel({
               </label>
             ))}
           </fieldset>
+          {customColumns.length > 0 && (
+            <fieldset style={S.field}>
+              <legend style={S.lab}>カスタム列</legend>
+              {customColumns.map((c) => {
+                const v = valueDraft[c.id] ?? "";
+                const onChange = (next: string) =>
+                  setValueDraft({ ...valueDraft, [c.id]: next });
+                return (
+                  <label key={c.id} style={S.field}>
+                    <span style={S.lab}>{c.label}</span>
+                    {c.type === "select" ? (
+                      <select aria-label={c.label} value={v} style={S.input}
+                        onChange={(e) => onChange(e.target.value)}>
+                        <option value="">(未設定)</option>
+                        {parseOptions(c.optionsJson).map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input type={c.type === "number" ? "number"
+                        : c.type === "date" ? "date" : "text"}
+                        aria-label={c.label} value={v} style={S.input}
+                        onChange={(e) => onChange(e.target.value)}/>
+                    )}
+                  </label>
+                );
+              })}
+            </fieldset>
+          )}
         </div>
         <footer style={S.footer}>
           <button type="button" onClick={remove} disabled={saving}

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RosterDetailPanel } from "../src/pages/roster/RosterDetailPanel";
-import type { RosterMember, SlackRole } from "../src/types";
+import type { RosterCustomColumn, RosterMember, SlackRole } from "../src/types";
 import { AppProviders } from "./util";
 
 // 名簿管理 PR4-FE: RosterDetailPanel (編集 / ロール選択 / 退会) の smoke。
@@ -34,6 +34,9 @@ beforeEach(() => {
     if (path.endsWith(`/roster/members/${member.id}/roles`))
       payload = method === "GET" ? { roleIds: [] } : { ok: true, roleIds: [] };
     else if (path.endsWith(`/actions/${ACTION_ID}/roles`)) payload = roles;
+    else if (path.endsWith("/roster/values")) payload = [];
+    else if (path.includes("/roster/members/") && path.includes("/values/"))
+      payload = { ok: true };
     else if (path.endsWith(`/roster/members/${member.id}`))
       payload = { ...member, ...JSON.parse(body ?? "{}") };
     return new Response(JSON.stringify(payload),
@@ -80,6 +83,23 @@ describe("RosterDetailPanel smoke", () => {
       expect(calls.some((c) => c.method === "PUT"
         && c.url.endsWith(`/roster/members/${member.id}/roles`)
         && c.body?.includes("r-1"))).toBe(true);
+    });
+  });
+
+  it("カスタム値を編集して保存すると PUT /values/:columnId が発火する (PR5b)", async () => {
+    const cols: RosterCustomColumn[] = [{
+      id: "col-x", eventActionId: ACTION_ID, columnKey: "memo", label: "メモ",
+      type: "text", optionsJson: null, sortOrder: 0, createdAt: "x", updatedAt: "x",
+    }];
+    mount({ customColumns: cols });
+    // カスタム列セクションの label="メモ" の input を取得 (空文字)
+    const memoInput = await screen.findByLabelText("メモ");
+    await userEvent.type(memoInput, "hello");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === "PUT"
+        && c.url.endsWith(`/roster/members/${member.id}/values/col-x`)
+        && c.body?.includes("hello"))).toBe(true);
     });
   });
 
