@@ -703,6 +703,86 @@ export const githubUserMappings = sqliteTable(
   (t) => [index("idx_github_user_mappings_slack_user_id").on(t.slackUserId)],
 );
 
+// 名簿管理 (member_roster) PR1: 名簿メンバー本体。
+// 1 event_action : N member (運用上 1 action 1 名簿、DB 制約は付けない)。
+// status は 'active' | 'inactive'。削除は soft delete (deleted_at) で履歴を残す。
+export const rosterMembers = sqliteTable(
+  "roster_members",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id").notNull(),
+    name: text("name").notNull(),
+    nameKana: text("name_kana"),
+    email: text("email"),
+    // 例: "B3", "M1" など自由文字列
+    grade: text("grade"),
+    slackUserId: text("slack_user_id"),
+    slackName: text("slack_name"),
+    // ISO 8601 date (YYYY-MM-DD)
+    joinedAt: text("joined_at"),
+    leftAt: text("left_at"),
+    note: text("note"),
+    // 'active' | 'inactive'
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    deletedAt: text("deleted_at"),
+  },
+  (t) => [
+    index("idx_roster_members_event_action_id").on(t.eventActionId),
+    index("idx_roster_members_status").on(t.status),
+    index("idx_roster_members_deleted_at").on(t.deletedAt),
+  ],
+);
+
+// 名簿管理 (member_roster) PR1: カスタム列定義。
+// 1 event_action : N column。(event_action_id, column_key) UNIQUE。
+// type は 'text' | 'number' | 'select' | 'date'。select 時のみ options_json
+// (JSON 配列) を使う。
+export const rosterCustomColumns = sqliteTable(
+  "roster_custom_columns",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id").notNull(),
+    columnKey: text("column_key").notNull(),
+    label: text("label").notNull(),
+    type: text("type").notNull(),
+    optionsJson: text("options_json"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_roster_custom_columns_event_action_id").on(t.eventActionId),
+    uniqueIndex("uq_roster_custom_columns_action_key").on(
+      t.eventActionId,
+      t.columnKey,
+    ),
+  ],
+);
+
+// 名簿管理 (member_roster) PR1: member × column の値。
+// (member_id, column_id) UNIQUE。値は JSON 文字列で persist。
+export const rosterMemberValues = sqliteTable(
+  "roster_member_values",
+  {
+    id: text("id").primaryKey(),
+    memberId: text("member_id").notNull(),
+    columnId: text("column_id").notNull(),
+    valueJson: text("value_json").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_roster_member_values_member_column").on(
+      t.memberId,
+      t.columnId,
+    ),
+    index("idx_roster_member_values_member_id").on(t.memberId),
+    index("idx_roster_member_values_column_id").on(t.columnId),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
