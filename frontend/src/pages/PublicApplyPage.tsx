@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
+import { NameSplitInput } from "../components/NameSplitInput";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
 import {
   HOW_FOUND_LABEL,
@@ -31,7 +32,9 @@ export function PublicApplyPage() {
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [availability, setAvailability] = useState<Availability | null>(null);
-  const [name, setName] = useState("");
+  // 苗字/名前を分割入力。送信時に半角スペース結合で既存 `name` カラムに詰める。
+  const [familyName, setFamilyName] = useState("");
+  const [givenName, setGivenName] = useState("");
   const [email, setEmail] = useState("");
   // Sprint 19 PR2: Google Form 準拠の新フィールド
   const [studentId, setStudentId] = useState("");
@@ -84,8 +87,14 @@ export function PublicApplyPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) {
-      setError("お名前とメールアドレスは必須です");
+    const trimmedFamilyName = familyName.trim();
+    const trimmedGivenName = givenName.trim();
+    if (!trimmedFamilyName || !trimmedGivenName) {
+      setError("姓と名は必須です");
+      return;
+    }
+    if (!email.trim()) {
+      setError("メールアドレスは必須です");
       return;
     }
     if (!studentId.trim()) {
@@ -104,11 +113,14 @@ export function PublicApplyPage() {
       setError("面談希望日時を1つ以上選択してください");
       return;
     }
+    // 既存の `name` カラムに合わせて半角スペース結合で BE に送る。
+    // 送信 body の形式は維持 (BE / DB スキーマは無変更)。
+    const name = `${trimmedFamilyName} ${trimmedGivenName}`;
     setError(null);
     setSubmitting(true);
     try {
       const res = await api.applications.apply(eventId!, {
-        name: name.trim(),
+        name,
         email: email.trim(),
         studentId: studentId.trim(),
         howFound,
@@ -199,17 +211,13 @@ export function PublicApplyPage() {
       )}
 
       <form onSubmit={handleSubmit}>
-        <Field label="お名前 *">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            maxLength={100}
-            placeholder="例: 山田 太郎"
-            style={inputStyle}
-          />
-        </Field>
+        <NameSplitInput
+          label="お名前 *"
+          familyName={familyName}
+          givenName={givenName}
+          onFamilyNameChange={setFamilyName}
+          onGivenNameChange={setGivenName}
+        />
         <Field label="メールアドレス *" hint="運営からの連絡用にご記入ください">
           <input
             type="email"
@@ -348,15 +356,23 @@ export function PublicApplyPage() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={
+            submitting || !familyName.trim() || !givenName.trim()
+          }
           style={{
-            background: submitting ? colors.primarySubtle : colors.primary,
+            background:
+              submitting || !familyName.trim() || !givenName.trim()
+                ? colors.primarySubtle
+                : colors.primary,
             color: colors.textInverse,
             padding: "0.75rem 2rem",
             border: "none",
             borderRadius: "0.375rem",
             fontSize: "1rem",
-            cursor: submitting ? "not-allowed" : "pointer",
+            cursor:
+              submitting || !familyName.trim() || !givenName.trim()
+                ? "not-allowed"
+                : "pointer",
             fontWeight: "bold",
           }}
         >

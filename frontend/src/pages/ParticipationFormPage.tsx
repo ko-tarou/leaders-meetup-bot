@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { NameSplitInput } from "../components/NameSplitInput";
 import type {
   ParticipationActivity,
   ParticipationDevRole,
@@ -55,7 +56,9 @@ export function ParticipationFormPage() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
+  // 苗字/名前を分割入力。送信時に半角スペース結合で既存 `name` カラムに詰める。
+  const [familyName, setFamilyName] = useState("");
+  const [givenName, setGivenName] = useState("");
   const [slackName, setSlackName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [department, setDepartment] = useState("");
@@ -94,7 +97,17 @@ export function ParticipationFormPage() {
         try {
           const pf = await api.participation.prefill(eventId, token);
           if (cancelled) return;
-          if (pf.name) setName(pf.name);
+          if (pf.name) {
+            // 既存 name (半角/全角スペース区切りの可能性) を分割して
+            // 姓/名フィールドに復元する。区切りが無い場合は姓に全文を入れる。
+            const parts = pf.name.trim().split(/[\s　]+/);
+            if (parts.length >= 2) {
+              setFamilyName(parts[0]);
+              setGivenName(parts.slice(1).join(" "));
+            } else {
+              setFamilyName(pf.name.trim());
+            }
+          }
           if (pf.email) setEmail(pf.email);
           if (pf.studentId) setStudentId(pf.studentId);
         } catch {
@@ -115,13 +128,16 @@ export function ParticipationFormPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedFamilyName = familyName.trim();
+    const trimmedGivenName = givenName.trim();
     if (
-      !name.trim() ||
+      !trimmedFamilyName ||
+      !trimmedGivenName ||
       !slackName.trim() ||
       !studentId.trim() ||
       !department.trim()
     ) {
-      setError("名前・Slack 表示名・学籍番号・学科は必須です");
+      setError("姓・名・Slack 表示名・学籍番号・学科は必須です");
       return;
     }
     if (!grade) return setError("学年を選択してください");
@@ -130,12 +146,15 @@ export function ParticipationFormPage() {
     if (wantsDev && devRoles.length === 0) {
       return setError("希望役職を1つ以上選択してください");
     }
+    // 既存の `name` カラムに合わせて半角スペース結合で BE に送る。
+    // 送信 body の形式は維持 (BE / DB スキーマは無変更)。
+    const name = `${trimmedFamilyName} ${trimmedGivenName}`;
     setError(null);
     setSubmitting(true);
     try {
       const res = await api.participation.submit(eventId!, {
         token: token || undefined,
-        name: name.trim(),
+        name,
         slackName: slackName.trim(),
         studentId: studentId.trim(),
         department: department.trim(),
@@ -203,16 +222,13 @@ export function ParticipationFormPage() {
 
       <form onSubmit={handleSubmit}>
         <SectionTitle>基本情報</SectionTitle>
-        <Field label="名前 *">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            maxLength={100}
-            style={inputStyle}
-          />
-        </Field>
+        <NameSplitInput
+          label="名前 *"
+          familyName={familyName}
+          givenName={givenName}
+          onFamilyNameChange={setFamilyName}
+          onGivenNameChange={setGivenName}
+        />
         <Field
           label="Slack 表示名 *"
           hint="Slack に表示されている名前（例: 山田太郎）。ロール自動割当に使用します"
@@ -355,15 +371,23 @@ export function ParticipationFormPage() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={
+            submitting || !familyName.trim() || !givenName.trim()
+          }
           style={{
-            background: submitting ? colors.primarySubtle : colors.primary,
+            background:
+              submitting || !familyName.trim() || !givenName.trim()
+                ? colors.primarySubtle
+                : colors.primary,
             color: colors.textInverse,
             padding: "0.75rem 2rem",
             border: "none",
             borderRadius: "0.375rem",
             fontSize: "1rem",
-            cursor: submitting ? "not-allowed" : "pointer",
+            cursor:
+              submitting || !familyName.trim() || !givenName.trim()
+                ? "not-allowed"
+                : "pointer",
             fontWeight: "bold",
           }}
         >
