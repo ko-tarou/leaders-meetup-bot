@@ -18,6 +18,7 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "weekly_reminder",
   "attendance_check",
   "role_management",
+  "member_roster",
 ];
 
 type Props = {
