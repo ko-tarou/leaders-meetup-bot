@@ -63,12 +63,16 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
     let cancelled = false;
     setMembers(null);
     setError(null);
-    Promise.all([
-      api.roster.listMembers(actionId, { includeInactive: !hideInactive }),
-      api.roster.listColumns(actionId).catch(() => [] as RosterCustomColumn[]),
-      api.roster.listValues(actionId).catch(() => [] as RosterMemberValue[]),
-    ])
-      .then(([rows, cols, vals]) => {
+    // Chromium 系ブラウザ (Chrome / Dia) で 3 並行 fetch が
+    // "Provisional headers" 状態で失敗する事象を回避するため sequential 化。
+    // Safari では並行でも問題ないが、互換性のため全環境で順次取得する。
+    (async () => {
+      try {
+        const rows = await api.roster.listMembers(actionId, { includeInactive: !hideInactive });
+        if (cancelled) return;
+        const cols = await api.roster.listColumns(actionId).catch(() => [] as RosterCustomColumn[]);
+        if (cancelled) return;
+        const vals = await api.roster.listValues(actionId).catch(() => [] as RosterMemberValue[]);
         if (cancelled) return;
         setMembers(Array.isArray(rows) ? rows : []);
         setCustomCols(cols);
@@ -78,12 +82,12 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
           catch { /* skip invalid JSON */ }
         }
         setValueMap(m);
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "読み込みに失敗しました");
         setMembers([]);
-      });
+      }
+    })();
     return () => { cancelled = true; };
   }, [actionId, hideInactive, showCols, valuesVersion]);
 
