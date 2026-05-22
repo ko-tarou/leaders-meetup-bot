@@ -10,7 +10,11 @@ import { AppProviders, renderWithProviders } from "./util";
 // クエリ文字列は取り除いた上でマッチするため、includeInactive=1 も同 path に解決される。
 
 const ACTION_ID = "act-roster-1";
-const ROUTE = `/event-actions/${ACTION_ID}/roster/members`;
+const EVENT_ID = "ev-1";
+// hotfix: roster API パスは `/orgs/:eventId/actions/:actionId/roster/...`
+// に移行済み。テストも新パスに合わせる (BE は旧パスも残しているが、
+// FE クライアントは新パスを叩く)。
+const ROUTE = `/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/members`;
 
 function makeMember(over: Partial<RosterMember>): RosterMember {
   return {
@@ -156,8 +160,8 @@ describe("RosterPage smoke", () => {
     renderWithProviders(<RosterPage eventId="ev-1" actionId={ACTION_ID} />, {
       routes: {
         [ROUTE]: members,
-        [`/event-actions/${ACTION_ID}/roster/columns`]: cols,
-        [`/event-actions/${ACTION_ID}/roster/values`]: [
+        [`/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/columns`]: cols,
+        [`/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/values`]: [
           { memberId: aliceId, columnId: "col-1", valueJson: JSON.stringify("M") },
         ],
       },
