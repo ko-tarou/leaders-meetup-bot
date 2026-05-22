@@ -27,8 +27,9 @@ const FIELDS: { key: Field; label: string; type?: string; required?: boolean }[]
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function RosterMemberAddModal({
-  actionId, onClose, onCreated,
+  eventId, actionId, onClose, onCreated,
 }: {
+  eventId: string;
   actionId: string;
   onClose: () => void;
   onCreated: (member: RosterMember) => void;
@@ -55,7 +56,7 @@ export function RosterMemberAddModal({
     setBusy(true);
     try {
       const empty2null = (s: string): string | null => (s.trim() === "" ? null : s.trim());
-      const created = await api.roster.createMember(actionId, {
+      const created = await api.roster.createMember(eventId, actionId, {
         name,
         nameKana: empty2null(draft.nameKana),
         email: empty2null(draft.email),

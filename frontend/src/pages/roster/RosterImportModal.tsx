@@ -57,7 +57,7 @@ export function RosterImportModal({
     let done = 0;
     for (const t of targets) {
       try {
-        await api.roster.createMember(actionId, {
+        await api.roster.createMember(eventId, actionId, {
           name: t.name, email: t.email,
           slackName: t.slackName ?? undefined,
           joinedAt: t.decidedAt ?? undefined,

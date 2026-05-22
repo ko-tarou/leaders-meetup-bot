@@ -68,11 +68,11 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
     // Safari では並行でも問題ないが、互換性のため全環境で順次取得する。
     (async () => {
       try {
-        const rows = await api.roster.listMembers(actionId, { includeInactive: !hideInactive });
+        const rows = await api.roster.listMembers(eventId, actionId, { includeInactive: !hideInactive });
         if (cancelled) return;
-        const cols = await api.roster.listColumns(actionId).catch(() => [] as RosterCustomColumn[]);
+        const cols = await api.roster.listColumns(eventId, actionId).catch(() => [] as RosterCustomColumn[]);
         if (cancelled) return;
-        const vals = await api.roster.listValues(actionId).catch(() => [] as RosterMemberValue[]);
+        const vals = await api.roster.listValues(eventId, actionId).catch(() => [] as RosterMemberValue[]);
         if (cancelled) return;
         setMembers(Array.isArray(rows) ? rows : []);
         setCustomCols(cols);
@@ -89,7 +89,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
       }
     })();
     return () => { cancelled = true; };
-  }, [actionId, hideInactive, showCols, valuesVersion]);
+  }, [eventId, actionId, hideInactive, showCols, valuesVersion]);
 
   const visible = useMemo(() => {
     if (!members) return [];
@@ -204,7 +204,10 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
         </div>
       )}
       {showCols && (
-        <RosterColumnsModal actionId={actionId} onClose={() => setShowCols(false)} />
+        <RosterColumnsModal
+          eventId={eventId} actionId={actionId}
+          onClose={() => setShowCols(false)}
+        />
       )}
       {showImport && (
         <RosterImportModal
@@ -215,7 +218,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
       )}
       {showAdd && (
         <RosterMemberAddModal
-          actionId={actionId}
+          eventId={eventId} actionId={actionId}
           onClose={() => setShowAdd(false)}
           onCreated={(m) =>
             setMembers((prev) => (prev ? [...prev, m] : [m]))}
