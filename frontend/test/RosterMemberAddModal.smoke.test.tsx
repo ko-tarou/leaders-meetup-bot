@@ -7,6 +7,7 @@ import { AppProviders } from "./util";
 // 名簿管理 PR6-FE: RosterMemberAddModal の smoke。
 // name 必須バリデーション / 入力 → POST / メール形式チェック を覆う。
 const ACTION_ID = "act-1";
+const EVENT_ID = "ev-1";
 
 type Call = { url: string; method: string; body?: string };
 let calls: Call[];
@@ -32,7 +33,7 @@ function mount() {
   const onClose = vi.fn();
   const onCreated = vi.fn();
   render(<AppProviders>
-    <RosterMemberAddModal actionId={ACTION_ID}
+    <RosterMemberAddModal eventId={EVENT_ID} actionId={ACTION_ID}
       onClose={onClose} onCreated={onCreated} />
   </AppProviders>);
   return { onClose, onCreated };
@@ -46,7 +47,7 @@ describe("RosterMemberAddModal smoke", () => {
     await userEvent.click(screen.getByRole("button", { name: "追加" }));
     await waitFor(() => {
       const posts = calls.filter((c) => c.method === "POST"
-        && c.url.endsWith(`/event-actions/${ACTION_ID}/roster/members`));
+        && c.url.endsWith(`/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/members`));
       expect(posts.length).toBe(1);
       expect(posts[0]!.body).toContain("新規 太郎");
       expect(posts[0]!.body).toContain("taro@example.com");

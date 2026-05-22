@@ -49,7 +49,7 @@ export function RosterDetailPanel({
       api.roster.getMemberRoles(eventId, actionId, member.id)
         .catch(() => ({ roleIds: [] as string[] })),
       // PR5b: カスタム値を fetch。失敗時 / 配列でない時は空扱い (列が無い環境を許容)。
-      api.roster.listValues(actionId).catch(() => []),
+      api.roster.listValues(eventId, actionId).catch(() => []),
     ]).then(([rs, mr, vals]) => {
       if (off) return;
       setRoles(rs); setRoleIds(new Set(mr.roleIds)); setInitialRoleIds(mr.roleIds);
@@ -84,7 +84,7 @@ export function RosterDetailPanel({
     try {
       let updated = member;
       if (Object.keys(patch).length > 0) {
-        updated = await api.roster.updateMember(actionId, member.id, patch);
+        updated = await api.roster.updateMember(eventId, actionId, member.id, patch);
       }
       const target = Array.from(roleIds).sort();
       if (initialRoleIds.slice().sort().join(",") !== target.join(",")) {
@@ -98,9 +98,9 @@ export function RosterDetailPanel({
         if (before === after) continue;
         valuesChanged = true;
         if (after === "") {
-          await api.roster.deleteMemberValue(actionId, member.id, col.id);
+          await api.roster.deleteMemberValue(eventId, actionId, member.id, col.id);
         } else {
-          await api.roster.setMemberValue(actionId, member.id, col.id,
+          await api.roster.setMemberValue(eventId, actionId, member.id, col.id,
             fromInputValue(col.type, after));
         }
       }
@@ -121,7 +121,7 @@ export function RosterDetailPanel({
     if (!ok) return;
     setSaving(true);
     try {
-      await api.roster.deleteMember(actionId, member.id);
+      await api.roster.deleteMember(eventId, actionId, member.id);
       onChanged(null);
       toast.success("退会扱いにしました");
       onClose();

@@ -8,6 +8,7 @@ import { AppProviders } from "./util";
 // 名簿管理 PR5-FE: RosterColumnsModal の smoke。
 // 列一覧表示 / 追加 (POST) / 削除 (confirm → DELETE) / 閉じる の主要動線を覆う。
 const ACTION_ID = "act-1";
+const EVENT_ID = "ev-1";
 const cols: RosterCustomColumn[] = [
   { id: "c-1", eventActionId: ACTION_ID, columnKey: "position", label: "役職",
     type: "text", optionsJson: null, sortOrder: 0,
@@ -38,7 +39,7 @@ beforeEach(() => {
 function mount() {
   const onClose = vi.fn();
   render(<AppProviders>
-    <RosterColumnsModal actionId={ACTION_ID} onClose={onClose} />
+    <RosterColumnsModal eventId={EVENT_ID} actionId={ACTION_ID} onClose={onClose} />
   </AppProviders>);
   return { onClose };
 }
@@ -59,7 +60,7 @@ describe("RosterColumnsModal smoke", () => {
     await userEvent.click(screen.getByRole("button", { name: /列を追加/ }));
     await waitFor(() => {
       expect(calls.some((c) => c.method === "POST"
-        && c.url.endsWith(`/event-actions/${ACTION_ID}/roster/columns`)
+        && c.url.endsWith(`/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/columns`)
         && c.body?.includes("phone") && c.body?.includes("電話番号"))).toBe(true);
     });
   });
@@ -86,7 +87,7 @@ describe("RosterColumnsModal smoke", () => {
     await userEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => {
       expect(calls.some((c) => c.method === "PUT"
-        && c.url.endsWith(`/event-actions/${ACTION_ID}/roster/columns/c-1`)
+        && c.url.endsWith(`/orgs/${EVENT_ID}/actions/${ACTION_ID}/roster/columns/c-1`)
         && c.body?.includes("新役職"))).toBe(true);
     });
   });

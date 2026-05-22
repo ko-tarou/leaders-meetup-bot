@@ -24,7 +24,8 @@ type EditDraft = { label: string; type: RosterColumnType; optionsText: string; s
 const EMPTY_EDIT: EditDraft = { label: "", type: "text", optionsText: "", sortOrder: "0" };
 
 export function RosterColumnsModal(
-  { actionId, onClose }: { actionId: string; onClose: () => void },
+  { eventId, actionId, onClose }:
+  { eventId: string; actionId: string; onClose: () => void },
 ) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -37,17 +38,17 @@ export function RosterColumnsModal(
 
   useEffect(() => {
     let off = false;
-    api.roster.listColumns(actionId)
+    api.roster.listColumns(eventId, actionId)
       .then((rs) => !off && setCols(rs)).catch(() => !off && setCols([]));
     return () => { off = true; };
-  }, [actionId]);
+  }, [eventId, actionId]);
   useEffect(() => {
     const f = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", f);
     return () => window.removeEventListener("keydown", f);
   }, [onClose]);
 
-  const refresh = async () => setCols(await api.roster.listColumns(actionId));
+  const refresh = async () => setCols(await api.roster.listColumns(eventId, actionId));
 
   const add = async () => {
     if (!draft.columnKey.trim() || !draft.label.trim()) {
@@ -55,7 +56,7 @@ export function RosterColumnsModal(
     }
     setBusy(true);
     try {
-      await api.roster.createColumn(actionId, {
+      await api.roster.createColumn(eventId, actionId, {
         columnKey: draft.columnKey.trim(), label: draft.label.trim(), type: draft.type,
         options: draft.type === "select"
           ? draft.optionsText.split(",").map((s) => s.trim()).filter(Boolean)
@@ -81,7 +82,7 @@ export function RosterColumnsModal(
     setBusy(true);
     try {
       const so = Number(editDraft.sortOrder);
-      await api.roster.updateColumn(actionId, c.id, {
+      await api.roster.updateColumn(eventId, actionId, c.id, {
         label: editDraft.label.trim(), type: editDraft.type,
         options: editDraft.type === "select"
           ? editDraft.optionsText.split(",").map((s) => s.trim()).filter(Boolean)
@@ -104,7 +105,7 @@ export function RosterColumnsModal(
     if (!ok) return;
     setBusy(true);
     try {
-      await api.roster.deleteColumn(actionId, c.id);
+      await api.roster.deleteColumn(eventId, actionId, c.id);
       await refresh();
       toast.success("列を削除しました");
     } catch (e) {
