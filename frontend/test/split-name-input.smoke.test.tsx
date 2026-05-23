@@ -79,7 +79,7 @@ describe("split-name-input スモーク", () => {
     await user.type(await screen.findByRole("textbox", { name: "姓" }), "  山田  ");
     await user.type(screen.getByRole("textbox", { name: "名" }), "  太郎  ");
     // Field は label/input が分離されているため textbox 全件取得で順に埋める。
-    // 0=姓, 1=名, 2=slackName, 3=studentId, 4=department, 5=email
+    // 0=姓, 1=名, 2=slackName, 3=studentId, 4=department, 5=email, 6=slackEmail (任意)
     const tb = screen.getAllByRole("textbox");
     await user.type(tb[2], "yamada");
     await user.type(tb[3], "1 EP 1 - 1");
@@ -90,5 +90,42 @@ describe("split-name-input スモーク", () => {
     await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
     await waitFor(() => expect(captured.value).not.toBeNull());
     expect((captured.value as { name: string }).name).toBe("山田 太郎");
+    // 名簿 Slack 連携強化 PR2: slackEmail 未入力時は body に含めない (省略=undefined)
+    // ことで、JSON.stringify 後に key が落ちる = BE 側で従来通り null 扱いとなる。
+    expect("slackEmail" in (captured.value as Record<string, unknown>)).toBe(false);
+  });
+
+  it("参加届: slackEmail を入力すると POST body に含まれる", async () => {
+    // 名簿 Slack 連携強化 PR2: 任意項目の slackEmail を入力した場合、
+    // 送信 body に trim 済みの値が含まれることを担保する。
+    const captured: { value: unknown } = { value: null };
+    stubFetch(captured);
+    render(
+      <MemoryRouter initialEntries={[`/participation/${EV}`]}>
+        <Routes>
+          <Route
+            path="/participation/:eventId"
+            element={<ParticipationFormPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole("textbox", { name: "姓" }), "山田");
+    await user.type(screen.getByRole("textbox", { name: "名" }), "花子");
+    // 0=姓, 1=名, 2=slackName, 3=studentId, 4=department, 5=email, 6=slackEmail
+    const tb = screen.getAllByRole("textbox");
+    await user.type(tb[2], "hanako");
+    await user.type(tb[3], "1 EP 1 - 2");
+    await user.type(tb[4], "情報");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
+    await user.type(tb[5], "school@example.com");
+    await user.type(tb[6], "  hanako@example.com  ");
+    await user.click(screen.getByRole("radio", { name: "イベント運営" }));
+    await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
+    await waitFor(() => expect(captured.value).not.toBeNull());
+    expect((captured.value as { slackEmail: string }).slackEmail).toBe(
+      "hanako@example.com",
+    );
   });
 });
