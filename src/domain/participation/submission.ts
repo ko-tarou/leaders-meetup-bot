@@ -25,6 +25,9 @@ export interface ParticipationSubmissionBody {
   token?: string;
   name?: string;
   slackName?: string;
+  // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
+  // 提出ハンドラ側で users.lookupByEmail に渡し slack_user_id を解決する。
+  slackEmail?: string;
   studentId?: string;
   department?: string;
   grade?: string;
@@ -45,6 +48,9 @@ export interface ParticipationFields {
   eventId: string;
   name: string;
   slackName: string | null;
+  // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
+  // trim 後の文字列を保存し、空/未指定は null (slack_name と同扱い)。
+  slackEmail: string | null;
   studentId: string | null;
   department: string | null;
   grade: string | null;
@@ -113,6 +119,16 @@ export function validateSubmission(
   ) {
     return { ok: false, error: "invalid desiredActivity" };
   }
+  // 名簿 Slack 連携強化 PR1: slackEmail は任意項目。値があれば email 形式
+  // をチェックする (本文 email と同じ正規表現で揃える)。空文字 / undefined
+  // / 空白のみは「未入力」扱いで素通し (buildParticipationFields 側で null)。
+  if (
+    typeof body.slackEmail === "string" &&
+    body.slackEmail.trim() !== "" &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.slackEmail.trim())
+  ) {
+    return { ok: false, error: "invalid slackEmail format" };
+  }
   return { ok: true };
 }
 
@@ -168,6 +184,8 @@ export function buildParticipationFields(
     name: (body.name as string).trim(),
     // 任意入力。空/未指定は null (student_id 等の任意文字列と同扱い)
     slackName: body.slackName?.trim() || null,
+    // 名簿 Slack 連携強化 PR1: 任意入力。空/未指定は null。
+    slackEmail: body.slackEmail?.trim() || null,
     studentId: body.studentId?.trim() || null,
     department: body.department?.trim() || null,
     grade: body.grade || null,

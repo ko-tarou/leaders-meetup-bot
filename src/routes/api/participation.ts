@@ -11,6 +11,7 @@ import {
 import {
   readRoleAutoAssignConfig,
   resolveSlackUserId,
+  resolveSlackUserIdByEmail,
   applyRoleAssignment,
   revokeRoleAssignment,
 } from "../../services/role-auto-assign";
@@ -106,6 +107,9 @@ participationRouter.post("/participation/:eventId", async (c) => {
     token?: string;
     name?: string;
     slackName?: string;
+    // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
+    // あれば users.lookupByEmail で slack_user_id を解決する。
+    slackEmail?: string;
     studentId?: string;
     department?: string;
     grade?: string;
@@ -210,9 +214,40 @@ participationRouter.post("/participation/:eventId", async (c) => {
       const cfg = readRoleAutoAssignConfig(action.config);
       if (!cfg || !cfg.enabled) return; // 無効/未設定 → no-op
 
-      const slackUserId = fields.slackName
-        ? await resolveSlackUserId(c.env, cfg.workspaceId, fields.slackName)
-        : null;
+      // 名簿 Slack 連携強化 PR1: メアド優先で slack_user_id を解決する。
+      // slack_email があれば users.lookupByEmail で 1 回引き、失敗時は
+      // 既存の slack_name (表示名) ベース解決へ fallback する。
+      // どちらも fail-soft (例外は内部で握り潰し null) のため、提出 API は
+      // 解決失敗で 201 を返し続ける。slack_email 由来の解決失敗は本 hook
+      // 内で console.error を 1 行残し、後続の運用調査の手掛かりにする。
+      let slackUserId: string | null = null;
+      if (fields.slackEmail) {
+        try {
+          slackUserId = await resolveSlackUserIdByEmail(
+            c.env,
+            cfg.workspaceId,
+            fields.slackEmail,
+          );
+        } catch (e) {
+          // resolveSlackUserIdByEmail 自体は throw しない設計だが、
+          // provider 差し替え等の予期しない例外も握り潰す (fail-soft)。
+          console.error("[participation] slack lookup failed:", e);
+          slackUserId = null;
+        }
+        if (!slackUserId) {
+          console.error(
+            "[participation] slack lookup failed: email not resolved",
+            fields.slackEmail,
+          );
+        }
+      }
+      if (!slackUserId && fields.slackName) {
+        slackUserId = await resolveSlackUserId(
+          c.env,
+          cfg.workspaceId,
+          fields.slackName,
+        );
+      }
       if (!slackUserId) {
         // 表示名解決に失敗 (未解決) → 運営へ通知。手動紐付け待ち。
         // この経路は roleAutoAssign 有効時のみ走る (上の cfg.enabled ガード)

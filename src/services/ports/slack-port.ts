@@ -73,6 +73,12 @@ export interface SlackPort {
 
   getUserInfo(userId: string): Promise<SlackResponse>;
 
+  /**
+   * 名簿 Slack 連携強化 PR1: メアドから Slack ユーザーを引く。
+   * Slack の `users.lookupByEmail` (users:read.email scope) を 1:1 で写す。
+   */
+  usersLookupByEmail(email: string): Promise<SlackResponse>;
+
   getChannelList(): Promise<SlackResponse>;
 
   getChannelMembers(channel: string): Promise<SlackResponse>;

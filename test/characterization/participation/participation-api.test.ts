@@ -492,6 +492,224 @@ describe("POST autoAssignOnSubmit / 通知 (現状固定)", () => {
     spy.mockRestore();
   });
 
+  // -------------------------------------------------------------------------
+  // 名簿 Slack 連携強化 PR1: slack_email 経由の解決 (新規)
+  // -------------------------------------------------------------------------
+  it("slackEmail 付き提出 → users.lookupByEmail で slackUserId/email を保存", async () => {
+    const ev = await makeEvent();
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    const role = await makeSlackRole(roleAction.id, { name: "Dev" });
+    await makeEventAction(ev.id, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: { event: [role.id] },
+          devRole: {},
+        },
+      }),
+    });
+    const lookupSpy = vi
+      .spyOn(MockSlackClient.prototype, "usersLookupByEmail")
+      .mockResolvedValueOnce({
+        ok: true,
+        user: { id: "U-MAIL", profile: { email: "alice@example.com" } },
+      } as never);
+    const listSpy = vi.spyOn(MockSlackClient.prototype, "listAllUsers");
+    const res = await post(
+      ev.id,
+      validBody({
+        slackEmail: "alice@example.com",
+        slackName: "alice", // 提供されても email 解決成功なら fallback は呼ばれない
+        desiredActivity: "event",
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.slackEmail).toBe("alice@example.com");
+    expect(row?.slackUserId).toBe("U-MAIL");
+    // CHARACTERIZATION: 表示名 fallback (listAllUsers) は呼ばれない
+    expect(listSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(row?.assignedRoleIds ?? "[]")).toEqual([role.id]);
+    lookupSpy.mockRestore();
+    listSpy.mockRestore();
+  });
+
+  it("slackEmail なし提出 → 既存通り slackName fallback で解決される", async () => {
+    const ev = await makeEvent();
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    const role = await makeSlackRole(roleAction.id, { name: "Dev" });
+    await makeEventAction(ev.id, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: { event: [role.id] },
+          devRole: {},
+        },
+      }),
+    });
+    const lookupSpy = vi.spyOn(
+      MockSlackClient.prototype,
+      "usersLookupByEmail",
+    );
+    const listSpy = vi
+      .spyOn(MockSlackClient.prototype, "listAllUsers")
+      .mockResolvedValueOnce({
+        ok: true,
+        members: [{ id: "U-NAME", profile: { display_name: "bob" } }],
+      } as never);
+    const res = await post(
+      ev.id,
+      validBody({ slackName: "bob", desiredActivity: "event" }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.slackEmail).toBeNull();
+    expect(row?.slackUserId).toBe("U-NAME");
+    // CHARACTERIZATION: slackEmail 無しなら lookupByEmail は呼ばれない
+    expect(lookupSpy).not.toHaveBeenCalled();
+    lookupSpy.mockRestore();
+    listSpy.mockRestore();
+  });
+
+  it("slackEmail 付き & Slack API エラー → slackName fallback (fail-soft 201)", async () => {
+    const ev = await makeEvent();
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    const role = await makeSlackRole(roleAction.id, { name: "Dev" });
+    await makeEventAction(ev.id, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: { event: [role.id] },
+          devRole: {},
+        },
+      }),
+    });
+    // lookupByEmail はサーバエラー応答 (fail-soft で null 解決)。
+    const lookupSpy = vi
+      .spyOn(MockSlackClient.prototype, "usersLookupByEmail")
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "users_not_found",
+      } as never);
+    // fallback の表示名解決で 1 名一致を返し、最終的に解決成功させる。
+    const listSpy = vi
+      .spyOn(MockSlackClient.prototype, "listAllUsers")
+      .mockResolvedValueOnce({
+        ok: true,
+        members: [{ id: "U-FB", profile: { display_name: "carol" } }],
+      } as never);
+    const res = await post(
+      ev.id,
+      validBody({
+        slackEmail: "ghost@example.com",
+        slackName: "carol",
+        desiredActivity: "event",
+      }),
+    );
+    // CHARACTERIZATION: lookupByEmail 失敗でも fail-soft で 201 を返し続け、
+    // slackEmail は DB に保存される (表示名検索で解決した slackUserId と共存)。
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.slackEmail).toBe("ghost@example.com");
+    expect(row?.slackUserId).toBe("U-FB");
+    expect(lookupSpy).toHaveBeenCalledTimes(1);
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    lookupSpy.mockRestore();
+    listSpy.mockRestore();
+  });
+
+  it("slackEmail 付き & lookupByEmail が throw しても提出は 201 (fail-soft)", async () => {
+    const ev = await makeEvent();
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    await makeEventAction(ev.id, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: {},
+          devRole: {},
+        },
+      }),
+    });
+    const lookupSpy = vi
+      .spyOn(MockSlackClient.prototype, "usersLookupByEmail")
+      .mockRejectedValueOnce(new Error("network boom"));
+    const res = await post(
+      ev.id,
+      validBody({ slackEmail: "boom@example.com" }),
+    );
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.slackEmail).toBe("boom@example.com");
+    expect(row?.slackUserId).toBeNull();
+    lookupSpy.mockRestore();
+  });
+
+  it("slackEmail 形式不正 → 400 'invalid slackEmail format'", async () => {
+    const ev = await makeEvent();
+    const res = await post(ev.id, validBody({ slackEmail: "not-an-email" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "invalid slackEmail format",
+    });
+  });
+
+  it("slackEmail 空文字は許容 (未指定扱い・保存は null)", async () => {
+    const ev = await makeEvent();
+    const res = await post(ev.id, validBody({ slackEmail: "" }));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.slackEmail).toBeNull();
+  });
+
   it("通知 hook が throw しても提出は 201 (fail-soft)", async () => {
     const ev = await makeEvent();
     const { row: ws } = await makeEncryptedWorkspace();

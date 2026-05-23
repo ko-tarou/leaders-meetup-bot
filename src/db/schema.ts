@@ -194,6 +194,9 @@ export const participationForms = sqliteTable(
     studentId: text("student_id"),
     // Slack 表示名。Phase2 のロール自動割当用 (nullable・任意入力)
     slackName: text("slack_name"),
+    // Slack 登録メールアドレス。名簿 Slack 連携強化 PR1 で追加 (migration 0051)。
+    // users.lookupByEmail で slack_user_id を解決する永続キー。任意入力 (nullable)。
+    slackEmail: text("slack_email"),
     // 学科・自由記述
     department: text("department"),
     // '1' | '2' | '3' | '4' | 'graduate'
@@ -718,6 +721,9 @@ export const rosterMembers = sqliteTable(
     grade: text("grade"),
     slackUserId: text("slack_user_id"),
     slackName: text("slack_name"),
+    // Slack 登録メールアドレス。名簿 Slack 連携強化 PR1 で追加 (migration 0052)。
+    // 表示名が変わっても users.lookupByEmail で再解決できる永続キー。nullable。
+    slackEmail: text("slack_email"),
     // ISO 8601 date (YYYY-MM-DD)
     joinedAt: text("joined_at"),
     leftAt: text("left_at"),
