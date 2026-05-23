@@ -4,8 +4,10 @@ import type { RosterImportCandidate } from "../../types";
 import { useToast } from "../../components/ui/Toast";
 import { colors } from "../../styles/tokens";
 
-// 名簿管理 PR6-FE: 合格者取り込みモーダル。
-// applications.status='passed' のうち未取り込みを一覧 → チェックして一括 POST。
+// 名簿管理 PR6-FE: 取り込みモーダル。
+// PR3 (2026-05): 取り込み元を「合格者 (applications.passed)」から
+// 「参加届を提出した人 (participation_forms.submitted)」に変更。
+// Slack 情報 (slackEmail / slackName / slackUserId) も合わせて createMember に渡す。
 // 一括 import API は無いので createMember を for-loop で叩く (失敗は集計表示)。
 
 export function RosterImportModal({
@@ -57,10 +59,14 @@ export function RosterImportModal({
     let done = 0;
     for (const t of targets) {
       try {
+        // PR3 (2026-05): 参加届ベースなので Slack 情報も一緒に保存する。
         await api.roster.createMember(eventId, actionId, {
-          name: t.name, email: t.email,
+          name: t.name,
+          email: t.email,
+          slackEmail: t.slackEmail ?? undefined,
           slackName: t.slackName ?? undefined,
-          joinedAt: t.decidedAt ?? undefined,
+          slackUserId: t.slackUserId ?? undefined,
+          joinedAt: t.submittedAt,
         });
       } catch (e) {
         failed.push(`${t.name}: ${e instanceof Error ? e.message : "失敗"}`);
@@ -82,9 +88,9 @@ export function RosterImportModal({
   return (
     <div style={S.ov} onClick={() => !busy && onClose()} role="presentation">
       <div style={S.box} onClick={(e) => e.stopPropagation()}
-        role="dialog" aria-modal="true" aria-label="合格者取り込み">
+        role="dialog" aria-modal="true" aria-label="参加届を提出した人から取り込み">
         <header style={S.hd}>
-          <h2 style={S.title}>合格者から取り込み</h2>
+          <h2 style={S.title}>参加届を提出した人から取り込み</h2>
           <button type="button" onClick={onClose} disabled={busy}
             aria-label="閉じる" style={S.x}>×</button>
         </header>
@@ -93,8 +99,8 @@ export function RosterImportModal({
           {cands === null ? <div style={S.muted}>読み込み中...</div>
            : cands.length === 0 ? (
             <div style={S.muted}>
-              取り込み可能な合格者はいません。<br />
-              (まだ合格者がいない / すでに全員取り込み済み)
+              取り込み可能な参加届はありません。<br />
+              (まだ提出がない / すでに全員取り込み済み)
             </div>
           ) : (
             <table style={S.table}>
@@ -105,8 +111,8 @@ export function RosterImportModal({
                 </th>
                 <th style={S.th}>名前</th>
                 <th style={S.th}>メール</th>
-                <th style={S.th}>合格日</th>
                 <th style={S.th}>Slack 名</th>
+                <th style={S.th}>Slack ID</th>
               </tr></thead>
               <tbody>
                 {cands.map((c) => (
@@ -118,8 +124,12 @@ export function RosterImportModal({
                     </td>
                     <td style={S.td}>{c.name}</td>
                     <td style={S.td}>{c.email}</td>
-                    <td style={S.td}>{c.decidedAt ?? "-"}</td>
                     <td style={S.td}>{c.slackName ?? "-"}</td>
+                    <td style={S.td}>
+                      {c.slackUserId ?? (
+                        <span style={S.muted}>未解決</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

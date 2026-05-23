@@ -5,16 +5,25 @@ import { RosterImportModal } from "../src/pages/roster/RosterImportModal";
 import type { RosterImportCandidate } from "../src/types";
 import { AppProviders } from "./util";
 
-// 名簿管理 PR6-FE: RosterImportModal の smoke。
-// 候補一覧表示 / すべて選択 / 個別チェック → 一括 POST / モーダル close を覆う。
+// 名簿管理 RosterImportModal の smoke。
+// PR3 (2026-05): 参加届ベース (participation_forms.submitted) に変更。
+//   候補は { id, name, email, slackEmail, slackName, slackUserId, submittedAt } を持ち、
+//   テーブルには 名前 / メール / Slack 名 / Slack ID を表示する。
 const EVENT_ID = "ev-1";
 const ACTION_ID = "act-1";
 
 const cands: RosterImportCandidate[] = [
-  { id: "app-1", name: "Alice", email: "alice@example.com",
-    decidedAt: "2025-04-01", slackName: "alice" },
-  { id: "app-2", name: "Bob", email: "bob@example.com",
-    decidedAt: "2025-04-02", slackName: null },
+  {
+    id: "pf-1", name: "Alice", email: "alice@example.com",
+    slackEmail: "alice@slack.example.com",
+    slackName: "alice", slackUserId: "U_ALICE",
+    submittedAt: "2026-05-10T00:00:00.000Z",
+  },
+  {
+    id: "pf-2", name: "Bob", email: "bob@example.com",
+    slackEmail: null, slackName: null, slackUserId: null,
+    submittedAt: "2026-05-09T00:00:00.000Z",
+  },
 ];
 
 type Call = { url: string; method: string; body?: string };
@@ -54,12 +63,21 @@ function mount() {
 }
 
 describe("RosterImportModal smoke", () => {
-  it("候補一覧 (名前 / メール / 合格日) が表示される", async () => {
+  it("モーダルタイトルが「参加届を提出した人から取り込み」", async () => {
+    mount();
+    expect(
+      await screen.findByRole("dialog", { name: /参加届を提出した人から取り込み/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("候補一覧 (名前 / メール / Slack 名 / Slack ID) が表示される", async () => {
     mount();
     expect(await screen.findByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Bob")).toBeInTheDocument();
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
-    expect(screen.getByText("2025-04-02")).toBeInTheDocument();
+    expect(screen.getByText("U_ALICE")).toBeInTheDocument();
+    // Slack ID 未解決の Bob には「未解決」が表示される
+    expect(screen.getByText("未解決")).toBeInTheDocument();
   });
 
   it("チェックして「選択を追加」で POST が選択数だけ発火する", async () => {
@@ -74,6 +92,29 @@ describe("RosterImportModal smoke", () => {
       expect(posts[0]!.body).toContain("Alice");
     });
     expect(onImported).toHaveBeenCalled();
+  });
+
+  // PR3 (2026-05): 取り込み時に Slack 情報 (slackEmail/slackName/slackUserId)
+  // と joinedAt (= submittedAt) も POST body に渡されることを確認。
+  it("Slack 情報も一緒に保存される (slackEmail/slackName/slackUserId/joinedAt)", async () => {
+    mount();
+    await screen.findByText("Alice");
+    await userEvent.click(screen.getByLabelText("Alice を選択"));
+    await userEvent.click(screen.getByRole("button", { name: /選択を追加/ }));
+    await waitFor(() => {
+      const post = calls.find((c) => c.method === "POST"
+        && c.url.includes("/roster/members"));
+      expect(post).toBeDefined();
+      const body = JSON.parse(post!.body!) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        name: "Alice",
+        email: "alice@example.com",
+        slackEmail: "alice@slack.example.com",
+        slackName: "alice",
+        slackUserId: "U_ALICE",
+        joinedAt: "2026-05-10T00:00:00.000Z",
+      });
+    });
   });
 
   it("「すべて選択」で全候補が選択され、押下で全件 POST される", async () => {
@@ -97,7 +138,7 @@ describe("RosterImportModal smoke", () => {
         onClose={vi.fn()} onImported={vi.fn()} />
     </AppProviders>);
     await waitFor(() => {
-      expect(screen.getByText(/取り込み可能な合格者はいません/)).toBeInTheDocument();
+      expect(screen.getByText(/取り込み可能な参加届はありません/)).toBeInTheDocument();
     });
   });
 

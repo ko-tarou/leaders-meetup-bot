@@ -135,10 +135,13 @@ describe("RosterPage smoke", () => {
   });
 
   // PR6: 取り込み / 追加ボタンが描画され、押下でモーダルが開く。
-  it("「合格者から取り込み」ボタンと「+ メンバー追加」ボタンが表示される (PR6)", async () => {
+  // PR3 (2026-05): 取り込み元を参加届ベースに変更し、ボタンラベルも変更。
+  it("「参加届を提出した人から取り込み」ボタンと「+ メンバー追加」ボタンが表示される", async () => {
     render();
     await screen.findByText("Alice");
-    expect(screen.getByRole("button", { name: /合格者から取り込み/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /参加届を提出した人から取り込み/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /メンバー追加/ })).toBeInTheDocument();
   });
 
