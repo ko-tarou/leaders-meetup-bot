@@ -3,6 +3,7 @@ import { api } from "../../api";
 import type {
   RosterCustomColumn, RosterMember, RosterMemberValue,
 } from "../../types";
+import { useToast } from "../../components/ui/Toast";
 import { colors } from "../../styles/tokens";
 import { RosterDetailPanel } from "./RosterDetailPanel";
 import { RosterColumnsModal } from "./RosterColumnsModal";
@@ -56,6 +57,31 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
   // panel 内でカスタム値を編集したら increment → 値を再取得する。
   // 取り込み / 追加モーダル close 時にも increment して名簿を再 fetch する。
   const [valuesVersion, setValuesVersion] = useState(0);
+  // PR4 (2026-05): 「Slack 同期」ボタンの実行中フラグ。同期完了後に
+  // valuesVersion を increment して名簿全体を refetch する。
+  const [syncing, setSyncing] = useState(false);
+  const toast = useToast();
+
+  // PR4 (2026-05): Slack 表示名の一括同期。
+  // 進行中はボタンを disabled にし、完了後はトーストで結果を出してから refetch。
+  // 失敗 (HTTP エラー) でも fail-soft でエラートーストを出すだけに留める。
+  const handleSyncSlackNames = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const r = await api.roster.syncSlackNames(eventId, actionId);
+      toast.success(
+        `Slack 表示名を同期しました (${r.updated} 件更新 / ${r.unchanged} 件変更なし / ${r.errors.length} 件エラー)`,
+      );
+      setValuesVersion((n) => n + 1);
+    } catch (e: unknown) {
+      toast.error(
+        e instanceof Error ? `Slack 同期に失敗しました: ${e.message}` : "Slack 同期に失敗しました",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // hideInactive=false の時のみ includeInactive=1 を送る。
   // カスタム列 / 値も同時に再取得する (列追加・削除モーダル close 後の整合性のため)。
@@ -130,6 +156,16 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
         </button>
         <button type="button" onClick={() => setShowCols(true)} style={S.colsBtn}>
           カスタム列管理
+        </button>
+        {/* PR4 (2026-05): Slack 表示名一括同期。slack_user_id 持ちメンバーのみが対象。 */}
+        <button
+          type="button"
+          onClick={handleSyncSlackNames}
+          disabled={syncing}
+          style={syncing ? S.syncBtnBusy : S.colsBtn}
+          aria-busy={syncing}
+        >
+          {syncing ? "同期中..." : "Slack 同期"}
         </button>
       </div>
 
@@ -281,4 +317,10 @@ const S = {
   primaryBtn: { padding: "0.4rem 0.8rem", background: colors.primary, color: "#fff",
     border: "none", borderRadius: "0.375rem", fontSize: "0.875rem",
     cursor: "pointer" } as CSSProperties,
+  // PR4 (2026-05): 「Slack 同期」進行中のボタン状態。
+  // colsBtn と同じ見た目だが cursor を変えて in-flight を明示する。
+  syncBtnBusy: { padding: "0.4rem 0.8rem", background: colors.surface,
+    color: colors.textSecondary, border: `1px solid ${colors.borderStrong}`,
+    borderRadius: "0.375rem", fontSize: "0.875rem",
+    cursor: "wait" } as CSSProperties,
 } as const;

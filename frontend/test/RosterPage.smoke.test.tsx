@@ -152,6 +152,54 @@ describe("RosterPage smoke", () => {
     expect(await screen.findByRole("dialog", { name: "メンバー追加" })).toBeInTheDocument();
   });
 
+  // PR4 (2026-05): 「Slack 同期」ボタン押下で sync-slack-names API が呼ばれ、
+  // 完了後に成功トーストが出る (件数を含む)。
+  it("「Slack 同期」ボタン押下で sync-slack-names が叩かれトーストが出る", async () => {
+    // util の installFetchMock は path.endsWith 比較なので、members に加え
+    // sync-slack-names も routes に入れる。実呼び出しは fetch を spy する。
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (url.endsWith("/sync-slack-names")) {
+        return new Response(
+          JSON.stringify({ total: 2, updated: 1, unchanged: 1, errors: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      // それ以外 (members / columns / values 等) は空配列 or members を返す。
+      const path = url.split("?")[0];
+      const body = path.endsWith(ROUTE) ? members : [];
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    rtlRender(
+      <AppProviders>
+        <RosterPage eventId="ev-1" actionId={ACTION_ID} />
+      </AppProviders>,
+    );
+    await screen.findByText("Alice");
+
+    const syncBtn = screen.getByRole("button", { name: /^Slack 同期$/ });
+    await userEvent.click(syncBtn);
+    await waitFor(() => {
+      const calls = fetchSpy.mock.calls.map((c) => String(c[0]));
+      expect(calls.some((u) => u.endsWith("/sync-slack-names"))).toBe(true);
+    });
+    // 完了トーストに件数が出る。
+    await waitFor(() => {
+      expect(screen.getByText(/1 件更新/)).toBeInTheDocument();
+      expect(screen.getByText(/1 件変更なし/)).toBeInTheDocument();
+    });
+  });
+
   // PR5b: カスタム列ヘッダとセル値が一覧表に出る。util の route map (path.endsWith) で 3 種を分岐。
   it("カスタム列の見出しと値が一覧表に表示される (PR5b)", async () => {
     const aliceId = members[0]!.id;

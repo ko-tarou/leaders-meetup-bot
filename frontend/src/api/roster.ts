@@ -7,6 +7,19 @@ import type {
 } from "../types";
 import { request } from "./client";
 
+// PR4 (2026-05): Slack 表示名一括同期 API のレスポンス型。
+// BE `syncRosterSlackNamesForAction` のシリアライズと一致させる。
+//   - total:     slack_user_id を持つメンバー全件 (=同期対象数)
+//   - updated:   実際に slack_name を書き換えた件数
+//   - unchanged: 表示名が変わっていなかった件数
+//   - errors:    1 件単位の失敗。memberId と Slack エラー文字列を含む
+export type RosterSyncSlackNamesResult = {
+  total: number;
+  updated: number;
+  unchanged: number;
+  errors: Array<{ memberId: string; error: string }>;
+};
+
 // PR6: 手動追加 / 取り込み 用の POST body。email/grade などは任意。
 // PR3 (2026-05): slackEmail を追加 (参加届からの取り込みで保存)。
 export type RosterMemberCreateInput = {
@@ -127,5 +140,14 @@ export const roster = {
     request<{ ok: boolean }>(
       `${base(eventId, actionId)}/members/${memberId}/values/${columnId}`,
       { method: "DELETE" },
+    ),
+  /**
+   * PR4 (2026-05): 全メンバーの slack_name を Slack 最新表示名で再同期する。
+   * slack_user_id が NULL の行は対象外。1 メンバー失敗で全体は止まらず errors[] に集約。
+   */
+  syncSlackNames: (eventId: string, actionId: string) =>
+    request<RosterSyncSlackNamesResult>(
+      `${base(eventId, actionId)}/sync-slack-names`,
+      { method: "POST" },
     ),
 };
