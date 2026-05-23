@@ -85,6 +85,38 @@ export async function resolveSlackUserId(
 }
 
 /**
+ * 名簿 Slack 連携強化 PR1: メアド → user id 解決。
+ *
+ * Slack の `users.lookupByEmail` を 1 回叩く。`{ ok:true, user:{ id } }`
+ * のときだけ id を返し、それ以外 (users_not_found / invalid_email /
+ * Slack 例外 / 不正 response) は null。**fail-soft**。
+ *
+ * 表示名検索より優先するキーとして使う想定。空文字 / 未指定は即 null。
+ * 名前検索と異なり listAllUsers を回さないので O(1) であり、
+ * 表示名重複問題 (曖昧一致) も発生しない。
+ */
+export async function resolveSlackUserIdByEmail(
+  env: Env,
+  workspaceId: string,
+  slackEmail: string,
+): Promise<string | null> {
+  const trimmed = slackEmail.trim();
+  if (!trimmed) return null;
+  try {
+    const slack = await createSlackClientForWorkspace(env, workspaceId);
+    if (!slack) return null;
+    const res = await slack.usersLookupByEmail(trimmed);
+    if (!res.ok) return null;
+    const user = res.user as { id?: string } | undefined;
+    if (!user || typeof user.id !== "string" || !user.id) return null;
+    return user.id;
+  } catch (e) {
+    console.error("[role-auto-assign] resolveSlackUserIdByEmail failed:", e);
+    return null;
+  }
+}
+
+/**
  * フォーム回答に基づきロール付与。config 無効/rejected/未解決 → []。
  * 対象は祖先込みに展開し idempotent (既存 SELECT → 差分 insert)。
  * 返り値 assignedRoleIds (祖先含む) は剥奪用にフォームへ保存する想定。
