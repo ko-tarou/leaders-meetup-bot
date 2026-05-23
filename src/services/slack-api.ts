@@ -114,6 +114,21 @@ export class SlackClient implements SlackPort {
     return this.callApiGet("users.info", { user: userId });
   }
 
+  /**
+   * 名簿 Slack 連携強化 PR1: メールアドレスから Slack ユーザーを引く。
+   *
+   * 成功時のレスポンスは
+   *   { ok: true, user: { id, name, real_name, profile: { display_name, email, ... } } }
+   * 失敗時は `{ ok: false, error: "users_not_found" | "invalid_email" | ... }`。
+   *
+   * 必要 scope: `users:read.email` (display name 解決の `users:read` とは別)。
+   * 呼び出し側 (participation 提出 / roster 同期) は fail-soft で扱い、
+   * 解決失敗は従来の slack_name 経由 fallback に委ねる。
+   */
+  async usersLookupByEmail(email: string): Promise<SlackResponse> {
+    return this.callApiGet("users.lookupByEmail", { email });
+  }
+
   async getChannelList(): Promise<SlackResponse> {
     // conversations.list で workspace の全 public/private チャンネルを取得する。
     // 以前は users.conversations を使っていたが、bot 参加済みチャンネルしか

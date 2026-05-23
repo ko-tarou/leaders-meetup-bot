@@ -118,6 +118,10 @@ export class MockSlackClient {
     return this.record("getUserInfo", [userId]);
   }
 
+  async usersLookupByEmail(email: string): Promise<SlackResponse> {
+    return this.record("usersLookupByEmail", [email]);
+  }
+
   async getChannelList(): Promise<SlackResponse> {
     return this.record("getChannelList", []);
   }
