@@ -123,7 +123,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
           <span>退会済みを非表示</span>
         </label>
         <button type="button" onClick={() => setShowImport(true)} style={S.primaryBtn}>
-          合格者から取り込み
+          参加届を提出した人から取り込み
         </button>
         <button type="button" onClick={() => setShowAdd(true)} style={S.primaryBtn}>
           ＋ メンバー追加

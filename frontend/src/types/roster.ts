@@ -28,14 +28,21 @@ export type RosterMemberValue = {
   valueJson: string;
 };
 
-// PR6: 合格者取り込み候補。BE は applications.status='passed' のうち
-// roster_members に email 重複の無いものを返す。
+// 名簿取り込み候補。
+// PR6 初版: applications.status='passed' を返していた。
+// PR3 (2026-05): participation_forms.status='submitted' に変更。
+//   - id は participation_form.id (POST 時の請求 token とは無関係)
+//   - email は学校メール (form.email)
+//   - slackEmail / slackName / slackUserId は Slack 連携用 (任意・nullable)
+//   - submittedAt は 参加届の提出日時 (ISO 8601)。joinedAt の初期値として使う
 export type RosterImportCandidate = {
   id: string;
   name: string;
   email: string;
-  decidedAt: string | null;
+  slackEmail: string | null;
   slackName: string | null;
+  slackUserId: string | null;
+  submittedAt: string;
 };
 
 export type RosterMember = {
@@ -47,6 +54,8 @@ export type RosterMember = {
   grade: string | null;
   slackUserId: string | null;
   slackName: string | null;
+  // PR3 (2026-05): Slack 登録メールアドレス。参加届からの取り込みで初期化される。
+  slackEmail: string | null;
   joinedAt: string | null;
   leftAt: string | null;
   note: string | null;

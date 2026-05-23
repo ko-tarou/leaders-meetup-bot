@@ -8,6 +8,7 @@ import type {
 import { request } from "./client";
 
 // PR6: 手動追加 / 取り込み 用の POST body。email/grade などは任意。
+// PR3 (2026-05): slackEmail を追加 (参加届からの取り込みで保存)。
 export type RosterMemberCreateInput = {
   name: string;
   nameKana?: string | null;
@@ -15,6 +16,7 @@ export type RosterMemberCreateInput = {
   grade?: string | null;
   slackUserId?: string | null;
   slackName?: string | null;
+  slackEmail?: string | null;
   joinedAt?: string | null;
   note?: string | null;
   status?: "active" | "inactive";
@@ -54,7 +56,13 @@ export const roster = {
   createMember: (eventId: string, actionId: string, body: RosterMemberCreateInput) =>
     request<RosterMember>(`${base(eventId, actionId)}/members`,
       { method: "POST", body: JSON.stringify(body) }),
-  /** PR6: 合格者取り込み候補 (applications.status='passed' で email 未取り込み)。 */
+  /**
+   * 名簿取り込み候補一覧。
+   * PR3 (2026-05): participation_forms.status='submitted' から取得し、
+   *   同 event_action 内の roster_members で slack_user_id か email が
+   *   一致するものを除外して返す。Slack 情報 (slackEmail/slackName/slackUserId)
+   *   も合わせて返す。
+   */
   listImportCandidates: (eventId: string, actionId: string) =>
     request<RosterImportCandidate[]>(
       `${base(eventId, actionId)}/import-candidates`,
