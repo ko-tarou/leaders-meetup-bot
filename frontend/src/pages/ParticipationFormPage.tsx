@@ -64,6 +64,10 @@ export function ParticipationFormPage() {
   const [department, setDepartment] = useState("");
   const [grade, setGrade] = useState<ParticipationGrade | "">("");
   const [email, setEmail] = useState("");
+  // 名簿 Slack 連携強化 PR2: 任意の Slack メアド。
+  // 入力されていれば BE が users.lookupByEmail で Slack user を自動解決し、
+  // 表示名変更があっても名簿が更新され続ける (PR1 で BE 側基盤実装済み)。
+  const [slackEmail, setSlackEmail] = useState("");
   const [gender, setGender] = useState<ParticipationGender | "">("");
   const [hasAllergy, setHasAllergy] = useState(false);
   const [allergyDetail, setAllergyDetail] = useState("");
@@ -142,6 +146,15 @@ export function ParticipationFormPage() {
     }
     if (!grade) return setError("学年を選択してください");
     if (!email.trim()) return setError("メールアドレスを入力してください");
+    // 名簿 Slack 連携強化 PR2: slackEmail は任意。入力された場合のみ形式チェック。
+    // 空文字は未指定扱いで送信 body から省く (下記 submit 呼び出しを参照)。
+    const trimmedSlackEmail = slackEmail.trim();
+    if (
+      trimmedSlackEmail !== "" &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedSlackEmail)
+    ) {
+      return setError("Slack メールアドレスの形式が正しくありません");
+    }
     if (!activity) return setError("希望する活動を選択してください");
     if (wantsDev && devRoles.length === 0) {
       return setError("希望役職を1つ以上選択してください");
@@ -160,6 +173,9 @@ export function ParticipationFormPage() {
         department: department.trim(),
         grade,
         email: email.trim(),
+        // 空文字なら省く (= undefined) ことで BE 側で null として扱われ、
+        // PR1 の lookupByEmail 経路がスキップされる。
+        slackEmail: trimmedSlackEmail || undefined,
         gender: gender || undefined,
         hasAllergy,
         allergyDetail:
@@ -275,6 +291,19 @@ export function ParticipationFormPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
+            maxLength={200}
+            style={inputStyle}
+          />
+        </Field>
+        <Field
+          label="Slack に登録しているメールアドレス"
+          hint="Slack の表示名が変わっても自動で名簿が更新されます"
+        >
+          <input
+            type="email"
+            value={slackEmail}
+            onChange={(e) => setSlackEmail(e.target.value)}
+            placeholder="例: hanako@example.com"
             maxLength={200}
             style={inputStyle}
           />
