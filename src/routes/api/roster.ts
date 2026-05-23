@@ -147,9 +147,10 @@ const listMembersHandler = async (c: C) => {
 
 /**
  * POST /roster/members
- *   body: { name, nameKana?, email?, grade?, slackUserId?, slackName?,
+ *   body: { name, nameKana?, email?, grade?, slackUserId?, slackName?, slackEmail?,
  *           joinedAt?, leftAt?, note?, status? }
  *   name 必須。status は enum 検証 (省略時 'active')。
+ *   PR3 (2026-05): 参加届からの取り込み用に slackEmail を受け入れる。
  */
 const createMemberHandler = async (c: C) => {
   const db = drizzle(c.env.DB);
@@ -179,6 +180,7 @@ const createMemberHandler = async (c: C) => {
     grade: trimOrNull(body.grade),
     slackUserId: trimOrNull(body.slackUserId),
     slackName: trimOrNull(body.slackName),
+    slackEmail: trimOrNull(body.slackEmail),
     joinedAt: trimOrNull(body.joinedAt),
     leftAt: trimOrNull(body.leftAt),
     note: trimOrNull(body.note),
@@ -228,6 +230,7 @@ const updateMemberHandler = async (c: C) => {
     "grade",
     "slackUserId",
     "slackName",
+    "slackEmail",
     "joinedAt",
     "leftAt",
     "note",

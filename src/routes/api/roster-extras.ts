@@ -2,11 +2,18 @@
  * 名簿管理 (member_roster) 拡張 API。
  *
  * - GET  /orgs/:eventId/actions/:actionId/roster/import-candidates
- *     applications.status='passed' を返す (email 一致で roster_members 既取り込みは除外)。
+ *     participation_forms.status='submitted' を返す。
+ *     重複除外: 同 event の roster_members で slack_user_id 一致、もしくは
+ *     email lower-case 一致を除外。
  * - GET  /orgs/:eventId/actions/:actionId/roster/members/:memberId/roles
  *     同 event 配下の slack_roles に絞った付与 roleIds を返す。
  * - PUT  /orgs/:eventId/actions/:actionId/roster/members/:memberId/roles
  *     body { roleIds: string[] } で同 event scope 内の付与を入れ替え。
+ *
+ * 名簿 Slack 連携強化 PR3 (2026-05):
+ *   候補ソースを applications.status='passed' から
+ *   participation_forms.status='submitted' に変更。Slack 情報
+ *   (slack_email, slack_name, slack_user_id) も合わせて返す。
  *
  * PR1 (roster_members) が並行で未マージのためテーブル不在は 503 で fail-soft。
  */
@@ -16,7 +23,6 @@ import { eq, and, inArray } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   eventActions,
-  applications,
   participationForms,
   slackRoles,
   slackRoleMembers,
@@ -79,6 +85,12 @@ async function eventScopedRoleIds(db: Db, eventId: string): Promise<string[]> {
 }
 
 // --- GET /roster/import-candidates -----------------------------------------
+// PR3 (2026-05): 参加届ベースに変更。同 event の participation_forms から
+// status='submitted' を取得し、roster_members への重複は
+//  - slack_user_id 一致 (両方 non-null のとき)
+//  - email lower-case 一致 (form.email vs roster_members.email)
+// のどちらかで除外する。slack_user_id 一致を優先する理由は、
+// 学校メールを差し替えても Slack 紐付け済みなら同一人物と判定したいため。
 rosterExtrasRouter.get(
   "/orgs/:eventId/actions/:actionId/roster/import-candidates",
   async (c) => {
@@ -87,37 +99,53 @@ rosterExtrasRouter.get(
     const found = await findRosterAction(db, eventId, c.req.param("actionId"));
     if ("error" in found) return c.json({ error: found.error }, found.status);
 
-    const passed = await db.select().from(applications)
-      .where(and(eq(applications.eventId, eventId), eq(applications.status, "passed")))
-      .all();
-    if (passed.length === 0) return c.json([]);
-
     const forms = await db.select().from(participationForms)
-      .where(eq(participationForms.eventId, eventId)).all();
-    const slackNameByApp = new Map<string, string | null>();
-    for (const f of forms) if (f.applicationId) slackNameByApp.set(f.applicationId, f.slackName);
+      .where(and(
+        eq(participationForms.eventId, eventId),
+        eq(participationForms.status, "submitted"),
+      ))
+      .all();
+    if (forms.length === 0) return c.json([]);
 
-    const taken = new Set<string>();
+    // 既取り込み (重複) 検出用に、同 event_action 配下の roster_members を読む。
+    // PR1 マージ後は table 必ず存在するが、PR1 移行期間の互換のため exists check は残す。
+    const takenEmails = new Set<string>();
+    const takenSlackIds = new Set<string>();
     if (await rosterMembersExists(c.env.DB)) {
       try {
-        const r = await c.env.DB.prepare("SELECT email FROM roster_members")
-          .all<{ email: string | null }>();
-        for (const row of r.results ?? []) if (row.email) taken.add(row.email.toLowerCase());
+        const r = await c.env.DB
+          .prepare(
+            "SELECT email, slack_user_id FROM roster_members WHERE event_action_id = ? AND deleted_at IS NULL",
+          )
+          .bind(c.req.param("actionId"))
+          .all<{ email: string | null; slack_user_id: string | null }>();
+        for (const row of r.results ?? []) {
+          if (row.email) takenEmails.add(row.email.toLowerCase());
+          if (row.slack_user_id) takenSlackIds.add(row.slack_user_id);
+        }
       } catch {
         /* fail-soft */
       }
     }
 
+    const remaining = forms.filter((f) => {
+      if (f.slackUserId && takenSlackIds.has(f.slackUserId)) return false;
+      if (f.email && takenEmails.has(f.email.toLowerCase())) return false;
+      return true;
+    });
+    // submitted_at desc。文字列比較で ISO 8601 を降順ソートする。
+    remaining.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+
     return c.json(
-      passed
-        .filter((a) => !taken.has(a.email.toLowerCase()))
-        .map((a) => ({
-          id: a.id,
-          name: a.name,
-          email: a.email,
-          decidedAt: a.decidedAt,
-          slackName: slackNameByApp.get(a.id) ?? null,
-        })),
+      remaining.map((f) => ({
+        id: f.id,
+        name: f.name,
+        email: f.email,
+        slackEmail: f.slackEmail,
+        slackName: f.slackName,
+        slackUserId: f.slackUserId,
+        submittedAt: f.submittedAt,
+      })),
     );
   },
 );
