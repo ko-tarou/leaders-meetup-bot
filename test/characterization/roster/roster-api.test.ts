@@ -142,6 +142,36 @@ describe("members CRUD", () => {
     expect(await res.json()).toEqual({ error: "invalid status" });
   });
 
+  // PR3 (2026-05): 参加届からの取り込みで Slack 情報を一緒に保存できる。
+  it("POST: Slack 情報 (slackEmail/slackName/slackUserId) を一緒に保存できる", async () => {
+    const { action } = await setup();
+    const res = await reqJson(
+      `/event-actions/${action.id}/roster/members`,
+      "POST",
+      {
+        name: "佐藤 花子",
+        email: "hanako@school.example.com",
+        slackEmail: "hanako@slack.example.com",
+        slackName: "hanako_slack",
+        slackUserId: "U_HANAKO",
+        joinedAt: "2026-05-10T00:00:00.000Z",
+      },
+    );
+    expect(res.status).toBe(201);
+    const row = (await res.json()) as {
+      email: string | null;
+      slackEmail: string | null;
+      slackName: string | null;
+      slackUserId: string | null;
+      joinedAt: string | null;
+    };
+    expect(row.email).toBe("hanako@school.example.com");
+    expect(row.slackEmail).toBe("hanako@slack.example.com");
+    expect(row.slackName).toBe("hanako_slack");
+    expect(row.slackUserId).toBe("U_HANAKO");
+    expect(row.joinedAt).toBe("2026-05-10T00:00:00.000Z");
+  });
+
   it("GET: list は createdAt 昇順、soft-deleted は除外、inactive は default で除外", async () => {
     const { action } = await setup();
     // 直接 insert で createdAt を制御

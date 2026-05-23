@@ -3,7 +3,10 @@
  *
  * カバー:
  *  - orgs router で actionType='member_roster' を作成できる (default config)
- *  - GET /roster/import-candidates: status='passed' のみ + slackName join
+ *  - GET /roster/import-candidates: participation_forms.status='submitted' のみ返す
+ *      (PR3 で applications.passed から変更)
+ *  - GET /roster/import-candidates: roster_members に slack_user_id か email
+ *      一致がある参加届は除外される
  *  - GET /roster/import-candidates: action 型不一致は 400
  *  - GET /roster/members/:id/roles: 存在しない member は 404
  *  - PUT /roster/members/:id/roles: event scope 内 role の入れ替え
@@ -23,7 +26,7 @@ import { rosterExtrasRouter } from "../../../src/routes/api/roster-extras";
 import { makeEnv } from "../../helpers/env";
 import { testD1 } from "../../helpers/db";
 import {
-  makeEvent, makeEventAction, makeApplication,
+  makeEvent, makeEventAction,
   makeParticipationForm, makeSlackRole,
 } from "../../helpers/factory";
 
@@ -43,13 +46,18 @@ async function req(path: string, method = "GET", body?: unknown) {
   }, env);
 }
 
-async function insertRosterMember(id: string, actionId: string, slackUserId: string | null) {
+async function insertRosterMember(
+  id: string,
+  actionId: string,
+  slackUserId: string | null,
+  email: string | null = null,
+) {
   const now = new Date().toISOString();
   await testD1()
     .prepare(
-      "INSERT INTO roster_members (id, event_action_id, name, email, slack_user_id, status, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, 'active', ?, ?)",
+      "INSERT INTO roster_members (id, event_action_id, name, email, slack_user_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
     )
-    .bind(id, actionId, "Test Member", slackUserId, now, now).run();
+    .bind(id, actionId, "Test Member", email, slackUserId, now, now).run();
 }
 
 describe("orgs: actionType='member_roster'", () => {
@@ -64,19 +72,113 @@ describe("orgs: actionType='member_roster'", () => {
 });
 
 describe("GET /roster/import-candidates", () => {
-  it("status='passed' のみ返し slackName を join", async () => {
+  // PR3 (2026-05): participation_forms.status='submitted' から取得し、
+  // Slack 情報 (slackEmail / slackName / slackUserId) も合わせて返す。
+  it("status='submitted' のみ返し Slack 情報を含む", async () => {
     const ev = await makeEvent();
     const action = await makeEventAction(ev.id, { actionType: "member_roster" });
-    const passed = await makeApplication(ev.id, { status: "passed", email: "pass@example.com" });
-    await makeApplication(ev.id, { status: "pending", email: "p@example.com" });
-    await makeParticipationForm(ev.id, { applicationId: passed.id, slackName: "taro_slack" });
+    await makeParticipationForm(ev.id, {
+      name: "提出 太郎",
+      email: "submitted@example.com",
+      slackEmail: "submitted+slack@example.com",
+      slackName: "taro_slack",
+      slackUserId: "U_TARO",
+      status: "submitted",
+      submittedAt: "2026-05-10T00:00:00.000Z",
+    });
+    await makeParticipationForm(ev.id, {
+      name: "却下 次郎",
+      email: "rejected@example.com",
+      status: "rejected",
+      submittedAt: "2026-05-09T00:00:00.000Z",
+    });
 
     const res = await req(`/orgs/${ev.id}/actions/${action.id}/roster/import-candidates`);
     expect(res.status).toBe(200);
-    const list = (await res.json()) as Array<{ email: string; slackName: string | null }>;
+    const list = (await res.json()) as Array<{
+      email: string; slackEmail: string | null; slackName: string | null;
+      slackUserId: string | null; submittedAt: string;
+    }>;
     expect(list).toHaveLength(1);
-    expect(list[0].email).toBe("pass@example.com");
-    expect(list[0].slackName).toBe("taro_slack");
+    expect(list[0]).toMatchObject({
+      email: "submitted@example.com",
+      slackEmail: "submitted+slack@example.com",
+      slackName: "taro_slack",
+      slackUserId: "U_TARO",
+      submittedAt: "2026-05-10T00:00:00.000Z",
+    });
+  });
+
+  it("submitted_at desc で並ぶ", async () => {
+    const ev = await makeEvent();
+    const action = await makeEventAction(ev.id, { actionType: "member_roster" });
+    await makeParticipationForm(ev.id, {
+      name: "古い", email: "old@example.com",
+      submittedAt: "2026-05-01T00:00:00.000Z",
+    });
+    await makeParticipationForm(ev.id, {
+      name: "新しい", email: "new@example.com",
+      submittedAt: "2026-05-20T00:00:00.000Z",
+    });
+
+    const list = (await (await req(
+      `/orgs/${ev.id}/actions/${action.id}/roster/import-candidates`,
+    )).json()) as Array<{ email: string }>;
+    expect(list.map((r) => r.email)).toEqual([
+      "new@example.com", "old@example.com",
+    ]);
+  });
+
+  it("roster_members に slack_user_id 一致がある参加届は除外", async () => {
+    const ev = await makeEvent();
+    const action = await makeEventAction(ev.id, { actionType: "member_roster" });
+    await makeParticipationForm(ev.id, {
+      name: "既に Slack 紐付け済み",
+      email: "different-school@example.com",
+      slackUserId: "U_DUP",
+    });
+    await insertRosterMember("m-dup", action.id, "U_DUP", "old-school@example.com");
+
+    const list = (await (await req(
+      `/orgs/${ev.id}/actions/${action.id}/roster/import-candidates`,
+    )).json()) as unknown[];
+    expect(list).toHaveLength(0);
+  });
+
+  it("roster_members に email 一致がある参加届は除外", async () => {
+    const ev = await makeEvent();
+    const action = await makeEventAction(ev.id, { actionType: "member_roster" });
+    await makeParticipationForm(ev.id, {
+      name: "メール重複",
+      email: "DUP@example.com", // 大文字混在で lowercase 比較されることを確認
+    });
+    await insertRosterMember("m-email-dup", action.id, null, "dup@example.com");
+
+    const list = (await (await req(
+      `/orgs/${ev.id}/actions/${action.id}/roster/import-candidates`,
+    )).json()) as unknown[];
+    expect(list).toHaveLength(0);
+  });
+
+  it("別 event_action の roster_members は除外対象に含まない (action scope)", async () => {
+    // PR3: 重複除外を同 event_action 内に限定する。
+    // 別アクションの名簿に同じ email がいても、このアクションでは未取り込みとして表示される。
+    // (event_actions の UNIQUE(event_id, action_type) 制約により、別 event を用いて
+    //  「別 action」を作る)
+    const evA = await makeEvent();
+    const evB = await makeEvent();
+    const actionA = await makeEventAction(evA.id, { actionType: "member_roster" });
+    const actionB = await makeEventAction(evB.id, { actionType: "member_roster" });
+    await makeParticipationForm(evA.id, {
+      name: "他 action 取り込み済み",
+      email: "shared@example.com",
+    });
+    await insertRosterMember("m-other", actionB.id, null, "shared@example.com");
+
+    const list = (await (await req(
+      `/orgs/${evA.id}/actions/${actionA.id}/roster/import-candidates`,
+    )).json()) as Array<{ email: string }>;
+    expect(list.map((r) => r.email)).toEqual(["shared@example.com"]);
   });
 
   it("action が member_roster でないと 400", async () => {
