@@ -25,6 +25,12 @@ export type ParticipationSubmitBody = {
   token?: string;
   name: string;
   slackName?: string;
+  /**
+   * 名簿 Slack 連携強化 PR2: 任意の Slack メアド。
+   * 値があれば BE が `users.lookupByEmail` で Slack user を自動解決し、
+   * 表示名変更後も名簿が安定する (PR1 で BE 側に追加済み)。
+   */
+  slackEmail?: string;
   studentId?: string;
   department?: string;
   grade?: ParticipationGrade;
