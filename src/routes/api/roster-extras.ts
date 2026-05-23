@@ -18,6 +18,7 @@
  * PR1 (roster_members) が並行で未マージのためテーブル不在は 503 で fail-soft。
  */
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and, inArray } from "drizzle-orm";
 import type { Env } from "../../types/env";
@@ -27,6 +28,9 @@ import {
   slackRoles,
   slackRoleMembers,
 } from "../../db/schema";
+import { syncRosterSlackNamesForAction } from "../../services/roster-slack-sync";
+import { createSlackClientForWorkspace } from "../../services/workspace";
+import { readWorkspaceId } from "../../services/role-sync";
 
 export const rosterExtrasRouter = new Hono<{ Bindings: Env }>();
 
@@ -177,6 +181,94 @@ rosterExtrasRouter.get(
   },
 );
 
+// --- POST /roster/sync-slack-names -----------------------------------------
+// 名簿 Slack 連携強化 PR4: 名簿全員の slack_name を Slack 最新表示名で再取得。
+//
+// 両パスにマウントする:
+//   - /event-actions/:actionId/roster/sync-slack-names  (PR1〜3 互換)
+//   - /orgs/:eventId/actions/:actionId/roster/sync-slack-names (新パス)
+//
+// 旧パスは event scope を持たないため `findRosterAction` ではなく
+// actionType の単独検証で済ませる。新パスは event 一致 + actionType 両方を見る。
+const syncSlackNamesByEventActionHandler = async (
+  c: Context<{ Bindings: Env }>,
+) => {
+  const db = drizzle(c.env.DB);
+  const actionId = c.req.param("actionId");
+  if (!actionId) return c.json({ error: "actionId is required" }, 400);
+  const action = await db
+    .select()
+    .from(eventActions)
+    .where(eq(eventActions.id, actionId))
+    .get();
+  if (!action) return c.json({ error: "action not found" }, 404);
+  if (action.actionType !== "member_roster") {
+    return c.json({ error: "action is not member_roster" }, 400);
+  }
+  return runSync(c, action);
+};
+
+const syncSlackNamesByOrgHandler = async (
+  c: Context<{ Bindings: Env }>,
+) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const actionId = c.req.param("actionId");
+  if (!eventId || !actionId) {
+    return c.json({ error: "eventId/actionId are required" }, 400);
+  }
+  const found = await findRosterAction(db, eventId, actionId);
+  if ("error" in found) return c.json({ error: found.error }, found.status);
+  return runSync(c, found.action);
+};
+
+/** 共通: workspaceId 解決 → SlackClient 生成 → 同期実行 → 結果返却。 */
+async function runSync(
+  c: Context<{ Bindings: Env }>,
+  action: typeof eventActions.$inferSelect,
+) {
+  // workspaceId は同 event 内の role_management / member_application の
+  // config.workspaceId から逆引きする (cron 経路と同ロジック)。
+  // 名簿 action 自身が workspaceId を持つ運用は今のところ無いが、
+  // 将来のため readWorkspaceId(action) も先に試す。
+  const direct = readWorkspaceId(action);
+  let workspaceId: string | null = direct;
+  if (!workspaceId) {
+    const db = drizzle(c.env.DB);
+    const siblings = await db
+      .select()
+      .from(eventActions)
+      .where(eq(eventActions.eventId, action.eventId))
+      .all();
+    for (const t of ["role_management", "member_application"] as const) {
+      const cand = siblings.find((a) => a.actionType === t);
+      if (cand) {
+        const ws = readWorkspaceId(cand);
+        if (ws) {
+          workspaceId = ws;
+          break;
+        }
+      }
+    }
+  }
+  if (!workspaceId) {
+    return c.json(
+      { error: "workspaceId not configured for this event" },
+      400,
+    );
+  }
+  const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+  if (!slack) {
+    return c.json({ error: "workspace not found" }, 404);
+  }
+  const result = await syncRosterSlackNamesForAction(
+    c.env.DB,
+    slack,
+    action.id,
+  );
+  return c.json(result);
+}
+
 // --- PUT /roster/members/:memberId/roles -----------------------------------
 rosterExtrasRouter.put(
   "/orgs/:eventId/actions/:actionId/roster/members/:memberId/roles",
@@ -226,4 +318,16 @@ rosterExtrasRouter.put(
     }
     return c.json({ ok: true, roleIds: requested });
   },
+);
+
+// 名簿 Slack 連携強化 PR4: sync-slack-names エンドポイントを 2 パスにマウント。
+// 旧 (/event-actions/...) は PR1〜3 期に既存実装が使っていた path 形式の互換用。
+// 新 (/orgs/:eventId/actions/...) は Chromium 系の URL ブロック回避で導入されたパス。
+rosterExtrasRouter.post(
+  "/event-actions/:actionId/roster/sync-slack-names",
+  syncSlackNamesByEventActionHandler,
+);
+rosterExtrasRouter.post(
+  "/orgs/:eventId/actions/:actionId/roster/sync-slack-names",
+  syncSlackNamesByOrgHandler,
 );
