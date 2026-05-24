@@ -339,8 +339,10 @@ export function WorkspacesPage() {
           borderTop: `1px solid ${colors.border}`,
         }}
       >
+        {/* HitoLink DS: 副次アクション = ghost。 */}
         <button
           onClick={() => setShowManualForm(true)}
+          className="btn btn-ghost btn-sm"
           style={{
             background: "transparent",
             color: colors.textSecondary,

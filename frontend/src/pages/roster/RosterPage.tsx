@@ -158,9 +158,16 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
             onChange={(e) => setHideInactive(e.target.checked)} />
           <span>退会済みを非表示</span>
         </label>
+        {/*
+          HitoLink DS 試験適用 (revert 可):
+          className="btn btn-primary btn-sm" を追加。インライン style (S.primaryBtn)
+          は併存させ、後勝ちで HitoLink クラスのほうが表示される。リバート時は
+          className を消すだけで元のインラインスタイルに戻る。
+        */}
         <button
           type="button"
           onClick={() => setShowImport(true)}
+          className="btn btn-primary btn-sm"
           style={{ ...S.primaryBtn, ...mobileBtn }}
         >
           参加届を提出した人から取り込み
@@ -168,6 +175,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
         <button
           type="button"
           onClick={() => setShowAdd(true)}
+          className="btn btn-primary btn-sm"
           style={{ ...S.primaryBtn, ...mobileBtn }}
         >
           ＋ メンバー追加
@@ -175,6 +183,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
         <button
           type="button"
           onClick={() => setShowCols(true)}
+          className="btn btn-ghost btn-sm"
           style={{ ...S.colsBtn, ...mobileBtn }}
         >
           カスタム列管理
@@ -184,6 +193,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
           type="button"
           onClick={handleSyncSlackNames}
           disabled={syncing}
+          className="btn btn-ghost btn-sm"
           style={{ ...(syncing ? S.syncBtnBusy : S.colsBtn), ...mobileBtn }}
           aria-busy={syncing}
         >
