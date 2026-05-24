@@ -54,7 +54,9 @@ export function WorkspaceCreateForm({
       }}
       onClick={onClose}
     >
+      {/* HitoLink DS: anim-pop-in でモーダルを spring 着地させる。 */}
       <div
+        className="anim-pop-in"
         style={{
           background: "white",
           padding: isMobile ? "1rem" : "1.5rem",
@@ -128,9 +130,11 @@ export function WorkspaceCreateForm({
             justifyContent: "flex-end",
           }}
         >
+          {/* HitoLink DS: cancel = ghost、register = primary。 */}
           <button
             onClick={onClose}
             disabled={submitting}
+            className="btn btn-ghost btn-sm"
             style={{
               width: isMobile ? "100%" : undefined,
               minHeight: 40,
@@ -144,6 +148,7 @@ export function WorkspaceCreateForm({
             disabled={
               submitting || !botToken.trim() || !signingSecret.trim()
             }
+            className="btn btn-primary btn-sm"
             style={{
               background: colors.primary,
               color: colors.textInverse,

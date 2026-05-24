@@ -125,7 +125,10 @@ export function RosterColumnsModal(
     : S.box;
   return (
     <div style={ovStyle} onClick={onClose} role="presentation">
-      <div style={boxStyle} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="カスタム列管理">
+      {/* HitoLink DS: anim-pop-in でモーダルを spring 着地させる。 */}
+      <div style={boxStyle} onClick={(e) => e.stopPropagation()}
+        className="anim-pop-in"
+        role="dialog" aria-label="カスタム列管理">
         <header style={S.hd}>
           <h2 style={S.title}>カスタム列管理</h2>
           <button type="button" onClick={onClose} aria-label="閉じる" style={S.x}>×</button>
@@ -155,9 +158,12 @@ export function RosterColumnsModal(
                   onChange={(e) => setEditDraft({ ...editDraft, sortOrder: e.target.value })}/>
                 {c.type !== editDraft.type
                   && <span style={S.warn} role="alert">型変更: 既存値は再解釈されます</span>}
+                {/* HitoLink DS: 編集行の保存 = primary、cancel = ghost。 */}
                 <button type="button" onClick={() => saveEdit(c)} disabled={busy}
+                  className="btn btn-primary btn-sm"
                   style={S.addBtn}>保存</button>
                 <button type="button" onClick={cancelEdit} disabled={busy}
+                  className="btn btn-ghost btn-sm"
                   style={S.del}>キャンセル</button>
               </li>
             ) : (
@@ -188,7 +194,9 @@ export function RosterColumnsModal(
               <input aria-label="新しい列の選択肢 (カンマ区切り)" placeholder="A, B, C" value={draft.optionsText}
                 style={S.inp} disabled={busy} onChange={(e) => setDraft({ ...draft, optionsText: e.target.value })}/>
             )}
-            <button type="button" onClick={add} disabled={busy} style={S.addBtn}>＋ 列を追加</button>
+            {/* HitoLink DS: 新規列追加の主アクション。 */}
+            <button type="button" onClick={add} disabled={busy}
+              className="btn btn-primary btn-sm" style={S.addBtn}>＋ 列を追加</button>
           </fieldset>
         </div>
       </div>

@@ -86,7 +86,11 @@ export function RosterMemberAddModal({
 
   return (
     <div style={ovStyle} onClick={() => !busy && onClose()} role="presentation">
+      {/* HitoLink DS: anim-pop-in でモーダルを spring 着地させる。
+          注意: 当 modal は transform を使った位置決めをしていない (alignItems
+          centering のみ) ため、anim-pop-in の translateY と衝突しない。 */}
       <div style={boxStyle} onClick={(e) => e.stopPropagation()}
+        className="anim-pop-in"
         role="dialog" aria-modal="true" aria-label="メンバー追加">
         <header style={S.hd}>
           <h2 style={S.title}>メンバーを追加</h2>
@@ -124,10 +128,12 @@ export function RosterMemberAddModal({
             UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
             破棄系は × / overlay クリック / ESC キーで一貫させる。
           */}
+          {/* HitoLink DS: 主アクションを btn-primary に。インライン style は併存。 */}
           <button
             type="button"
             onClick={submit}
             disabled={busy}
+            className="btn btn-primary btn-sm"
             style={{
               ...S.primary,
               flex: isMobile ? "1 1 100%" : undefined,

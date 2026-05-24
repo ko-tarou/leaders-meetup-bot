@@ -98,7 +98,9 @@ export function RosterImportModal({
 
   return (
     <div style={ovStyle} onClick={() => !busy && onClose()} role="presentation">
+      {/* HitoLink DS: anim-pop-in でモーダルを spring 着地させる。 */}
       <div style={boxStyle} onClick={(e) => e.stopPropagation()}
+        className="anim-pop-in"
         role="dialog" aria-modal="true" aria-label="参加届を提出した人から取り込み">
         <header style={S.hd}>
           <h2 style={S.title}>参加届を提出した人から取り込み</h2>
@@ -190,10 +192,12 @@ export function RosterImportModal({
             UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
             破棄系は × / overlay クリック / ESC キーで一貫させる。
           */}
+          {/* HitoLink DS: 主アクションを btn-primary に。 */}
           <button
             type="button"
             onClick={doImport}
             disabled={busy || picked.size === 0}
+            className="btn btn-primary btn-sm"
             style={{
               ...S.primary,
               flex: isMobile ? "1 1 100%" : undefined,

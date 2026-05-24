@@ -160,11 +160,14 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
       }}
       onClick={onClose}
     >
+      {/* HitoLink DS: anim-pop-in で spring 着地。
+          (中央寄せは parent の flex で行っているため transform 競合なし。) */}
       <div
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? "タスクを編集" : "新規タスク"}
+        className="anim-pop-in"
         style={{
           background: "white",
           padding: isMobile ? "1rem" : "1.5rem",
@@ -281,10 +284,12 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
             破棄系は × / overlay クリック で一貫させる。
             「削除」は破壊的操作なので残す。
           */}
+          {/* HitoLink DS: 削除 = danger、保存 = primary。 */}
           {isEdit && (
             <button
               onClick={handleDelete}
               disabled={submitting}
+              className="btn btn-danger btn-sm"
               style={{
                 background: colors.danger,
                 color: colors.textInverse,
@@ -300,6 +305,7 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
           <button
             onClick={handleSubmit}
             disabled={submitting || !title.trim()}
+            className="btn btn-primary btn-sm"
             style={{
               background: colors.primary,
               color: colors.textInverse,

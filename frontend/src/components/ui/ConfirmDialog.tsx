@@ -218,12 +218,15 @@ function ConfirmDialogView({
         if (e.target === e.currentTarget) onResolve(false);
       }}
     >
+      {/* HitoLink DS: anim-pop-in で spring 着地。
+          (中央寄せは parent の flex で行っているため transform 競合なし。) */}
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? "ds-confirm-title" : undefined}
         aria-describedby="ds-confirm-message"
+        className="anim-pop-in"
         style={dialogStyle}
         onKeyDown={handleKeyDown}
       >
@@ -236,9 +239,12 @@ function ConfirmDialogView({
           {message}
         </p>
         <div style={actionsStyle}>
+          {/* HitoLink DS: cancel = ghost、confirm = primary or danger。
+              既存 Button コンポーネントはインライン style + className を merge する。 */}
           <Button
             ref={cancelBtnRef}
             variant="secondary"
+            className="btn btn-ghost btn-sm"
             fullWidth={isMobile}
             onClick={() => onResolve(false)}
           >
@@ -247,6 +253,9 @@ function ConfirmDialogView({
           <Button
             ref={confirmBtnRef}
             variant={variant === "danger" ? "danger" : "primary"}
+            className={
+              variant === "danger" ? "btn btn-danger btn-sm" : "btn btn-primary btn-sm"
+            }
             fullWidth={isMobile}
             onClick={() => onResolve(true)}
           >
