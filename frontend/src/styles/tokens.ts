@@ -73,3 +73,46 @@ export const shadow = {
 // `tokens.colors.primary` のように使える。
 export const tokens = { colors, space, radius, fontSize, shadow } as const;
 export type Tokens = typeof tokens;
+
+// ============================================================================
+// HitoLink Design System (試験適用 / revert 可)
+// ============================================================================
+//
+// 上記の `colors` (Tailwind blue-600 系) を破壊せずに、HitoLink DS の
+// 色トークンへの参照だけ追加する。値は CSS 変数 ref で、実体は
+// frontend/src/styles/hitolink.css の `:root` に定義されている。
+//
+// 使い方: `import { hitoColors } from "../styles/tokens";`
+//   <button style={{ background: hitoColors.primary }}>...</button>
+//
+// これにより、インライン style を残したまま (= 既存 UI を壊さず)
+// 一部のコンポーネントだけ HitoLink ルックに移行できる。
+// リバートは「この export を消す + 参照側を削除」だけ。
+export const hitoColors = {
+  paper: "var(--color-paper)",
+  paper2: "var(--color-paper-2)",
+  surface: "var(--color-surface)",
+  ink1: "var(--color-ink-1)",
+  ink2: "var(--color-ink-2)",
+  ink3: "var(--color-ink-3)",
+  ink4: "var(--color-ink-4)",
+  ink5: "var(--color-ink-5)",
+  line1: "var(--color-line-1)",
+  line2: "var(--color-line-2)",
+  primary: "var(--color-primary)",
+  primaryHover: "var(--color-primary-hover)",
+  primarySoft: "var(--color-primary-soft)",
+  accent: "var(--color-accent)",
+  accentHover: "var(--color-accent-hover)",
+  accentSoft: "var(--color-accent-soft)",
+  danger: "var(--color-danger)",
+  dangerSoft: "var(--color-danger-soft)",
+} as const;
+
+// 影トークン (2 段重ね) も同じ要領で。
+// 例: `style={{ boxShadow: hitoShadow.card }}`
+export const hitoShadow = {
+  card: "var(--shadow-card)",
+  pop: "var(--shadow-pop)",
+  press: "var(--shadow-press)",
+} as const;
