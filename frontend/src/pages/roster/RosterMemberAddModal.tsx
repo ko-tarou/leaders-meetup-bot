@@ -103,27 +103,34 @@ export function RosterMemberAddModal({
             </label>
           ))}
         </div>
-        <footer style={S.ft}>
+        <footer
+          style={{
+            ...S.ft,
+            // UX-PR3 (E): mobile では sticky bottom 化して、フォームを下まで
+            // スクロールしなくても primary action が常に押せるようにする。
+            // (キャンセルは右上 × に統一済みなので、primary 1 個だけを表示)
+            ...(isMobile
+              ? {
+                  position: "sticky",
+                  bottom: 0,
+                  background: colors.background,
+                  zIndex: 10,
+                }
+              : {}),
+          }}
+        >
           {!isMobile && <span style={{ flex: 1 }} />}
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            style={{
-              ...S.cancel,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
-              minHeight: 40,
-            }}
-          >
-            キャンセル
-          </button>
+          {/*
+            UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
+            破棄系は × / overlay クリック / ESC キーで一貫させる。
+          */}
           <button
             type="button"
             onClick={submit}
             disabled={busy}
             style={{
               ...S.primary,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              flex: isMobile ? "1 1 100%" : undefined,
               minHeight: 40,
             }}
           >

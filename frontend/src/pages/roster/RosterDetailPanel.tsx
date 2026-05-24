@@ -205,6 +205,18 @@ export function RosterDetailPanel({
             ...S.footer,
             // mobile はボタンを折り返し許可
             flexWrap: isMobile ? "wrap" : "nowrap",
+            // UX-PR3 (E): mobile では panel が全画面 modal 化するので、
+            // 長いフォームの最後までスクロールしなくても保存ボタンが
+            // 常に画面下に張り付くよう sticky 化する。
+            // (キャンセルは右上 × に統一済みなので、退会 + 保存 の 2 個だけ)
+            ...(isMobile
+              ? {
+                  position: "sticky",
+                  bottom: 0,
+                  background: colors.background,
+                  zIndex: 10,
+                }
+              : {}),
           }}
         >
           <button
@@ -221,18 +233,10 @@ export function RosterDetailPanel({
             退会させる
           </button>
           {!isMobile && <span style={{ flex: 1 }} />}
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            style={{
-              ...S.cancel,
-              minHeight: 40,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
-            }}
-          >
-            キャンセル
-          </button>
+          {/*
+            UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
+            破棄系は × / overlay クリック / ESC キーで一貫させる。
+          */}
           <button
             type="button"
             onClick={save}
@@ -240,7 +244,7 @@ export function RosterDetailPanel({
             style={{
               ...S.save,
               minHeight: 40,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              flex: isMobile ? "1 1 100%" : undefined,
             }}
           >
             {saving ? "保存中..." : "保存"}
