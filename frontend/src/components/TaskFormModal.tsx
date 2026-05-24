@@ -162,6 +162,9 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEdit ? "タスクを編集" : "新規タスク"}
         style={{
           background: "white",
           padding: isMobile ? "1rem" : "1.5rem",
@@ -169,9 +172,43 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
           width: isMobile ? "100%" : "min(500px, 90vw)",
           maxHeight: isMobile ? "100vh" : "90vh",
           overflow: "auto",
+          // UX-PR3 (E): 後段の sticky footer の position 基準にする
+          position: "relative",
         }}
       >
-        <h3 style={{ marginTop: 0 }}>{isEdit ? "タスクを編集" : "新規タスク"}</h3>
+        {/*
+          UX-PR3 (D): 他モーダル (RosterImportModal 等) と統一して、
+          右上に「閉じる ×」を置く。下部の「キャンセル」と機能が被るので、
+          後段でキャンセルボタンは削除する。
+        */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "0.5rem",
+            marginBottom: "0.5rem",
+          }}
+        >
+          <h3 style={{ margin: 0 }}>{isEdit ? "タスクを編集" : "新規タスク"}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            aria-label="閉じる"
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: "1.5rem",
+              cursor: "pointer",
+              color: colors.textSecondary,
+              lineHeight: 1,
+              padding: "0 0.25rem",
+            }}
+          >
+            ×
+          </button>
+        </div>
         {error && <div style={{ color: colors.danger, marginBottom: "0.5rem" }}>{error}</div>}
 
         <Field label="タスク名 *">
@@ -219,8 +256,31 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
             marginTop: "1rem",
             justifyContent: isMobile ? "stretch" : "flex-end",
             flexWrap: "wrap",
+            // UX-PR3 (E): mobile では sticky bottom 化して、長いフォームを
+            // スクロールしなくても保存ボタンが常に画面下に張り付くようにする。
+            // (キャンセルは右上 × に統一済み)
+            ...(isMobile
+              ? {
+                  position: "sticky",
+                  bottom: 0,
+                  background: "white",
+                  paddingTop: "0.75rem",
+                  paddingBottom: "0.25rem",
+                  borderTop: `1px solid ${colors.border}`,
+                  zIndex: 10,
+                  marginLeft: "-1rem",
+                  marginRight: "-1rem",
+                  paddingLeft: "1rem",
+                  paddingRight: "1rem",
+                }
+              : {}),
           }}
         >
+          {/*
+            UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
+            破棄系は × / overlay クリック で一貫させる。
+            「削除」は破壊的操作なので残す。
+          */}
           {isEdit && (
             <button
               onClick={handleDelete}
@@ -237,13 +297,6 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
               削除
             </button>
           )}
-          <button
-            onClick={onClose}
-            disabled={submitting}
-            style={{ width: isMobile ? "100%" : undefined }}
-          >
-            キャンセル
-          </button>
           <button
             onClick={handleSubmit}
             disabled={submitting || !title.trim()}
