@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Link,
   Navigate,
@@ -15,10 +15,12 @@ import { FeedbackWidget } from "./components/feedback/FeedbackWidget";
 import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import { ToastProvider } from "./components/ui/Toast";
 import { EventProvider, useEvents } from "./contexts/EventContext";
+import { useIsMobile } from "./hooks/useIsMobile";
 import {
   clearPublicGranted,
   clearPublicMode,
   type PublicGranted,
+  type PublicMode,
   usePublicGranted,
   usePublicMode,
 } from "./hooks/usePublicMode";
@@ -105,6 +107,7 @@ function AppShell() {
   const publicMode = usePublicMode();
   const granted = usePublicGranted();
   const isPublic = publicMode !== null;
+  const isMobile = useIsMobile();
   if (tokenInvalid) {
     return <AdminTokenPrompt message={fetchError ?? undefined} />;
   }
@@ -113,65 +116,12 @@ function AppShell() {
       style={{
         maxWidth: 800,
         margin: "0 auto",
-        padding: 20,
+        // レスポンシブ: モバイル時は左右 padding を 12px に縮め、画面幅を有効活用。
+        padding: isMobile ? "12px 12px 20px" : 20,
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
-      <header
-        style={{
-          marginBottom: 24,
-          borderBottom: `1px solid ${colors.border}`,
-          paddingBottom: 12,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          {isPublic ? (
-            // 公開モード時はタイトルをただのテキストにし、
-            // EventSwitcher / Workspace管理 / 公開管理 などの navigation を隠す。
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
-              <span style={badgeStyle}>
-                {publicMode === "view" ? "閲覧モード" : "編集モード"}
-              </span>
-            </div>
-          ) : (
-            <Link to="/" style={titleLinkStyle}>
-              <h1 style={{ margin: 0, fontSize: 24 }}>DevHub Ops</h1>
-            </Link>
-          )}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            {isPublic ? (
-              <PublicLogoutButton />
-            ) : (
-              <>
-                <EventSwitcher />
-                <Link to="/workspaces" style={workspacesLinkStyle}>
-                  Workspace管理
-                </Link>
-                <Link to="/public-management" style={workspacesLinkStyle}>
-                  公開管理
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-        <BackLink />
-      </header>
+      <AppHeader isMobile={isMobile} isPublic={isPublic} publicMode={publicMode} />
       {isPublic && granted ? (
         // 公開モード: granted の action のみアクセス可。
         // それ以外の URL に来た場合は granted action に redirect する。
@@ -215,6 +165,208 @@ function AppShell() {
           <Route path="/public-management" element={<PublicManagementPage />} />
         </Routes>
       )}
+    </div>
+  );
+}
+
+// レスポンシブ対応 PR1: 共通ヘッダ。
+// - desktop (>=640px): 従来通り title + nav (EventSwitcher / Workspace管理 /
+//   公開管理) を横並びで表示する。
+// - mobile (<640px): title + ハンバーガーボタンのみを並べ、ナビは
+//   ドロワーシートとして slide-in する。EventSwitcher / リンク類は
+//   シート内に縦並びで配置する。
+// 公開モード時は EventSwitcher / Workspace管理 / 公開管理 を出さず、
+// ログアウトだけを出す既存仕様を維持する。
+function AppHeader({
+  isMobile,
+  isPublic,
+  publicMode,
+}: {
+  isMobile: boolean;
+  isPublic: boolean;
+  publicMode: PublicMode | null;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
+
+  // ルート遷移したらメニューは閉じる (drawer が開きっぱなしになる事故防止)
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // メニュー open 中は body スクロールを止める (responsive.css の .rb-no-scroll)
+  useEffect(() => {
+    if (!menuOpen) return;
+    document.body.classList.add("rb-no-scroll");
+    return () => {
+      document.body.classList.remove("rb-no-scroll");
+    };
+  }, [menuOpen]);
+
+  // ESC でメニューを閉じる (a11y)
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
+  const titleEl = isPublic ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 24 }}>DevHub Ops</h1>
+      <span style={badgeStyle}>
+        {publicMode === "view" ? "閲覧モード" : "編集モード"}
+      </span>
+    </div>
+  ) : (
+    <Link to="/" style={titleLinkStyle}>
+      <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 24 }}>DevHub Ops</h1>
+    </Link>
+  );
+
+  const navItems = isPublic ? (
+    <PublicLogoutButton />
+  ) : (
+    <>
+      <EventSwitcher />
+      <Link to="/workspaces" style={workspacesLinkStyle}>
+        Workspace管理
+      </Link>
+      <Link to="/public-management" style={workspacesLinkStyle}>
+        公開管理
+      </Link>
+    </>
+  );
+
+  return (
+    <header
+      style={{
+        marginBottom: isMobile ? 16 : 24,
+        borderBottom: `1px solid ${colors.border}`,
+        paddingBottom: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        {titleEl}
+        {isMobile ? (
+          <button
+            type="button"
+            aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"}
+            aria-expanded={menuOpen}
+            aria-controls="app-mobile-menu"
+            onClick={() => setMenuOpen((v) => !v)}
+            style={hamburgerBtnStyle}
+          >
+            {/* 視覚的アイコンは ASCII で代替 (絵文字依存しない) */}
+            <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>
+              {menuOpen ? "✕" : "☰"}
+            </span>
+          </button>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            {navItems}
+          </div>
+        )}
+      </div>
+      <BackLink />
+      {isMobile && menuOpen && (
+        <MobileMenuSheet onClose={() => setMenuOpen(false)}>
+          {navItems}
+        </MobileMenuSheet>
+      )}
+    </header>
+  );
+}
+
+// レスポンシブ対応 PR1: モバイル時のドロワーシート。
+// オーバーレイ + 右端から slide-in する画面の 80% 幅シートで、
+// 中に EventSwitcher / リンク類を縦並びで描画する。
+function MobileMenuSheet({
+  children,
+  onClose,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        zIndex: 9990,
+      }}
+    >
+      <aside
+        id="app-mobile-menu"
+        role="dialog"
+        aria-modal="true"
+        aria-label="メインメニュー"
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          height: "100%",
+          width: "min(320px, 85vw)",
+          background: colors.background,
+          boxShadow: "-4px 0 12px rgba(0,0,0,0.15)",
+          padding: "16px",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: 8,
+          }}
+        >
+          <button
+            type="button"
+            aria-label="メニューを閉じる"
+            onClick={onClose}
+            style={hamburgerBtnStyle}
+          >
+            <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>
+              ✕
+            </span>
+          </button>
+        </div>
+        {/* メニュー本体: 縦並びで tap target を確保 */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          {children}
+        </div>
+      </aside>
     </div>
   );
 }
@@ -300,6 +452,22 @@ const workspacesLinkStyle: React.CSSProperties = {
   borderRadius: 4,
   background: colors.background,
   whiteSpace: "nowrap",
+};
+
+// レスポンシブ対応 PR1: モバイルのハンバーガーボタン。
+// tap target 44px 以上を確保し、a11y 用にコントラストの強い枠線を入れる。
+const hamburgerBtnStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 44,
+  height: 44,
+  padding: 0,
+  background: colors.background,
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: 6,
+  color: colors.text,
+  cursor: "pointer",
 };
 
 const badgeStyle: React.CSSProperties = {
