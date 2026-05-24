@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { EventAction, EventActionType } from "../../types";
 import { ACTION_META } from "../../lib/eventTabs";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 import { breadcrumbLinkStyle } from "./styles";
 
@@ -17,6 +18,7 @@ export function ActionDetailHeader({
   action: EventAction;
   eventName: string | undefined;
 }) {
+  const isMobile = useIsMobile();
   const meta = ACTION_META[actionType as EventActionType];
   return (
     <>
@@ -51,7 +53,7 @@ export function ActionDetailHeader({
           gap: "0.5rem",
         }}
       >
-        <h2 style={{ margin: 0, fontSize: "1.3rem" }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? "1.15rem" : "1.3rem" }}>
           {meta?.icon} {meta?.label ?? actionType}
         </h2>
         {action.enabled !== 1 && (
@@ -70,10 +72,14 @@ export function ActionDetailHeader({
         <Link
           to={`/events/${eventId}/actions`}
           style={{
-            marginLeft: "auto",
+            // mobile では auto を使わず flexWrap で改行されるのに任せて
+            // 「一覧に戻る」が独立行に落ちるようにする
+            marginLeft: isMobile ? 0 : "auto",
             color: colors.primary,
             textDecoration: "none",
             fontSize: "0.875rem",
+            // mobile では行頭に来てもよいようフル幅化
+            flexBasis: isMobile ? "100%" : undefined,
           }}
         >
           ← 一覧に戻る

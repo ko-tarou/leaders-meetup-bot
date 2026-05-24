@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors, fontSize, radius, shadow, space } from "../../styles/tokens";
 import { Button } from "./Button";
 
@@ -112,6 +113,7 @@ function ConfirmDialogView({
     cancelLabel = "キャンセル",
     variant = "default",
   } = item.opts;
+  const isMobile = useIsMobile();
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -201,6 +203,9 @@ function ConfirmDialogView({
   };
   const actionsStyle: CSSProperties = {
     display: "flex",
+    // mobile では確認/キャンセルを縦並び (Confirm を上に出すと誤タップで
+    // 危険操作を発生させやすいので order を反転して Cancel を上に置く)
+    flexDirection: isMobile ? "column-reverse" : "row",
     justifyContent: "flex-end",
     gap: space.sm,
   };
@@ -234,6 +239,7 @@ function ConfirmDialogView({
           <Button
             ref={cancelBtnRef}
             variant="secondary"
+            fullWidth={isMobile}
             onClick={() => onResolve(false)}
           >
             {cancelLabel}
@@ -241,6 +247,7 @@ function ConfirmDialogView({
           <Button
             ref={confirmBtnRef}
             variant={variant === "danger" ? "danger" : "primary"}
+            fullWidth={isMobile}
             onClick={() => onResolve(true)}
           >
             {confirmLabel}

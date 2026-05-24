@@ -3,6 +3,7 @@ import { api } from "../../api";
 import type { RosterColumnType, RosterCustomColumn } from "../../types";
 import { useToast } from "../../components/ui/Toast";
 import { useConfirm } from "../../components/ui/ConfirmDialog";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 
 // 名簿管理 PR5-FE: カスタム列管理モーダル (追加 / 削除)。
@@ -29,6 +30,7 @@ export function RosterColumnsModal(
 ) {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const [cols, setCols] = useState<RosterCustomColumn[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -113,9 +115,17 @@ export function RosterColumnsModal(
     } finally { setBusy(false); }
   };
 
+  // mobile では fullscreen 化 (固定列 + 編集行が縦に長くなりがちなため)
+  const ovStyle: CSSProperties = isMobile
+    ? { ...S.ov, alignItems: "stretch" }
+    : S.ov;
+  const boxStyle: CSSProperties = isMobile
+    ? { ...S.box, width: "100%", maxWidth: "100%", maxHeight: "100vh",
+        height: "100%", borderRadius: 0 }
+    : S.box;
   return (
-    <div style={S.ov} onClick={onClose} role="presentation">
-      <div style={S.box} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="カスタム列管理">
+    <div style={ovStyle} onClick={onClose} role="presentation">
+      <div style={boxStyle} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="カスタム列管理">
         <header style={S.hd}>
           <h2 style={S.title}>カスタム列管理</h2>
           <button type="button" onClick={onClose} aria-label="閉じる" style={S.x}>×</button>

@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { colors } from "../styles/tokens";
 
 // 005-interviewer-simplify / PR #139:
@@ -42,6 +43,7 @@ type FormMeta = {
 export function InterviewerFormPage() {
   const { token } = useParams<{ token: string }>();
   const toast = useToast();
+  const isMobile = useIsMobile();
 
   const [meta, setMeta] = useState<FormMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -200,7 +202,7 @@ export function InterviewerFormPage() {
     <Layout>
       <div style={{ marginBottom: "1.5rem" }}>
         <div style={eyebrowStyle}>面接官フォーム</div>
-        <h1 style={{ margin: "0.25rem 0 0", fontSize: "1.5rem" }}>
+        <h1 style={{ margin: "0.25rem 0 0", fontSize: isMobile ? "1.25rem" : "1.5rem" }}>
           {meta.eventName}
         </h1>
         <p
@@ -277,11 +279,29 @@ export function InterviewerFormPage() {
           <WeekCalendarPicker selectedSlots={slots} onChange={setSlots} />
         </div>
 
-        <div style={actionsStyle}>
-          <span style={{ fontSize: "0.875rem", color: colors.textSecondary }}>
+        <div
+          style={{
+            ...actionsStyle,
+            // mobile では「枠選択中」表示とボタンを縦並びにし、ボタンを 100% 幅にする
+            flexDirection: isMobile ? "column" : "row",
+            alignItems: isMobile ? "stretch" : "center",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.875rem",
+              color: colors.textSecondary,
+              textAlign: isMobile ? "center" : "left",
+            }}
+          >
             {slots.length} 枠選択中
           </span>
-          <Button type="submit" disabled={submitting} isLoading={submitting}>
+          <Button
+            type="submit"
+            disabled={submitting}
+            isLoading={submitting}
+            fullWidth={isMobile}
+          >
             {submittedAt ? "上書き保存" : "保存"}
           </Button>
         </div>

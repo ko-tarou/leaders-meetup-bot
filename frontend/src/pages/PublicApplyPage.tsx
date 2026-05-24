@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { NameSplitInput } from "../components/NameSplitInput";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
+import { useIsMobile } from "../hooks/useIsMobile";
 import {
   HOW_FOUND_LABEL,
   INTERVIEW_LOCATION_LABEL,
@@ -29,6 +30,7 @@ type Availability = {
 export function PublicApplyPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [availability, setAvailability] = useState<Availability | null>(null);
@@ -165,7 +167,7 @@ export function PublicApplyPage() {
   if (!availability.enabled) {
     return (
       <Layout>
-        <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+        <h1 style={{ margin: "0 0 0.5rem", fontSize: isMobile ? "1.25rem" : "1.5rem" }}>
           {event.name} 応募フォーム
         </h1>
         <NoticeBox>現在この応募は受付停止中です。</NoticeBox>
@@ -175,7 +177,7 @@ export function PublicApplyPage() {
   if (availability.leaderAvailableSlots.length === 0) {
     return (
       <Layout>
-        <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+        <h1 style={{ margin: "0 0 0.5rem", fontSize: isMobile ? "1.25rem" : "1.5rem" }}>
           {event.name} 応募フォーム
         </h1>
         <NoticeBox>
@@ -365,7 +367,9 @@ export function PublicApplyPage() {
                 ? colors.primarySubtle
                 : colors.primary,
             color: colors.textInverse,
-            padding: "0.75rem 2rem",
+            // mobile では tap しやすく、画面下ぎりぎりまで広げる
+            padding: isMobile ? "0.875rem 1rem" : "0.75rem 2rem",
+            width: isMobile ? "100%" : undefined,
             border: "none",
             borderRadius: "0.375rem",
             fontSize: "1rem",
@@ -374,6 +378,7 @@ export function PublicApplyPage() {
                 ? "not-allowed"
                 : "pointer",
             fontWeight: "bold",
+            minHeight: 44,
           }}
         >
           {submitting ? "送信中..." : "応募を送信"}
@@ -399,12 +404,14 @@ export function PublicThanksPage() {
 }
 
 function Layout({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
   return (
     <div
       style={{
         maxWidth: 720,
         margin: "0 auto",
-        padding: "2rem 1rem",
+        // mobile では左右余白を 0.875rem に狭めて入力欄を広く見せる
+        padding: isMobile ? "1.25rem 0.875rem" : "2rem 1rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         color: colors.text,
       }}

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { setAdminToken } from "../api";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { setPublicGranted, setPublicMode } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
 
@@ -22,6 +23,7 @@ type AuthSuccess = {
 export function PublicEntryPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
 
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -100,7 +102,8 @@ export function PublicEntryPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 20,
+        // mobile では左右余白を狭めてカードを目一杯広げる
+        padding: isMobile ? 12 : 20,
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
@@ -108,7 +111,8 @@ export function PublicEntryPage() {
         onSubmit={handleSubmit}
         style={{
           background: colors.background,
-          padding: 32,
+          // mobile はカード内 padding も少し狭めて入力欄を広く確保
+          padding: isMobile ? 20 : 32,
           borderRadius: 8,
           boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
           width: "100%",
@@ -175,7 +179,7 @@ export function PublicEntryPage() {
           disabled={loading || !password}
           style={{
             width: "100%",
-            padding: "10px 16px",
+            padding: "12px 16px",
             fontSize: 14,
             background: colors.primary,
             color: colors.textInverse,
@@ -183,6 +187,8 @@ export function PublicEntryPage() {
             borderRadius: 4,
             cursor: loading || !password ? "not-allowed" : "pointer",
             opacity: loading || !password ? 0.6 : 1,
+            // tap target を確保
+            minHeight: 44,
           }}
         >
           {loading ? "認証中..." : "ログイン"}

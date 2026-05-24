@@ -4,6 +4,7 @@ import type { EventAction } from "../types";
 import { api } from "../api";
 import type { ReminderDraft } from "../components/ReminderCard";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { colors } from "../styles/tokens";
 
 // Sprint 23 PR-A: weekly_reminder アクションの一覧画面。
@@ -80,6 +81,7 @@ export function WeeklyReminderListPage({
 }) {
   const navigate = useNavigate();
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reminders = parseReminders(action.config);
@@ -142,7 +144,15 @@ export function WeeklyReminderListPage({
 
   return (
     <div>
-      <div style={s.headerRow}>
+      <div
+        style={{
+          ...s.headerRow,
+          // mobile では intro と「新規追加」ボタンを縦並びにして
+          // ボタンが画面外にはみ出さないようにする
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "flex-start",
+        }}
+      >
         <p style={s.intro}>
           指定した曜日・時刻に Slack へ自動でメッセージを送信します。
           実際の送信は 5 分 cron 周期のため、指定時刻から数分以内のずれが発生します。
@@ -151,7 +161,7 @@ export function WeeklyReminderListPage({
           type="button"
           onClick={handleAdd}
           disabled={busy === "__add__"}
-          style={s.primaryBtn}
+          style={{ ...s.primaryBtn, width: isMobile ? "100%" : undefined, minHeight: 40 }}
         >
           + 新規追加
         </button>

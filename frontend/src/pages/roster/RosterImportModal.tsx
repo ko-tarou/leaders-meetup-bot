@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../../api";
 import type { RosterImportCandidate } from "../../types";
 import { useToast } from "../../components/ui/Toast";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 
 // 名簿管理 PR6-FE: 取り込みモーダル。
@@ -17,6 +18,7 @@ export function RosterImportModal({
   onClose: () => void; onImported: () => void;
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
   const [cands, setCands] = useState<RosterImportCandidate[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -85,9 +87,18 @@ export function RosterImportModal({
     if (failed.length === 0) onClose();
   };
 
+  // mobile では全画面 modal にして tap target を最大化する
+  const ovStyle: CSSProperties = isMobile
+    ? { ...S.ov, alignItems: "stretch" }
+    : S.ov;
+  const boxStyle: CSSProperties = isMobile
+    ? { ...S.box, width: "100%", maxWidth: "100%", maxHeight: "100vh",
+        borderRadius: 0, height: "100%" }
+    : S.box;
+
   return (
-    <div style={S.ov} onClick={() => !busy && onClose()} role="presentation">
-      <div style={S.box} onClick={(e) => e.stopPropagation()}
+    <div style={ovStyle} onClick={() => !busy && onClose()} role="presentation">
+      <div style={boxStyle} onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-label="参加届を提出した人から取り込み">
         <header style={S.hd}>
           <h2 style={S.title}>参加届を提出した人から取り込み</h2>
@@ -103,6 +114,9 @@ export function RosterImportModal({
               (まだ提出がない / すでに全員取り込み済み)
             </div>
           ) : (
+            // mobile では 5 列テーブルが横スクロールでも読みづらいため、
+            // ラッパで overflow-x:auto を付与して指でスワイプ可能にする
+            <div style={{ overflowX: "auto" }}>
             <table style={S.table}>
               <thead><tr>
                 <th style={S.th}>
@@ -134,6 +148,7 @@ export function RosterImportModal({
                 ))}
               </tbody>
             </table>
+            </div>
           )}
           {progress && (
             <div style={S.progress} role="status" aria-live="polite">
@@ -149,16 +164,39 @@ export function RosterImportModal({
             </div>
           )}
         </div>
-        <footer style={S.ft}>
+        <footer
+          style={{
+            ...S.ft,
+            // mobile はボタンの折り返しを許可してタップ領域を広く確保する
+            flexWrap: isMobile ? "wrap" : "nowrap",
+          }}
+        >
           <span style={S.muted}>
             {cands && cands.length > 0 ? `${picked.size} / ${cands.length} 件選択` : ""}
           </span>
-          <span style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} disabled={busy} style={S.cancel}>
+          {!isMobile && <span style={{ flex: 1 }} />}
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              ...S.cancel,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              minHeight: 40,
+            }}
+          >
             キャンセル
           </button>
-          <button type="button" onClick={doImport}
-            disabled={busy || picked.size === 0} style={S.primary}>
+          <button
+            type="button"
+            onClick={doImport}
+            disabled={busy || picked.size === 0}
+            style={{
+              ...S.primary,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              minHeight: 40,
+            }}
+          >
             {busy ? "取り込み中..." : `選択を追加 (${picked.size})`}
           </button>
         </footer>

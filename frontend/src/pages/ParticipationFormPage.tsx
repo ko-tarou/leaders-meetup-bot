@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { NameSplitInput } from "../components/NameSplitInput";
+import { useIsMobile } from "../hooks/useIsMobile";
 import type {
   ParticipationActivity,
   ParticipationDevRole,
@@ -48,6 +49,7 @@ export function ParticipationFormPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("t") ?? "";
+  const isMobile = useIsMobile();
 
   const [eventName, setEventName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -223,7 +225,7 @@ export function ParticipationFormPage() {
 
   return (
     <Layout>
-      <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+      <h1 style={{ margin: "0 0 0.5rem", fontSize: isMobile ? "1.25rem" : "1.5rem" }}>
         {eventName} 参加届
       </h1>
       <p style={{ color: colors.textSecondary, marginBottom: "1.5rem" }}>
@@ -409,7 +411,9 @@ export function ParticipationFormPage() {
                 ? colors.primarySubtle
                 : colors.primary,
             color: colors.textInverse,
-            padding: "0.75rem 2rem",
+            // mobile では tap しやすく、画面下まで広げる
+            padding: isMobile ? "0.875rem 1rem" : "0.75rem 2rem",
+            width: isMobile ? "100%" : undefined,
             border: "none",
             borderRadius: "0.375rem",
             fontSize: "1rem",
@@ -418,6 +422,7 @@ export function ParticipationFormPage() {
                 ? "not-allowed"
                 : "pointer",
             fontWeight: "bold",
+            minHeight: 44,
           }}
         >
           {submitting ? "送信中..." : "参加届を送信"}
@@ -460,12 +465,14 @@ function SelectField<T extends string>({
 }
 
 function Layout({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
   return (
     <div
       style={{
         maxWidth: 720,
         margin: "0 auto",
-        padding: "2rem 1rem",
+        // mobile では左右余白を狭めて入力欄を広く確保する
+        padding: isMobile ? "1.25rem 0.875rem" : "2rem 1rem",
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
         color: colors.text,
       }}

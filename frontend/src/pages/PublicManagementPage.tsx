@@ -4,6 +4,7 @@ import type { Event, EventAction, EventActionType } from "../types";
 import { useEvents } from "../contexts/EventContext";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { ACTION_META } from "../lib/eventTabs";
 import { colors } from "../styles/tokens";
 
@@ -34,6 +35,7 @@ export function PublicManagementPage() {
   const { events, loading: eventsLoading } = useEvents();
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<ActionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -217,6 +219,69 @@ export function PublicManagementPage() {
         <div style={{ color: colors.textSecondary, fontSize: 14 }}>
           公開可能な action がありません。
         </div>
+      ) : isMobile ? (
+        // mobile: 4 列テーブルは情報密度が高すぎてスクロールしても URL が読みづらい。
+        // 1 row = 1 card に再構成し、閲覧/編集 URL を縦に並べる。
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {rows.map((row) => {
+            const meta = ACTION_META[row.action.actionType as EventActionType];
+            return (
+              <div
+                key={row.action.id}
+                style={{
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  padding: 12,
+                  background: colors.background,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: colors.textSecondary,
+                    marginBottom: 4,
+                  }}
+                >
+                  {row.event.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: colors.text,
+                    marginBottom: 10,
+                  }}
+                >
+                  {meta?.icon ?? ""} {meta?.label ?? row.action.actionType}
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={mobileCardLabel}>閲覧 URL</div>
+                  <TokenCell
+                    url={row.tokens?.viewUrl ?? null}
+                    loading={row.loading}
+                    onCopy={() =>
+                      row.tokens?.viewUrl && copyToClipboard(row.tokens.viewUrl)
+                    }
+                    onGenerate={() => handleGenerate(row, "view")}
+                    onDelete={() => handleDelete(row, "view")}
+                  />
+                </div>
+                <div>
+                  <div style={mobileCardLabel}>編集 URL</div>
+                  <TokenCell
+                    url={row.tokens?.editUrl ?? null}
+                    loading={row.loading}
+                    onCopy={() =>
+                      row.tokens?.editUrl && copyToClipboard(row.tokens.editUrl)
+                    }
+                    onGenerate={() => handleGenerate(row, "edit")}
+                    onDelete={() => handleDelete(row, "edit")}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={tableStyle}>
@@ -382,4 +447,13 @@ const smallPrimaryButton: React.CSSProperties = {
   border: "none",
   borderRadius: 4,
   cursor: "pointer",
+};
+
+const mobileCardLabel: React.CSSProperties = {
+  fontSize: 11,
+  color: colors.textSecondary,
+  fontWeight: 500,
+  marginBottom: 4,
+  textTransform: "uppercase",
+  letterSpacing: "0.05em",
 };
