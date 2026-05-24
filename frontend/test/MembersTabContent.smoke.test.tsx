@@ -127,4 +127,30 @@ describe("MembersTabContent smoke (members-tab-integration)", () => {
       expect(screen.getByText("ロール一覧サマリ")).toBeInTheDocument();
     });
   });
+
+  // fix/members-tab-role-features-restored:
+  // 「ロール」level-1 タブ配下に 5 つの level-2 サブタブ (サマリ / ロール /
+  // メンバー / 同期 / 設定) が存在し、それぞれの本体コンポーネントへ切り替わること。
+  it("「ロール」配下の level-2 サブタブが 5 つ揃って render される", async () => {
+    mount([makeAction("member_roster"), makeAction("role_management")]);
+    await waitFor(() => {
+      expect(screen.queryByText(/初期化中/)).toBeNull();
+    });
+
+    // level-1 「ロール」へ切替
+    await userEvent.click(screen.getByRole("button", { name: "ロール" }));
+
+    // level-2 サブタブ 5 つ全部の存在を確認
+    const labels = ["サマリ", "ロール", "メンバー", "同期", "設定"];
+    for (const label of labels) {
+      // 「ロール」は level-1 にも同じ label があるので role=tab で絞り込む
+      const tabs = screen.getAllByRole("tab", { name: label });
+      expect(tabs.length).toBeGreaterThan(0);
+    }
+
+    // 初期は "サマリ" (= RoleMainTab) が active
+    await waitFor(() => {
+      expect(screen.getByText("ロール一覧サマリ")).toBeInTheDocument();
+    });
+  });
 });
