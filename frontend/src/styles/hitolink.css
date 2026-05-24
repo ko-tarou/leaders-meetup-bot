@@ -1,0 +1,576 @@
+/* =============================================================
+ * HitoLink Design System v0.2 — leaders-meetup-bot 試験適用 (revert 可)
+ *
+ * 出典: ~/Desktop/Org-HitoLink/HitoLink-DesignSystem/tokens/globals.css
+ *
+ * 翻訳ルール (leaders-meetup-bot は Tailwind 非導入のため):
+ *   - `@import "tailwindcss";` 削除
+ *   - `@theme { ... }` を `:root { ... }` に書き換え
+ *   - `--font-sans` の `var(--next-font-en)` 等は Google Fonts 名に直接展開
+ *     (Inter / Noto Sans JP / Zen Kaku Gothic New を frontend/index.html で読み込む)
+ *   - 残りの :root / .btn-* / .anim-* / .skel / .rule-* / .icon-btn-* /
+ *     .material-symbols-rounded / .rdp-* はそのまま
+ *
+ * リバート手順:
+ *   1. frontend/src/main.tsx の `import "./styles/hitolink.css";` を削除
+ *   2. このファイル自体を削除
+ *   3. frontend/index.html の Google Fonts <link> ブロックを削除
+ *   4. frontend/src/styles/tokens.ts 末尾の `hitoColors` export を削除
+ *   5. 各コンポーネントの `className="btn btn-primary"` 等を削除
+ *      (インライン style は併存しているので、クラスを消すだけで元の見た目に戻る)
+ * ============================================================= */
+
+/* =============================================================
+ * Hitorink Design Tokens (Platform)
+ * Tailwind v4 の `@theme {}` ブロックを純 CSS の `:root {}` に翻訳。
+ * ============================================================= */
+:root {
+  /* ── Color: Editorial paper palette
+   *    Background は純白ではなく "warm paper"。
+   *    Ink は純黒ではなく深い墨色。
+   *    どちらも Hitorink の "人肌のあるモダン" を担保する基本ニュートラル。 */
+  --color-paper: #faf7f2;
+  --color-paper-2: #f3eee2;
+  --color-surface: #ffffff;
+  --color-ink-1: #15130f;
+  --color-ink-2: #2a2620;
+  --color-ink-3: #5a554b;
+  --color-ink-4: #8c8678;
+  --color-ink-5: #b9b3a4;
+  --color-line-1: #ece6d4;
+  --color-line-2: #d8cfba;
+
+  /* Brand */
+  --color-primary: #2d3a6b;       /* Hitorink ink-blue: B2B 信頼感 + 人肌の藍 */
+  --color-primary-hover: #1f2a52;
+  --color-primary-soft: #e6e9f3;
+  --color-accent: #e5614a;        /* warm 暖色アクセント: 人肌側の温度 */
+  --color-accent-hover: #cc4a35;
+  --color-accent-soft: #fdebe5;
+  --color-danger: #b9342a;
+  --color-danger-soft: #f8e2dd;
+
+  /* ── Radius: 8px standard をやや膨らませた 10/14/20 で人肌寄せ */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+
+  /* ── Shadow: 二段重ね (近距離 + 遠距離) でクラフト感を出す
+   *    AI 感の正体の一つは「shadow デフォルト一段」。 */
+  --shadow-card:
+    0 1px 1.5px rgba(21, 19, 15, 0.04),
+    0 8px 24px -10px rgba(21, 19, 15, 0.08);
+  --shadow-pop:
+    0 2px 4px -2px rgba(21, 19, 15, 0.08),
+    0 24px 48px -16px rgba(21, 19, 15, 0.16);
+  --shadow-press:
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 1px 2px rgba(45, 58, 107, 0.40);
+  --shadow-ring-primary: 0 0 0 4px rgba(45, 58, 107, 0.16);
+  --shadow-ring-accent: 0 0 0 4px rgba(229, 97, 74, 0.18);
+  --shadow-ring-danger: 0 0 0 4px rgba(185, 52, 42, 0.18);
+
+  /* ── Typography stacks
+   *    元の DS では next/font が CSS 変数を注入していたが、本プロジェクトは
+   *    Vite + 通常 React なので Google Fonts 名を直接展開する。
+   *    順序: 英文(Inter) → 和文(Noto Sans JP) → システムフォールバック。 */
+  --font-sans:
+    'Inter',
+    'Noto Sans JP',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans",
+    "Yu Gothic",
+    "Meiryo",
+    sans-serif;
+  --font-display:
+    'Zen Kaku Gothic New',
+    'Noto Sans JP',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Hiragino Kaku Gothic ProN",
+    "Yu Gothic",
+    sans-serif;
+  --font-mono:
+    ui-monospace,
+    SFMono-Regular,
+    "JetBrains Mono",
+    "Roboto Mono",
+    Menlo,
+    monospace;
+
+  color-scheme: light;
+
+  /* Motion tokens (Tailwind の token にしないのは utility 化が不要なため) */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);     /* default decelerate */
+  --ease-emphasized: cubic-bezier(0.32, 0.72, 0, 1);    /* spring-ish for reveal */
+  --ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  --dur-quick: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 420ms;
+  --dur-page: 600ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-quick: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+    --dur-page: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* =============================================================
+ * Base
+ * ─────────────────────────────────────────────────────────────
+ * 元 DS では html/body にフォントや背景を強制適用していたが、
+ * 既存のインラインスタイル (App.tsx の fontFamily 指定など) との
+ * 衝突を避け、リバート性を担保するため body/html へのプロパティ強制は
+ * しない。フォントを使いたい要素は `var(--font-sans)` を style で指定する。
+ *
+ * ただし selection / focus / ::selection だけは安全に上書きできる。
+ * ============================================================= */
+
+/* Selection */
+::selection {
+  background: rgba(229, 97, 74, 0.22);
+  color: var(--color-ink-1);
+}
+
+/* =============================================================
+ * Utilities (Hitorink platform helpers)
+ * ============================================================= */
+
+/* タビュラ数字: カウンターやメトリクスは必ずこれを使う */
+.tabular {
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0;
+}
+
+/* 和文ベースライン補正用 (display 用に letter-spacing をやや締める) */
+.text-display {
+  font-family: var(--font-display);
+  font-feature-settings: "palt" 1;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+/* 罫: editorial 的な薄い区切り線 */
+.rule-fine {
+  background: linear-gradient(to right,
+    transparent,
+    var(--color-line-2) 12%,
+    var(--color-line-2) 88%,
+    transparent);
+  height: 1px;
+}
+
+/* Card surface: 紙の手触り */
+.surface-paper {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line-1);
+  box-shadow: var(--shadow-card);
+}
+
+/* =============================================================
+ * Animations
+ * ============================================================= */
+/* reveal-up: 控えめな上昇 (内容ブロックの初期表示用) */
+@keyframes hl-reveal-up {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.985); filter: blur(4px); }
+  60%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.anim-reveal-up {
+  animation: hl-reveal-up var(--dur-slow) var(--ease-emphasized) both;
+}
+
+/* pop-in: ダイアログ・モーダル・カード系の登場用
+ *   easeOutBack(1.56) で軽くオーバーシュートしてから settle。
+ *   「ぽふっ」と着地する spring 感を出す。 */
+@keyframes hl-pop-in {
+  0%   { opacity: 0; transform: translateY(18px) scale(0.86); filter: blur(6px); }
+  55%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.anim-pop-in {
+  animation: hl-pop-in 560ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* pop-down: 上から落ちる toast / 通知バッジ用 */
+@keyframes hl-pop-down {
+  0%   { opacity: 0; transform: translateY(-18px) scale(0.88); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.anim-pop-down {
+  animation: hl-pop-down 460ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes hl-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.anim-fade-in {
+  animation: hl-fade-in var(--dur-base) var(--ease-standard) both;
+}
+
+@keyframes hl-shimmer {
+  0%, 100% { opacity: 0.45; transform: scaleX(0.95); }
+  50%      { opacity: 1;    transform: scaleX(1.0); }
+}
+.anim-shimmer {
+  transform-origin: left center;
+  animation: hl-shimmer 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes hl-pulse-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50%      { opacity: 1;    transform: translateY(-1.5px); }
+}
+.anim-dot {
+  animation: hl-pulse-dot 1.2s var(--ease-in-out) infinite;
+}
+
+/* ── Skeleton (shimmer) */
+@keyframes hl-skel-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skel {
+  background: linear-gradient(
+    90deg,
+    var(--color-paper-2) 0%,
+    var(--color-line-1) 50%,
+    var(--color-paper-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: hl-skel-shimmer 1.6s linear infinite;
+  border-radius: 3px;
+}
+
+/* ── Icon state-change primitives */
+@keyframes hl-icon-pop {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-90deg); }
+  60%  { opacity: 1; transform: scale(1.12) rotate(6deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+.anim-icon-pop {
+  animation: hl-icon-pop 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes hl-icon-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.5px); }
+}
+.anim-icon-bob {
+  animation: hl-icon-bob 1.6s ease-in-out infinite;
+}
+
+.icon-morph {
+  transition:
+    opacity 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* =============================================================
+ * Buttons (Hitorink platform — 意味的バリアント)
+ * ─────────────────────────────────────────────────────────────
+ *   .btn-primary  ── 主アクション (ink-blue)。送信・確定・前進
+ *   .btn-accent   ── 暖色アクセント (warm orange)。遊び・励まし系
+ *   .btn-danger   ── 破壊的 (red)。削除・リセット・離脱
+ *   .btn-ghost    ── 副次・取消 (transparent)。Cancel・代替 option
+ * ============================================================= */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  height: 3rem; /* 48px */
+  padding-inline: 1.5rem;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transform-origin: center;
+  /* shine sweep ::after を内側にクリップするため */
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  /* 既存のインラインで border が付いていることを想定し、明示的に消す。
+     リバート性: クラスを外せばインライン側に戻る。 */
+  border: 1px solid transparent;
+  transition:
+    transform var(--dur-base) var(--ease-standard),
+    box-shadow var(--dur-slow) var(--ease-standard),
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard),
+    opacity var(--dur-quick) var(--ease-standard);
+}
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+@media (hover: hover) {
+  .btn:not(:disabled):hover {
+    transform: translateY(-3px) scale(1.035);
+  }
+}
+.btn:not(:disabled):active {
+  transform: translateY(1px) scale(0.98);
+  transition-duration: var(--dur-quick);
+}
+.btn:focus-visible {
+  outline: none;
+}
+.btn > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Shine sweep (115deg) — primary / accent / danger のみ */
+.btn-primary::after,
+.btn-accent::after,
+.btn-danger::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 0%,
+    transparent 38%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 62%,
+    transparent 100%
+  );
+  transform: translateX(-110%);
+  transition: transform 0.9s var(--ease-standard);
+}
+@media (hover: hover) {
+  .btn-primary:not(:disabled):hover::after,
+  .btn-accent:not(:disabled):hover::after,
+  .btn-danger:not(:disabled):hover::after {
+    transform: translateX(110%);
+  }
+}
+
+/* Sizes */
+.btn-sm {
+  height: 2.25rem; /* 36px */
+  padding-inline: 1rem;
+  font-size: 13px;
+  border-radius: var(--radius-md);
+}
+
+/* ── primary (ink-blue) */
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-paper);
+  box-shadow: var(--shadow-press);
+}
+@media (hover: hover) {
+  .btn-primary:not(:disabled):hover {
+    background: var(--color-primary-hover);
+    box-shadow:
+      0 4px 8px -2px rgba(45, 58, 107, 0.28),
+      0 14px 32px -6px rgba(45, 58, 107, 0.45),
+      0 0 24px 2px rgba(45, 58, 107, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+.btn-primary:not(:disabled):active {
+  background: var(--color-primary-hover);
+  box-shadow: var(--shadow-press);
+}
+.btn-primary:focus-visible {
+  box-shadow: var(--shadow-ring-primary), var(--shadow-press);
+}
+.btn-primary:disabled {
+  background: var(--color-ink-5);
+  color: var(--color-paper);
+  box-shadow: none;
+}
+
+/* ── accent (warm orange) */
+.btn-accent {
+  background: var(--color-accent);
+  color: var(--color-paper);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(229, 97, 74, 0.40);
+}
+@media (hover: hover) {
+  .btn-accent:not(:disabled):hover {
+    background: var(--color-accent-hover);
+    box-shadow:
+      0 4px 8px -2px rgba(229, 97, 74, 0.30),
+      0 14px 32px -6px rgba(229, 97, 74, 0.48),
+      0 0 24px 2px rgba(229, 97, 74, 0.26),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+}
+.btn-accent:not(:disabled):active {
+  background: var(--color-accent-hover);
+}
+.btn-accent:focus-visible {
+  box-shadow: var(--shadow-ring-accent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* ── danger (red) */
+.btn-danger {
+  background: var(--color-danger);
+  color: var(--color-paper);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 2px rgba(185, 52, 42, 0.40);
+}
+@media (hover: hover) {
+  .btn-danger:not(:disabled):hover {
+    background: #9c2a22;
+    box-shadow:
+      0 4px 8px -2px rgba(185, 52, 42, 0.30),
+      0 14px 32px -6px rgba(185, 52, 42, 0.48),
+      0 0 24px 2px rgba(185, 52, 42, 0.26),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  }
+}
+.btn-danger:not(:disabled):active {
+  background: #82221b;
+}
+.btn-danger:focus-visible {
+  box-shadow: var(--shadow-ring-danger),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* ── ghost (transparent → subtle paper hover) */
+.btn-ghost {
+  background: transparent;
+  color: var(--color-ink-3);
+  border: 1px solid var(--color-line-2);
+}
+@media (hover: hover) {
+  .btn-ghost:not(:disabled):hover {
+    background: var(--color-paper-2);
+    color: var(--color-ink-1);
+    border-color: var(--color-line-2);
+    box-shadow:
+      0 8px 24px -6px rgba(21, 19, 15, 0.14),
+      0 0 16px 0 rgba(21, 19, 15, 0.06);
+  }
+}
+.btn-ghost:not(:disabled):active {
+  background: var(--color-paper-2);
+}
+.btn-ghost:focus-visible {
+  box-shadow: var(--shadow-ring-primary);
+}
+
+/* =============================================================
+ * Icon Button (Hitorink platform)
+ * ============================================================= */
+.icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;  /* 36px */
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--color-ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  overflow: hidden;
+  transition:
+    color var(--dur-quick) var(--ease-standard),
+    background-color var(--dur-quick) var(--ease-standard),
+    border-color var(--dur-quick) var(--ease-standard),
+    transform var(--dur-base) var(--ease-standard);
+}
+.icon-btn > * {
+  position: relative;
+  z-index: 1;
+}
+@media (hover: hover) {
+  .icon-btn:hover {
+    transform: scale(1.06);
+  }
+}
+.icon-btn:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-quick);
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-ring-primary);
+}
+
+.icon-btn-sm {
+  width: 1.75rem;  /* 28px */
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+}
+
+/* icon-btn-ghost: シンプルな bg fade */
+@media (hover: hover) {
+  .icon-btn-ghost:hover {
+    background: var(--color-paper-2);
+    color: var(--color-ink-1);
+  }
+}
+
+/* icon-btn-danger */
+@media (hover: hover) {
+  .icon-btn-danger:hover {
+    color: var(--color-paper);
+    background: var(--color-danger);
+  }
+}
+
+/* === Iconography: Material Symbols Rounded ============================= */
+.material-symbols-rounded {
+  font-family: "Material Symbols Rounded", system-ui, sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 1.5rem;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.material-symbols-rounded.is-filled { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+.material-symbols-rounded.is-bold   { font-variation-settings: 'FILL' 0, 'wght' 600, 'GRAD' 0, 'opsz' 24; }
+.material-symbols-rounded.size-18   { font-size: 1.125rem; }
+.material-symbols-rounded.size-20   { font-size: 1.25rem; }
+.material-symbols-rounded.size-24   { font-size: 1.5rem; }
+.material-symbols-rounded.size-28   { font-size: 1.75rem; }
+.material-symbols-rounded.size-32   { font-size: 2rem; }

@@ -65,9 +65,11 @@ export function AdminTokenPrompt({ message }: { message?: string }) {
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
           }}
         />
+        {/* HitoLink DS: ログインボタン = primary。インライン style は併存。 */}
         <button
           type="submit"
           disabled={!value.trim()}
+          className="btn btn-primary btn-sm"
           style={{
             marginTop: 12,
             padding: "10px 18px",

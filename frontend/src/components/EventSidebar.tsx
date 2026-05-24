@@ -49,6 +49,9 @@ export function EventSidebar() {
         top: 0,
         borderRight: `1px solid ${colors.border}`,
         background: colors.surface,
+        // HitoLink DS: sidebar に 2 段重ね card shadow を載せて、main column との
+        // 深さ感を作る (元は border のみ)。
+        boxShadow: "var(--shadow-card)",
         display: "flex",
         flexDirection: "column",
         // スクロールは中の list 部に任せる (header / footer は固定)
@@ -208,9 +211,11 @@ export function EventSidebarContent({
           background: isDesktopVariant ? colors.surface : "transparent",
         }}
       >
+        {/* HitoLink DS: 「イベント作成」は accent (warm orange) で励まし系 CTA。 */}
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
+          className="btn btn-accent btn-sm"
           style={createButtonStyle(isMobile)}
         >
           ＋ イベント作成
@@ -356,7 +361,9 @@ function CreateEventModal({
       }}
       onClick={onClose}
     >
+      {/* HitoLink DS: anim-pop-in でモーダルを spring 着地させる。 */}
       <div
+        className="anim-pop-in"
         style={{
           background: "white",
           padding: isMobile ? "1rem" : "1.5rem",
@@ -428,10 +435,12 @@ function CreateEventModal({
             justifyContent: "flex-end",
           }}
         >
+          {/* HitoLink DS: cancel = ghost、create = primary。 */}
           <button
             type="button"
             onClick={onClose}
             disabled={submitting}
+            className="btn btn-ghost btn-sm"
             style={{
               padding: "0.5rem 1rem",
               border: `1px solid ${colors.borderStrong}`,
@@ -447,6 +456,7 @@ function CreateEventModal({
             type="button"
             onClick={handleCreate}
             disabled={submitting}
+            className="btn btn-primary btn-sm"
             style={{
               padding: "0.5rem 1rem",
               border: "none",

@@ -139,7 +139,10 @@ export function RosterDetailPanel({
     : S.panel;
   return (
     <div style={S.overlay} onClick={onClose} role="presentation">
+      {/* HitoLink DS: 右スライドインパネルは fade-in だけにする (pop-in の
+          translateY/scale はサイドパネルの "右に sticky" 感を壊すため避ける)。 */}
       <aside style={panelStyle} onClick={(e) => e.stopPropagation()}
+        className="anim-fade-in"
         role="dialog" aria-label={`${member.name} の編集`}>
         <header style={S.header}>
           <h2 style={S.title}>{member.name}</h2>
@@ -219,10 +222,12 @@ export function RosterDetailPanel({
               : {}),
           }}
         >
+          {/* HitoLink DS: 退会 = danger、保存 = primary。 */}
           <button
             type="button"
             onClick={remove}
             disabled={saving}
+            className="btn btn-danger btn-sm"
             style={{
               ...S.danger,
               minHeight: 40,
@@ -241,6 +246,7 @@ export function RosterDetailPanel({
             type="button"
             onClick={save}
             disabled={saving}
+            className="btn btn-primary btn-sm"
             style={{
               ...S.save,
               minHeight: 40,
