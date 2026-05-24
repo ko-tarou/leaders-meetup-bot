@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { api } from "../../api";
 import type { EventAction, ParticipationForm } from "../../types";
 import { Button } from "../ui/Button";
+import { EmptyState } from "../EmptyState";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
@@ -217,7 +218,15 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
       )}
 
       {forms.length === 0 ? (
-        <div style={s.empty}>まだ参加届の提出がありません。</div>
+        <EmptyState
+          icon="📝"
+          title="まだ参加届の提出がありません"
+          description="上の参加届フォーム URL を合格者・関係者に共有してください。提出されるとここに表示されます。"
+          primaryAction={{
+            label: "参加届 URL をコピー",
+            onClick: handleCopy,
+          }}
+        />
       ) : (
         <div style={s.list}>
           {forms.map((f) => {

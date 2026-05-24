@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { EventAction, EventActionType } from "../types";
 import { api } from "../api";
 import { ACTION_META } from "../lib/eventTabs";
+import { EmptyState } from "./EmptyState";
 import { useToast } from "./ui/Toast";
 import { colors } from "../styles/tokens";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -58,19 +59,19 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
       </div>
 
       {actions.length === 0 ? (
-        <div
-          style={{
-            padding: "3rem 1rem",
-            textAlign: "center",
-            color: colors.textSecondary,
-            border: `1px dashed ${colors.borderStrong}`,
-            borderRadius: "0.5rem",
-          }}
-        >
-          アクションが登録されていません。
-          <br />
-          「+ 新規追加」から追加してください。
-        </div>
+        <EmptyState
+          icon="📦"
+          title="アクションが登録されていません"
+          description="日程調整・タスク管理・名簿管理など、このイベントで使いたい機能を追加してください。"
+          primaryAction={
+            availableTypes.length > 0
+              ? {
+                  label: "＋ 新規追加",
+                  onClick: () => setShowAdd(true),
+                }
+              : undefined
+          }
+        />
       ) : (
         <div style={{ display: "grid", gap: "0.75rem" }}>
           {actions.map((a) => {

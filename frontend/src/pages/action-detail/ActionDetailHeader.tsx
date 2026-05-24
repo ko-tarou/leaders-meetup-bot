@@ -2,11 +2,14 @@ import { Link } from "react-router-dom";
 import type { EventAction, EventActionType } from "../../types";
 import { ACTION_META } from "../../lib/eventTabs";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { colors } from "../../styles/tokens";
-import { breadcrumbLinkStyle } from "./styles";
 
 // Phase4-3: ActionDetailPage のヘッダ部 (パンくず / タイトル / 無効バッジ /
 // 一覧に戻るリンク / 説明文) を純抽出。マークアップ・スタイルすべて不変。
+//
+// UX 改善 Phase 1 - PR2 (B): 旧インライン breadcrumb を共通 <Breadcrumbs />
+// に置き換え。aria-label / mobile 省略表示などのアクセシビリティを底上げする。
 export function ActionDetailHeader({
   eventId,
   actionType,
@@ -22,27 +25,16 @@ export function ActionDetailHeader({
   const meta = ACTION_META[actionType as EventActionType];
   return (
     <>
-      {/* パンくずリスト */}
-      <div
-        style={{
-          fontSize: "0.875rem",
-          marginBottom: "0.5rem",
-          color: colors.textSecondary,
-        }}
-      >
-        <Link to="/" style={breadcrumbLinkStyle}>
-          ホーム
-        </Link>
-        {" › "}
-        <Link
-          to={`/events/${eventId}/actions`}
-          style={breadcrumbLinkStyle}
-        >
-          {eventName ?? "イベント"}
-        </Link>
-        {" › "}
-        <span>{meta?.label ?? actionType}</span>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: "ホーム", href: "/" },
+          {
+            label: eventName ?? "イベント",
+            href: `/events/${eventId}/actions`,
+          },
+          { label: meta?.label ?? actionType },
+        ]}
+      />
 
       <div
         style={{
