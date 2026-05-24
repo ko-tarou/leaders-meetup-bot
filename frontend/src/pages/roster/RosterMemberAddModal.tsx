@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "../../api";
 import type { RosterMember } from "../../types";
 import { useToast } from "../../components/ui/Toast";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 
 // 名簿管理 PR6-FE: メンバー手動追加モーダル。
@@ -35,6 +36,7 @@ export function RosterMemberAddModal({
   onCreated: (member: RosterMember) => void;
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
 
@@ -73,9 +75,18 @@ export function RosterMemberAddModal({
     } finally { setBusy(false); }
   };
 
+  // mobile では全画面 modal にし、フォーム入力欄を画面端まで広げる
+  const ovStyle: CSSProperties = isMobile
+    ? { ...S.ov, alignItems: "stretch" }
+    : S.ov;
+  const boxStyle: CSSProperties = isMobile
+    ? { ...S.box, width: "100%", maxWidth: "100%", maxHeight: "100vh",
+        height: "100%", borderRadius: 0 }
+    : S.box;
+
   return (
-    <div style={S.ov} onClick={() => !busy && onClose()} role="presentation">
-      <div style={S.box} onClick={(e) => e.stopPropagation()}
+    <div style={ovStyle} onClick={() => !busy && onClose()} role="presentation">
+      <div style={boxStyle} onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-label="メンバー追加">
         <header style={S.hd}>
           <h2 style={S.title}>メンバーを追加</h2>
@@ -93,11 +104,29 @@ export function RosterMemberAddModal({
           ))}
         </div>
         <footer style={S.ft}>
-          <span style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} disabled={busy} style={S.cancel}>
+          {!isMobile && <span style={{ flex: 1 }} />}
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            style={{
+              ...S.cancel,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              minHeight: 40,
+            }}
+          >
             キャンセル
           </button>
-          <button type="button" onClick={submit} disabled={busy} style={S.primary}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            style={{
+              ...S.primary,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              minHeight: 40,
+            }}
+          >
             {busy ? "追加中..." : "追加"}
           </button>
         </footer>

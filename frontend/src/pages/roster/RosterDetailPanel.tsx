@@ -3,6 +3,7 @@ import { api } from "../../api";
 import type { RosterCustomColumn, RosterMember, SlackRole } from "../../types";
 import { useToast } from "../../components/ui/Toast";
 import { useConfirm } from "../../components/ui/ConfirmDialog";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 import {
   fromInputValue, parseOptions, toInputValue,
@@ -31,6 +32,7 @@ export function RosterDetailPanel({
 }) {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const [draft, setDraft] = useState<RosterMember>(member);
   const [roles, setRoles] = useState<SlackRole[] | null>(null);
   const [roleIds, setRoleIds] = useState<Set<string>>(new Set());
@@ -131,9 +133,13 @@ export function RosterDetailPanel({
     }
   };
 
+  // mobile では右側 slide-in panel ではなく全画面 modal にする (片手操作前提)
+  const panelStyle: CSSProperties = isMobile
+    ? { ...S.panel, width: "100%" }
+    : S.panel;
   return (
     <div style={S.overlay} onClick={onClose} role="presentation">
-      <aside style={S.panel} onClick={(e) => e.stopPropagation()}
+      <aside style={panelStyle} onClick={(e) => e.stopPropagation()}
         role="dialog" aria-label={`${member.name} の編集`}>
         <header style={S.header}>
           <h2 style={S.title}>{member.name}</h2>
@@ -194,13 +200,49 @@ export function RosterDetailPanel({
             </fieldset>
           )}
         </div>
-        <footer style={S.footer}>
-          <button type="button" onClick={remove} disabled={saving}
-            style={S.danger}>退会させる</button>
-          <span style={{ flex: 1 }} />
-          <button type="button" onClick={onClose} disabled={saving}
-            style={S.cancel}>キャンセル</button>
-          <button type="button" onClick={save} disabled={saving} style={S.save}>
+        <footer
+          style={{
+            ...S.footer,
+            // mobile はボタンを折り返し許可
+            flexWrap: isMobile ? "wrap" : "nowrap",
+          }}
+        >
+          <button
+            type="button"
+            onClick={remove}
+            disabled={saving}
+            style={{
+              ...S.danger,
+              minHeight: 40,
+              // mobile では退会ボタンを単独行に置く (誤タップ防止)
+              flex: isMobile ? "1 1 100%" : undefined,
+            }}
+          >
+            退会させる
+          </button>
+          {!isMobile && <span style={{ flex: 1 }} />}
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            style={{
+              ...S.cancel,
+              minHeight: 40,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+            }}
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            style={{
+              ...S.save,
+              minHeight: 40,
+              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+            }}
+          >
             {saving ? "保存中..." : "保存"}
           </button>
         </footer>
