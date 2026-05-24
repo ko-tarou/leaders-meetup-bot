@@ -10,7 +10,10 @@ import {
 } from "react-router-dom";
 import { clearAdminToken } from "./api";
 import { AdminTokenPrompt } from "./components/AdminTokenPrompt";
-import { EventSwitcher } from "./components/EventSwitcher";
+import {
+  EventSidebar,
+  EventSidebarContent,
+} from "./components/EventSidebar";
 import { FeedbackWidget } from "./components/feedback/FeedbackWidget";
 import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import { ToastProvider } from "./components/ui/Toast";
@@ -102,6 +105,13 @@ export function App() {
 
 // 005-1: token 未設定 / 401 検出時は AdminTokenPrompt を最優先で表示する。
 // useEvents は EventProvider 配下でしか使えないので、子コンポーネントとして分離。
+//
+// UX 改善 Phase 1 - PR1:
+// 旧 EventSwitcher (上部 dropdown) を廃止し、desktop は 2 カラム (左 = サイドバー /
+// 右 = main) のレイアウトに変更。mobile は従来通り Header + ハンバーガーで、
+// ドロワーシート内にサイドバー内容を埋め込む。
+// 公開モード時は EventSidebar を出さず (本来 event 切替の権限が無い)、
+// 従来通り max-width 800 のセンタリングレイアウトを維持する。
 function AppShell() {
   const { tokenInvalid, fetchError } = useEvents();
   const publicMode = usePublicMode();
@@ -111,71 +121,105 @@ function AppShell() {
   if (tokenInvalid) {
     return <AdminTokenPrompt message={fetchError ?? undefined} />;
   }
-  return (
-    <div
+
+  const routesEl =
+    isPublic && granted ? (
+      // 公開モード: granted の action のみアクセス可。
+      // それ以外の URL に来た場合は granted action に redirect する。
+      <Routes>
+        <Route
+          path="/events/:eventId/actions/:actionType"
+          element={
+            <PublicGuard granted={granted}>
+              <ActionDetailPage />
+            </PublicGuard>
+          }
+        />
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to={`/events/${granted.eventId}/actions/${granted.actionType}`}
+              replace
+            />
+          }
+        />
+      </Routes>
+    ) : (
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/events/:eventId" element={<EventIndexRedirect />} />
+        {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
+            より具体的なルートを上に置いてマッチを優先させる。 */}
+        <Route
+          path="/events/:eventId/actions/weekly_reminder/:reminderId"
+          element={<WeeklyReminderDetailPage />}
+        />
+        {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
+        <Route
+          path="/events/:eventId/actions/:actionType"
+          element={<ActionDetailPage />}
+        />
+        <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
+        <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
+        <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/public-management" element={<PublicManagementPage />} />
+      </Routes>
+    );
+
+  // 右側の main column を組み立てる。中身は従来の max-width 800 センタリング。
+  const mainColumn = (
+    <main
       style={{
+        flex: 1,
+        minWidth: 0,
         maxWidth: 800,
-        margin: "0 auto",
+        // desktop で sidebar と本文の間に余白を入れる。mobile は中央寄せ。
+        margin: isMobile || isPublic ? "0 auto" : "0 auto 0 0",
+        width: "100%",
         // レスポンシブ: モバイル時は左右 padding を 12px に縮め、画面幅を有効活用。
         padding: isMobile ? "12px 12px 20px" : 20,
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
-      <AppHeader isMobile={isMobile} isPublic={isPublic} publicMode={publicMode} />
-      {isPublic && granted ? (
-        // 公開モード: granted の action のみアクセス可。
-        // それ以外の URL に来た場合は granted action に redirect する。
-        <Routes>
-          <Route
-            path="/events/:eventId/actions/:actionType"
-            element={
-              <PublicGuard granted={granted}>
-                <ActionDetailPage />
-              </PublicGuard>
-            }
-          />
-          <Route
-            path="*"
-            element={
-              <Navigate
-                to={`/events/${granted.eventId}/actions/${granted.actionType}`}
-                replace
-              />
-            }
-          />
-        </Routes>
-      ) : (
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/events/:eventId" element={<EventIndexRedirect />} />
-          {/* Sprint 23 PR-A: 週次リマインドの個別詳細ページ。
-              より具体的なルートを上に置いてマッチを優先させる。 */}
-          <Route
-            path="/events/:eventId/actions/weekly_reminder/:reminderId"
-            element={<WeeklyReminderDetailPage />}
-          />
-          {/* /actions/:actionType を /:tab より上に置いてマッチを優先させる */}
-          <Route
-            path="/events/:eventId/actions/:actionType"
-            element={<ActionDetailPage />}
-          />
-          <Route path="/events/:eventId/:tab" element={<EventTabPage />} />
-          <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-          <Route path="/public-management" element={<PublicManagementPage />} />
-        </Routes>
-      )}
+      <AppHeader
+        isMobile={isMobile}
+        isPublic={isPublic}
+        publicMode={publicMode}
+      />
+      {routesEl}
+    </main>
+  );
+
+  // 公開モード / mobile: サイドバーは出さない (公開モードはそもそも event 切替不可。
+  // mobile はハンバーガー drawer 内に EventSidebarContent を埋め込む)。
+  if (isMobile || isPublic) {
+    return mainColumn;
+  }
+
+  // desktop (admin): 左に EventSidebar、右に main を flex で並べる。
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        minHeight: "100vh",
+        fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+      }}
+    >
+      <EventSidebar />
+      {mainColumn}
     </div>
   );
 }
 
-// レスポンシブ対応 PR1: 共通ヘッダ。
-// - desktop (>=640px): 従来通り title + nav (EventSwitcher / Workspace管理 /
-//   公開管理) を横並びで表示する。
-// - mobile (<640px): title + ハンバーガーボタンのみを並べ、ナビは
-//   ドロワーシートとして slide-in する。EventSwitcher / リンク類は
-//   シート内に縦並びで配置する。
-// 公開モード時は EventSwitcher / Workspace管理 / 公開管理 を出さず、
+// 共通ヘッダ。
+// - desktop (>=640px): title + (公開モード時のみ) ログアウトを横並びで表示。
+//   admin 時の event 切替は左サイドバー (EventSidebar) に移ったため、
+//   ヘッダから EventSwitcher を撤去。Workspace管理 / 公開管理 リンクのみ残す。
+// - mobile (<640px): title + ハンバーガーボタン。ナビはドロワーシート内で
+//   EventSidebarContent + リンク類を縦並びで表示する。
+// 公開モード時はサイドバーも出さないので、admin と同じく Header にリンクは出さず、
 // ログアウトだけを出す既存仕様を維持する。
 function AppHeader({
   isMobile,
@@ -226,11 +270,9 @@ function AppHeader({
     </Link>
   );
 
-  const navItems = isPublic ? (
-    <PublicLogoutButton />
-  ) : (
+  // desktop の admin ヘッダ右側に出す管理リンク群 (event 切替は sidebar に移動済み)。
+  const desktopAdminNav = (
     <>
-      <EventSwitcher />
       <Link to="/workspaces" style={workspacesLinkStyle}>
         Workspace管理
       </Link>
@@ -239,6 +281,9 @@ function AppHeader({
       </Link>
     </>
   );
+
+  // desktop 側ヘッダ右の表示。公開モードは PublicLogoutButton、admin は管理リンク。
+  const desktopNav = isPublic ? <PublicLogoutButton /> : desktopAdminNav;
 
   return (
     <header
@@ -281,14 +326,51 @@ function AppHeader({
               flexWrap: "wrap",
             }}
           >
-            {navItems}
+            {desktopNav}
           </div>
         )}
       </div>
       <BackLink />
       {isMobile && menuOpen && (
         <MobileMenuSheet onClose={() => setMenuOpen(false)}>
-          {navItems}
+          {isPublic ? (
+            <PublicLogoutButton />
+          ) : (
+            <>
+              {/* admin: drawer に EventSidebar 内容を埋め込む。
+                  navigate でドロワーは自動で閉じる (pathname 変化を監視)。
+                  onNavigate でも保険として閉じておく。 */}
+              <EventSidebarContent
+                variant="mobile"
+                onNavigate={() => setMenuOpen(false)}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: `1px solid ${colors.border}`,
+                }}
+              >
+                <Link
+                  to="/workspaces"
+                  style={mobileLinkStyle}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Workspace管理
+                </Link>
+                <Link
+                  to="/public-management"
+                  style={mobileLinkStyle}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  公開管理
+                </Link>
+              </div>
+            </>
+          )}
         </MobileMenuSheet>
       )}
     </header>
@@ -297,7 +379,7 @@ function AppHeader({
 
 // レスポンシブ対応 PR1: モバイル時のドロワーシート。
 // オーバーレイ + 右端から slide-in する画面の 80% 幅シートで、
-// 中に EventSwitcher / リンク類を縦並びで描画する。
+// 中に EventSidebar 内容 / リンク類を縦並びで描画する。
 function MobileMenuSheet({
   children,
   onClose,
@@ -452,6 +534,19 @@ const workspacesLinkStyle: React.CSSProperties = {
   borderRadius: 4,
   background: colors.background,
   whiteSpace: "nowrap",
+};
+
+// drawer 内のフルワイドリンク。tap target 44px 以上を確保。
+const mobileLinkStyle: React.CSSProperties = {
+  display: "block",
+  color: colors.primary,
+  fontSize: 14,
+  textDecoration: "none",
+  padding: "12px 12px",
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: 6,
+  background: colors.background,
+  minHeight: 44,
 };
 
 // レスポンシブ対応 PR1: モバイルのハンバーガーボタン。
