@@ -5,6 +5,7 @@ import { api } from "../api";
 import type { EventAction } from "../types";
 import { TOP_TABS } from "../lib/eventTabs";
 import { ActionsListView } from "../components/ActionsListView";
+import { Breadcrumbs } from "../components/Breadcrumbs";
 import { colors } from "../styles/tokens";
 
 // Sprint 13 PR1: 上部タブを 3 つ (アクション/メンバー/履歴) に固定。
@@ -71,8 +72,19 @@ export function EventTabPage() {
     return <Navigate to={`/events/${eventId}/actions`} replace />;
   }
 
+  // UX 改善 Phase 1 - PR2 (B): EventTabPage に breadcrumbs を追加。
+  // 「ホーム › <イベント名> › <タブラベル>」で現在地と帰還動線を明示する。
+  const tabLabel = TOP_TABS.find((t) => t.id === tab)?.label ?? tab;
   return (
     <div>
+      <Breadcrumbs
+        items={[
+          { label: "ホーム", href: "/" },
+          { label: event.name, href: `/events/${eventId}/actions` },
+          { label: tabLabel },
+        ]}
+      />
+
       <div
         style={{
           display: "flex",
