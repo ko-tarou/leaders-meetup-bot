@@ -169,31 +169,34 @@ export function RosterImportModal({
             ...S.ft,
             // mobile はボタンの折り返しを許可してタップ領域を広く確保する
             flexWrap: isMobile ? "wrap" : "nowrap",
+            // UX-PR3 (D+E): mobile では sticky bottom 化して、長い候補リストを
+            // スクロールしてもボタンが常に画面下に張り付くようにする。
+            // (キャンセルは右上 × に統一済みなので、primary 1 個だけを表示)
+            ...(isMobile
+              ? {
+                  position: "sticky",
+                  bottom: 0,
+                  background: colors.background,
+                  zIndex: 10,
+                }
+              : {}),
           }}
         >
           <span style={S.muted}>
             {cands && cands.length > 0 ? `${picked.size} / ${cands.length} 件選択` : ""}
           </span>
           {!isMobile && <span style={{ flex: 1 }} />}
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            style={{
-              ...S.cancel,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
-              minHeight: 40,
-            }}
-          >
-            キャンセル
-          </button>
+          {/*
+            UX-PR3 (D): 右上 × と被るため下部「キャンセル」は削除。
+            破棄系は × / overlay クリック / ESC キーで一貫させる。
+          */}
           <button
             type="button"
             onClick={doImport}
             disabled={busy || picked.size === 0}
             style={{
               ...S.primary,
-              flex: isMobile ? "1 1 calc(50% - 0.25rem)" : undefined,
+              flex: isMobile ? "1 1 100%" : undefined,
               minHeight: 40,
             }}
           >

@@ -103,6 +103,15 @@ describe("RosterDetailPanel smoke", () => {
     });
   });
 
+  // UX-PR3 (D): 下部「キャンセル」は右上 × と機能が被るため削除済み。
+  // 退会させる / 保存 は残るが、close 目的のボタンは × のみ。
+  it("下部に「キャンセル」ボタンは無い (右上 × に統一済み)", () => {
+    mount();
+    expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
+    // 「閉じる」ラベルは右上 × の 1 つだけ
+    expect(screen.getAllByLabelText("閉じる")).toHaveLength(1);
+  });
+
   it("退会ボタン → 確認承認で DELETE が発火し onChanged(null)", async () => {
     const { onChanged } = mount();
     await userEvent.click(screen.getByRole("button", { name: "退会させる" }));
