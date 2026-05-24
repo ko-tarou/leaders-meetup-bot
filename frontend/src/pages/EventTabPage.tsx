@@ -5,12 +5,16 @@ import { api } from "../api";
 import type { EventAction } from "../types";
 import { TOP_TABS } from "../lib/eventTabs";
 import { ActionsListView } from "../components/ActionsListView";
+import { MembersTabContent } from "./MembersTabContent";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { colors } from "../styles/tokens";
 
-// Sprint 13 PR1: 上部タブを 3 つ (アクション/メンバー/履歴) に固定。
+// Sprint 13 PR1: 上部タブを (アクション/メンバー) に固定。
 // schedule / tasks / member_welcome / pr_review といった旧タブは廃止し、
 // 全て /events/:id/actions/:actionType の専用ページへ集約した。
+//
+// members-tab-integration (2026-05): 「履歴」タブを廃止し、「メンバー」タブを
+// 名簿 + ロール管理 の統合 UI (サブタブ) に置き換える。
 export function EventTabPage() {
   const { eventId, tab } = useParams<{ eventId: string; tab: string }>();
   const navigate = useNavigate();
@@ -126,15 +130,12 @@ export function EventTabPage() {
         />
       )}
       {tab === "members" && (
-        <PlaceholderTab label="メンバー一覧は今後のスプリントで実装予定です。" />
-      )}
-      {tab === "history" && (
-        <PlaceholderTab label="履歴ビューは今後のスプリントで実装予定です。" />
+        <MembersTabContent
+          eventId={eventId}
+          actions={actions}
+          onActionsChange={() => setActionsRefreshKey((k) => k + 1)}
+        />
       )}
     </div>
   );
-}
-
-function PlaceholderTab({ label }: { label: string }) {
-  return <p style={{ color: colors.textMuted, padding: "1rem" }}>{label}</p>;
 }

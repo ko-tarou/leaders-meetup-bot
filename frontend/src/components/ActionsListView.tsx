@@ -11,6 +11,16 @@ import { useIsMobile } from "../hooks/useIsMobile";
 // Sprint 13 PR1: アクション一覧 (カード形式)。
 // クリックで /events/:eventId/actions/:actionType の専用ページへ遷移する。
 // 追加導線は AddActionModal (旧 ActionsTab.tsx 由来) をそのまま流用。
+//
+// members-tab-integration (2026-05): 「メンバー」タブで 名簿 + ロール管理 を
+// 一元化したため、ALL_ACTION_TYPES からは "member_roster" / "role_management"
+// を除外する (「+ 新規追加」モーダルの選択肢に出さない)。
+// 既に作成済の action 行も「アクション一覧」カードからは隠す
+// (メンバータブから引き続きアクセス可能 + 互換のため ActionDetailPage は維持)。
+const HIDDEN_FROM_LIST: EventActionType[] = [
+  "member_roster",
+  "role_management",
+];
 
 const ALL_ACTION_TYPES: EventActionType[] = [
   "schedule_polling",
@@ -19,8 +29,6 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "pr_review_list",
   "weekly_reminder",
   "attendance_check",
-  "role_management",
-  "member_roster",
 ];
 
 type Props = {
@@ -33,6 +41,11 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
   const navigate = useNavigate();
   const [showAdd, setShowAdd] = useState(false);
 
+  // members-tab-integration: 一覧表示からは member_roster / role_management を除外。
+  // これらは「メンバー」タブで一元管理する (互換のため /actions/:type 直リンクは生きている)。
+  const visibleActions = actions.filter(
+    (a) => !HIDDEN_FROM_LIST.includes(a.actionType),
+  );
   const usedTypes = new Set(actions.map((a) => a.actionType));
   const availableTypes = ALL_ACTION_TYPES.filter((t) => !usedTypes.has(t));
 
@@ -46,7 +59,7 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
         }}
       >
         <h3 style={{ margin: 0, fontSize: "1.05rem" }}>
-          アクション一覧 ({actions.length}件)
+          アクション一覧 ({visibleActions.length}件)
         </h3>
         {availableTypes.length > 0 && (
           <button
@@ -58,11 +71,11 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
         )}
       </div>
 
-      {actions.length === 0 ? (
+      {visibleActions.length === 0 ? (
         <EmptyState
           icon="📦"
           title="アクションが登録されていません"
-          description="日程調整・タスク管理・名簿管理など、このイベントで使いたい機能を追加してください。"
+          description="日程調整・タスク管理・週次リマインドなど、このイベントで使いたい機能を追加してください。"
           primaryAction={
             availableTypes.length > 0
               ? {
@@ -74,7 +87,7 @@ export function ActionsListView({ eventId, actions, onChange }: Props) {
         />
       ) : (
         <div style={{ display: "grid", gap: "0.75rem" }}>
-          {actions.map((a) => {
+          {visibleActions.map((a) => {
             const meta = ACTION_META[a.actionType];
             return (
               <div
