@@ -4,6 +4,7 @@ import type {
   RosterCustomColumn, RosterMember, RosterMemberValue,
 } from "../../types";
 import { useToast } from "../../components/ui/Toast";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 import { RosterDetailPanel } from "./RosterDetailPanel";
 import { RosterColumnsModal } from "./RosterColumnsModal";
@@ -41,6 +42,7 @@ function cmp(a: string | null, b: string | null, dir: SortDir): number {
 }
 
 export function RosterPage({ eventId, actionId }: { eventId: string; actionId: string }) {
+  const isMobile = useIsMobile();
   const [members, setMembers] = useState<RosterMember[] | null>(null);
   const [customCols, setCustomCols] = useState<RosterCustomColumn[]>([]);
   // values は (memberId,columnId) → parsed value のマップで持つ。
@@ -135,26 +137,45 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
     else { setSortKey(k); setSortDir("asc"); }
   };
 
+  // mobile では検索ボックスを 100% 幅にし、ボタン群は折り返したまま
+  // 全幅広げて tap し易くする。
+  const mobileBtn: CSSProperties | undefined = isMobile
+    ? { flex: "1 1 calc(50% - 0.5rem)", minHeight: 40 }
+    : undefined;
+
   return (
-    <div style={{ padding: "1rem" }}>
+    <div style={{ padding: isMobile ? "0.75rem" : "1rem" }}>
       <div style={S.controls}>
         <input
           type="search" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="名前 / フリガナ / メール / Slack 名を検索"
-          aria-label="名簿を検索" style={S.search}
+          aria-label="名簿を検索"
+          style={isMobile ? { ...S.search, flexBasis: "100%" } : S.search}
         />
         <label style={S.toggle}>
           <input type="checkbox" checked={hideInactive}
             onChange={(e) => setHideInactive(e.target.checked)} />
           <span>退会済みを非表示</span>
         </label>
-        <button type="button" onClick={() => setShowImport(true)} style={S.primaryBtn}>
+        <button
+          type="button"
+          onClick={() => setShowImport(true)}
+          style={{ ...S.primaryBtn, ...mobileBtn }}
+        >
           参加届を提出した人から取り込み
         </button>
-        <button type="button" onClick={() => setShowAdd(true)} style={S.primaryBtn}>
+        <button
+          type="button"
+          onClick={() => setShowAdd(true)}
+          style={{ ...S.primaryBtn, ...mobileBtn }}
+        >
           ＋ メンバー追加
         </button>
-        <button type="button" onClick={() => setShowCols(true)} style={S.colsBtn}>
+        <button
+          type="button"
+          onClick={() => setShowCols(true)}
+          style={{ ...S.colsBtn, ...mobileBtn }}
+        >
           カスタム列管理
         </button>
         {/* PR4 (2026-05): Slack 表示名一括同期。slack_user_id 持ちメンバーのみが対象。 */}
@@ -162,7 +183,7 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
           type="button"
           onClick={handleSyncSlackNames}
           disabled={syncing}
-          style={syncing ? S.syncBtnBusy : S.colsBtn}
+          style={{ ...(syncing ? S.syncBtnBusy : S.colsBtn), ...mobileBtn }}
           aria-busy={syncing}
         >
           {syncing ? "同期中..." : "Slack 同期"}
