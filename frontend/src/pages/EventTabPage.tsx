@@ -79,7 +79,9 @@ export function EventTabPage() {
           gap: "0.25rem",
           borderBottom: `1px solid ${colors.border}`,
           marginBottom: "1rem",
-          flexWrap: "wrap",
+          // モバイルでも 1 行を保つ: 折り返さず横スクロールに任せる。
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
         }}
       >
         {TOP_TABS.map((t) => (
@@ -94,6 +96,9 @@ export function EventTabPage() {
               color: t.id === tab ? colors.textInverse : colors.text,
               cursor: "pointer",
               fontSize: "0.95rem",
+              flex: "0 0 auto",
+              whiteSpace: "nowrap",
+              minHeight: 40,
             }}
           >
             {t.label}

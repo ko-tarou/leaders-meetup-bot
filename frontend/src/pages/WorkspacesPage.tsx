@@ -9,6 +9,7 @@ import { api, APIError } from "../api";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { useIsReadOnly } from "../hooks/usePublicMode";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { colors } from "../styles/tokens";
 import { FeedbackSettingsSection } from "../components/feedback/FeedbackSettingsSection";
 import { WorkspaceCard } from "./workspaces/WorkspaceCard";
@@ -23,6 +24,7 @@ export function WorkspacesPage() {
   const navigate = useNavigate();
   const { confirm } = useConfirm();
   const isReadOnly = useIsReadOnly();
+  const isMobile = useIsMobile();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -230,7 +232,7 @@ export function WorkspacesPage() {
   };
 
   return (
-    <div style={{ padding: "1rem" }}>
+    <div style={{ padding: isMobile ? "0.75rem" : "1rem" }}>
       <button
         type="button"
         onClick={handleBack}
@@ -250,18 +252,20 @@ export function WorkspacesPage() {
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          // mobile はタイトル + Slack ボタンを縦並びにして折り返しを防ぐ
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center",
           marginBottom: "1rem",
           gap: "0.5rem",
         }}
       >
-        <h2 style={{ margin: 0 }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? "1.15rem" : "1.5rem" }}>
           ワークスペース管理 ({workspaces.length}件)
         </h2>
         <a
           href="/slack/oauth/install"
           style={{
-            marginLeft: "auto",
+            marginLeft: isMobile ? undefined : "auto",
             background: "#4A154B", // Slack brand purple — keep as-is
             color: colors.textInverse,
             padding: "0.5rem 1rem",
@@ -269,6 +273,11 @@ export function WorkspacesPage() {
             textDecoration: "none",
             fontWeight: "bold",
             fontSize: "0.95rem",
+            textAlign: "center",
+            minHeight: 44,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           + Slack でインストール

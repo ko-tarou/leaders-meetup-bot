@@ -25,4 +25,6 @@ export const secondaryBtnStyle: React.CSSProperties = {
   background: colors.background,
   borderRadius: "0.25rem",
   cursor: "pointer",
+  // レスポンシブ対応 PR1: モバイルでも tap target を確保。
+  minHeight: 40,
 };

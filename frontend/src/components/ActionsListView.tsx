@@ -5,6 +5,7 @@ import { api } from "../api";
 import { ACTION_META } from "../lib/eventTabs";
 import { useToast } from "./ui/Toast";
 import { colors } from "../styles/tokens";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 // Sprint 13 PR1: アクション一覧 (カード形式)。
 // クリックで /events/:eventId/actions/:actionType の専用ページへ遷移する。
@@ -180,6 +181,7 @@ function AddActionModal({
   onAdded: () => void;
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
   const [actionType, setActionType] = useState<EventActionType>(
     availableTypes[0],
   );
@@ -207,7 +209,7 @@ function AddActionModal({
         inset: 0,
         background: "rgba(0,0,0,0.5)",
         display: "flex",
-        alignItems: "center",
+        alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",
         zIndex: 1000,
       }}
@@ -216,9 +218,11 @@ function AddActionModal({
       <div
         style={{
           background: "white",
-          padding: "1.5rem",
-          borderRadius: "0.5rem",
-          width: "min(400px, 90vw)",
+          padding: isMobile ? "1rem" : "1.5rem",
+          borderRadius: isMobile ? 0 : "0.5rem",
+          width: isMobile ? "100%" : "min(400px, 90vw)",
+          maxHeight: isMobile ? "100vh" : "90vh",
+          overflow: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -253,6 +257,7 @@ function AddActionModal({
         <div
           style={{
             display: "flex",
+            flexDirection: isMobile ? "column" : "row",
             gap: "0.5rem",
             justifyContent: "flex-end",
           }}
@@ -266,6 +271,7 @@ function AddActionModal({
               background: colors.background,
               borderRadius: "0.25rem",
               cursor: submitting ? "wait" : "pointer",
+              width: isMobile ? "100%" : undefined,
             }}
           >
             キャンセル
@@ -276,6 +282,7 @@ function AddActionModal({
             style={{
               ...primaryBtnStyle,
               cursor: submitting ? "wait" : "pointer",
+              width: isMobile ? "100%" : undefined,
             }}
           >
             {submitting ? "追加中..." : "追加"}

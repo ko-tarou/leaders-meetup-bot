@@ -3,6 +3,7 @@ import type { Task, TaskAssignee } from "../types";
 import { api } from "../api";
 import { useConfirm } from "./ui/ConfirmDialog";
 import { colors } from "../styles/tokens";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 // ADR-0002: タスク作成・編集・削除モーダル（Sprint 4 PR3）。
 // 期限は JST で入力し、内部的に UTC ISO へ変換して保存する。
@@ -17,6 +18,7 @@ type Props = {
 
 export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSaved }: Props) {
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const isEdit = !!task;
   const [title, setTitle] = useState(task?.title ?? "");
   const [description, setDescription] = useState(task?.description ?? "");
@@ -151,7 +153,8 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
         inset: 0,
         background: "rgba(0,0,0,0.5)",
         display: "flex",
-        alignItems: "center",
+        // mobile は上寄せ・全画面に近い表示にして見切れを防ぐ
+        alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",
         zIndex: 1000,
       }}
@@ -161,10 +164,10 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "white",
-          padding: "1.5rem",
-          borderRadius: "0.5rem",
-          width: "min(500px, 90vw)",
-          maxHeight: "90vh",
+          padding: isMobile ? "1rem" : "1.5rem",
+          borderRadius: isMobile ? 0 : "0.5rem",
+          width: isMobile ? "100%" : "min(500px, 90vw)",
+          maxHeight: isMobile ? "100vh" : "90vh",
           overflow: "auto",
         }}
       >
@@ -208,14 +211,48 @@ export function TaskFormModal({ eventId, task, parentCandidates, onClose, onSave
           <input value={assigneeInput} onChange={(e) => setAssigneeInput(e.target.value)} disabled={submitting} style={fullW} placeholder="U..." />
         </Field>
 
-        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", justifyContent: "flex-end" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: isMobile ? "column" : "row",
+            gap: "0.5rem",
+            marginTop: "1rem",
+            justifyContent: isMobile ? "stretch" : "flex-end",
+            flexWrap: "wrap",
+          }}
+        >
           {isEdit && (
-            <button onClick={handleDelete} disabled={submitting} style={{ background: colors.danger, color: colors.textInverse, marginRight: "auto" }}>
+            <button
+              onClick={handleDelete}
+              disabled={submitting}
+              style={{
+                background: colors.danger,
+                color: colors.textInverse,
+                // desktop は左端、mobile は順番通り (列の先頭)
+                marginRight: isMobile ? undefined : "auto",
+                order: isMobile ? 3 : 0,
+                width: isMobile ? "100%" : undefined,
+              }}
+            >
               削除
             </button>
           )}
-          <button onClick={onClose} disabled={submitting}>キャンセル</button>
-          <button onClick={handleSubmit} disabled={submitting || !title.trim()} style={{ background: colors.primary, color: colors.textInverse }}>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            style={{ width: isMobile ? "100%" : undefined }}
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !title.trim()}
+            style={{
+              background: colors.primary,
+              color: colors.textInverse,
+              width: isMobile ? "100%" : undefined,
+            }}
+          >
             {submitting ? "保存中..." : isEdit ? "更新" : "作成"}
           </button>
         </div>
