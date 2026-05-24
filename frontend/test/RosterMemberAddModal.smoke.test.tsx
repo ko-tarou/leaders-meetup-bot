@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RosterMemberAddModal } from "../src/pages/roster/RosterMemberAddModal";
@@ -77,5 +77,53 @@ describe("RosterMemberAddModal smoke", () => {
     const { onClose } = mount();
     await userEvent.click(screen.getByLabelText("閉じる"));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // UX-PR3 (D): 「キャンセル」と「閉じる ×」の機能が被るため、下部
+  // キャンセルボタンは削除して右上 × に統一する。
+  // → 「キャンセル」ラベルのボタンは存在しないこと、「閉じる」は1つだけ。
+  it("下部に「キャンセル」ボタンは無い (右上 × に統一済み)", () => {
+    mount();
+    expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
+    expect(screen.getAllByLabelText("閉じる")).toHaveLength(1);
+  });
+});
+
+// UX-PR3 (E): mobile 時に footer (primary action 行) が
+// position: sticky になり、スクロール無しで保存ボタンに到達できることを担保する。
+// useIsMobile は matchMedia を購読するので、それを mobile 一致で stub する。
+describe("RosterMemberAddModal sticky footer (mobile)", () => {
+  afterEach(() => {
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  function stubMatchMediaAsMobile() {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn(() => ({
+        matches: true,
+        media: "",
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => true,
+      })),
+    });
+  }
+
+  it("mobile では「追加」ボタンの親 footer が sticky bottom 化する", () => {
+    stubMatchMediaAsMobile();
+    render(<AppProviders>
+      <RosterMemberAddModal eventId={EVENT_ID} actionId={ACTION_ID}
+        onClose={vi.fn()} onCreated={vi.fn()} />
+    </AppProviders>);
+    const submitBtn = screen.getByRole("button", { name: "追加" });
+    // footer は submit ボタンの親要素 (style に position: sticky を持つ)
+    const footer = submitBtn.parentElement!;
+    expect(footer.style.position).toBe("sticky");
+    expect(footer.style.bottom).toBe("0px");
   });
 });

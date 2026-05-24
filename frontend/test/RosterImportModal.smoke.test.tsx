@@ -148,4 +148,12 @@ describe("RosterImportModal smoke", () => {
     await userEvent.click(screen.getByLabelText("閉じる"));
     expect(onClose).toHaveBeenCalled();
   });
+
+  // UX-PR3 (D): 下部「キャンセル」は右上 × と機能が被るため削除済み。
+  // フッターには primary action (選択を追加) だけが残ることを担保する。
+  it("下部に「キャンセル」ボタンは無い (右上 × に統一済み)", async () => {
+    mount();
+    await screen.findByText("Alice");
+    expect(screen.queryByRole("button", { name: "キャンセル" })).toBeNull();
+  });
 });
