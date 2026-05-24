@@ -1,0 +1,92 @@
+/*
+ * レスポンシブ対応 PR1: グローバル CSS。
+ *
+ * 既存 UI はインラインスタイル方針なので、ここでは「インラインで書けない/
+ * 書きづらいもの」だけに絞って body level の調整を行う:
+ *   - box-sizing: border-box (全要素)
+ *   - body/html の min-width 解除 (デフォルトでは無いが防衛的に明示)
+ *   - 横スクロール防止 (overflow-x: hidden は意図しない切り捨てを起こすので
+ *     しない。代わりに max-width: 100% を img / table 等にかける)
+ *   - スクロール時のバウンス挙動 (iOS Safari) を改善
+ *   - mobile 時の最低 tap target / 入力時の自動 zoom 抑制
+ *
+ * 注意: 個別ページの padding / font-size は引き続きインラインで書く。
+ * ここでは「ベースライン」だけを揃える。
+ */
+
+/* ===== Reset / Base ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* PC 専用設計のなごりで min-width が外から指定されていてもリセット */
+  min-width: 0;
+  /* iOS で慣性スクロールが効くようにする */
+  -webkit-overflow-scrolling: touch;
+  /* ページ全体のフォントは既存の inline 指定 (App.tsx) を上書きしない */
+}
+
+body {
+  /* スクロール時に親要素 (root) までスクロール伝搬しないよう抑制。
+     モーダル open 時の body スクロール抑制と併用しやすくなる。 */
+  overscroll-behavior-y: contain;
+}
+
+/* レスポンシブ画像 (今は使っていないが将来用) */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ===== モバイル時の調整 (< 640px) ===== */
+@media (max-width: 639px) {
+  html {
+    /* iOS Safari は input の font-size が 16px 未満だと
+       focus 時に自動でズームインしてしまう。これを防ぐため
+       html ルートの font-size はそのまま (16px) に保ちつつ、
+       本文側はやや小さめに調整する。 */
+    font-size: 16px;
+  }
+  body {
+    font-size: 0.9375rem; /* 15px */
+    line-height: 1.55;
+  }
+
+  /* form コントロールの最小サイズを保証 (iOS 自動ズーム回避 + tap target) */
+  input,
+  select,
+  textarea,
+  button {
+    font-size: max(16px, 1em);
+  }
+
+  /* タップ領域の最低限の高さ (Apple HIG: 44px / Material: 48px)
+     ただし inline 内 link 等まで膨らませると UI が壊れるので
+     button / role=button のみに限定する。 */
+  button,
+  [role="button"] {
+    min-height: 36px;
+  }
+
+  /* 横方向のはみ出しを防ぐ最後の砦。テーブルだけは inline style 側で
+     overflow-x: auto を付ける運用 (RosterPage 等は既に対応済み)。 */
+  table {
+    max-width: 100%;
+  }
+}
+
+/* ===== モバイルメニュー open 時に body スクロールを止めるユーティリティ ===== */
+/* App.tsx 等から `document.body.classList.add('rb-no-scroll')` で制御する。 */
+body.rb-no-scroll {
+  overflow: hidden;
+  touch-action: none;
+}
