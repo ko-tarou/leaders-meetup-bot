@@ -188,6 +188,10 @@ function subTabBtnStyle(active: boolean): CSSProperties {
     cursor: "pointer",
     borderRadius: "0.25rem 0.25rem 0 0",
     fontSize: "0.875rem",
+    // 横スクロール領域でも shrink せず一行を保つ
+    flex: "0 0 auto",
+    whiteSpace: "nowrap",
+    minHeight: 40,
   };
 }
 
@@ -223,6 +227,9 @@ const s: Record<string, CSSProperties> = {
     gap: "0.25rem",
     borderBottom: `1px solid ${colors.border}`,
     marginBottom: "1rem",
+    // mobile では折り返さず横スクロールで 1 行を保つ
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
   },
   errorBanner: {
     color: colors.danger,

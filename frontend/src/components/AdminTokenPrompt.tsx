@@ -25,8 +25,11 @@ export function AdminTokenPrompt({ message }: { message?: string }) {
       aria-labelledby="admin-token-title"
       style={{
         maxWidth: 480,
-        margin: "4rem auto",
-        padding: "1.5rem 1.75rem",
+        // mobile では画面端まで使い、上端も詰める
+        margin: "2rem 12px",
+        marginLeft: "auto",
+        marginRight: "auto",
+        padding: "1.5rem 1.25rem",
         background: "#fff",
         border: "1px solid #ddd",
         borderRadius: 8,
@@ -67,13 +70,14 @@ export function AdminTokenPrompt({ message }: { message?: string }) {
           disabled={!value.trim()}
           style={{
             marginTop: 12,
-            padding: "8px 18px",
+            padding: "10px 18px",
             border: "none",
             borderRadius: 4,
             cursor: value.trim() ? "pointer" : "not-allowed",
             fontSize: 14,
             background: value.trim() ? "#4A90D9" : "#bbb",
             color: "#fff",
+            minHeight: 44,
           }}
         >
           保存して続行

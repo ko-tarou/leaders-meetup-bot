@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import type { MeetingDetail as MeetingDetailType } from "../types";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { MemberSection } from "./MemberSection";
 import { ScheduleSection } from "./ScheduleSection";
 import { HistorySection } from "./HistorySection";
@@ -10,6 +11,7 @@ import { colors } from "../styles/tokens";
 type Props = { meetingId: string; onBack: () => void };
 
 export function MeetingDetail({ meetingId }: Props) {
+  const isMobile = useIsMobile();
   const [meeting, setMeeting] = useState<MeetingDetailType | null>(null);
   const [tab, setTab] = useState<"members" | "schedule" | "history">(
     "schedule",
@@ -33,14 +35,23 @@ export function MeetingDetail({ meetingId }: Props) {
 
   return (
     <div>
-      <h2>{meeting.name}</h2>
-      <p style={{ color: colors.textSecondary }}>
+      <h2 style={{ fontSize: isMobile ? "1.15rem" : undefined }}>{meeting.name}</h2>
+      <p style={{ color: colors.textSecondary, wordBreak: "break-all" }}>
         チャンネル: #{channelName || meeting.channelId}
       </p>
 
       <StatusIndicator meetingId={meetingId} refreshKey={refreshKey} />
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 4,
+          marginBottom: 16,
+          // mobile では折り返さず横スクロールでタブを 1 行に並べる
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
         {(["members", "schedule", "history"] as const).map((t) => (
           <button
             key={t}
@@ -52,6 +63,9 @@ export function MeetingDetail({ meetingId }: Props) {
               background: tab === t ? colors.primary : colors.border,
               color: tab === t ? colors.textInverse : colors.text,
               cursor: "pointer",
+              flex: "0 0 auto",
+              whiteSpace: "nowrap",
+              minHeight: 40,
             }}
           >
             {t === "members"
