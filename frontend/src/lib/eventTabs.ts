@@ -1,8 +1,11 @@
 // Sprint 13 PR1: アクション中心 UX 再設計。
 // 旧 TABS_BY_TYPE / DEFAULT_TAB_BY_TYPE / ACTION_TAB_INFO / COMMON_TABS /
 // buildTabsFromActions / getDefaultTabId は廃止。
-// 上部タブを 3 つ (アクション/メンバー/履歴) に固定し、
+// 上部タブを 2 つ (アクション/メンバー) に固定し、
 // アクション一覧 → アクション専用ページ (メイン/設定 サブタブ) という導線に統一。
+//
+// members-tab-integration (2026-05): 「履歴」タブを削除し、「メンバー」タブを
+// 名簿 + ロール管理のサブタブ統合 UI に置き換え。
 import type { EventActionType } from "../types";
 
 export type EventType = "meetup" | "hackathon" | "project";
@@ -64,10 +67,9 @@ export const ACTION_META: Record<
 };
 
 // 共通タブ (イベント直下)
-export type TopTab = "actions" | "members" | "history";
+export type TopTab = "actions" | "members";
 
 export const TOP_TABS: { id: TopTab; label: string }[] = [
   { id: "actions", label: "アクション" },
   { id: "members", label: "メンバー" },
-  { id: "history", label: "履歴" },
 ];
