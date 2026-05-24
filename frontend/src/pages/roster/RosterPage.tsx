@@ -3,6 +3,7 @@ import { api } from "../../api";
 import type {
   RosterCustomColumn, RosterMember, RosterMemberValue,
 } from "../../types";
+import { EmptyState } from "../../components/EmptyState";
 import { useToast } from "../../components/ui/Toast";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
@@ -195,9 +196,33 @@ export function RosterPage({ eventId, actionId }: { eventId: string; actionId: s
       {members === null ? (
         <div style={{ color: colors.textSecondary }}>読み込み中...</div>
       ) : visible.length === 0 ? (
-        <div style={S.empty}>
-          {search ? "検索条件に一致するメンバーはいません。" : "まだメンバーが登録されていません。"}
-        </div>
+        search ? (
+          // 検索 hit ゼロは「クリアする」だけの軽い空状態に留める。
+          // 初期状態のフル CTA とは性格が違うので EmptyState で差別化する。
+          <EmptyState
+            icon="🔍"
+            title="検索条件に一致するメンバーはいません"
+            description="キーワードを変えるか、検索をクリアしてください。"
+            primaryAction={{
+              label: "検索をクリア",
+              onClick: () => setSearch(""),
+            }}
+          />
+        ) : (
+          <EmptyState
+            icon="👥"
+            title="まだメンバーが登録されていません"
+            description="参加届を提出した人を取り込むか、手動でメンバーを追加してください。"
+            primaryAction={{
+              label: "＋ メンバー追加",
+              onClick: () => setShowAdd(true),
+            }}
+            secondaryAction={{
+              label: "参加届から取り込み",
+              onClick: () => setShowImport(true),
+            }}
+          />
+        )
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={S.table}>

@@ -4,6 +4,7 @@ import type { Application, ApplicationStatus } from "../types";
 import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { EmptyState } from "./EmptyState";
 import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
@@ -307,11 +308,27 @@ export function MemberApplicationListTab({ eventId }: Props) {
       </div>
 
       {filtered.length === 0 ? (
-        <div style={styles.empty}>
-          {apps.length === 0
-            ? "まだ応募はありません"
-            : "未対応の応募はありません"}
-        </div>
+        apps.length === 0 ? (
+          <EmptyState
+            icon="📭"
+            title="まだ応募はありません"
+            description="上の応募フォーム URL を SNS や Slack で共有して、応募を呼びかけましょう。"
+            primaryAction={{
+              label: "応募フォーム URL をコピー",
+              onClick: handleCopyApplyUrl,
+            }}
+          />
+        ) : (
+          <EmptyState
+            icon="✅"
+            title="未対応の応募はありません"
+            description="すべての応募に対応が完了しています。「対応済も表示」で過去の応募を確認できます。"
+            primaryAction={{
+              label: "対応済も表示",
+              onClick: () => setShowHandled(true),
+            }}
+          />
+        )
       ) : (
         <div style={{ display: "grid", gap: "0.5rem" }}>
           {filtered.map((a) => (

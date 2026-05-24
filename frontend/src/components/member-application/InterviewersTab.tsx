@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { api } from "../../api";
 import type { EventAction, InterviewerSummary } from "../../types";
 import { Button } from "../ui/Button";
+import { EmptyState } from "../EmptyState";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
 import { useIsReadOnly } from "../../hooks/usePublicMode";
@@ -200,9 +201,20 @@ export function InterviewersTab({ eventId, action }: Props) {
         {entries === null ? (
           <div style={{ color: colors.textSecondary }}>読み込み中...</div>
         ) : entries.length === 0 ? (
-          <div style={emptyStyle}>
-            まだエントリーはありません。上の URL を面接官に共有してください。
-          </div>
+          <EmptyState
+            icon="🧑‍💼"
+            title="まだエントリーはありません"
+            description="上の URL を面接官に共有してください。提出されると面接可能 slot が一覧表示されます。"
+            primaryAction={
+              formUrl
+                ? {
+                    label: "URL をコピー",
+                    onClick: handleCopy,
+                    disabled: refreshing,
+                  }
+                : undefined
+            }
+          />
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={tableStyle}>
@@ -338,15 +350,6 @@ const tdStyle: CSSProperties = {
   padding: "0.625rem 0.75rem",
   borderBottom: `1px solid ${colors.border}`,
   verticalAlign: "middle",
-};
-
-const emptyStyle: CSSProperties = {
-  padding: "1.5rem",
-  textAlign: "center",
-  color: colors.textSecondary,
-  background: colors.surface,
-  border: `1px dashed ${colors.border}`,
-  borderRadius: "0.375rem",
 };
 
 const errorStyle: CSSProperties = {
