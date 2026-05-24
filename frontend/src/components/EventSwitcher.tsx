@@ -4,6 +4,7 @@ import { useEvents } from "../contexts/EventContext";
 import { api } from "../api";
 import { colors } from "../styles/tokens";
 import { useToast } from "./ui/Toast";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const CREATE_OPTION_VALUE = "__create__";
 
@@ -44,22 +45,31 @@ export function EventSwitcher() {
     useEvents();
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   if (loading) return <span style={labelStyle}>イベント読み込み中...</span>;
+
+  // mobile はメニューシート内で縦並びになるため幅 100% にして tap し易くする。
+  const select: React.CSSProperties = isMobile
+    ? { ...selectStyle, width: "100%", minWidth: 0 }
+    : selectStyle;
+  const createBtn: React.CSSProperties = isMobile
+    ? { ...createButtonStyle, width: "100%" }
+    : createButtonStyle;
 
   return (
     <>
       {events.length === 0 ? (
         <button
           type="button"
-          style={createButtonStyle}
+          style={createBtn}
           onClick={() => setCreateOpen(true)}
         >
           ＋ 新規イベント作成
         </button>
       ) : (
         <select
-          style={selectStyle}
+          style={select}
           value={currentEvent?.id ?? ""}
           onChange={(e) => {
             const newId = e.target.value;
@@ -117,6 +127,7 @@ function CreateEventModal({
   onCreated: (newId: string) => void | Promise<void>;
 }) {
   const toast = useToast();
+  const isMobile = useIsMobile();
   const [name, setName] = useState("");
   const [type, setType] = useState<EventType>("meetup");
   const [submitting, setSubmitting] = useState(false);
@@ -145,7 +156,7 @@ function CreateEventModal({
         inset: 0,
         background: "rgba(0,0,0,0.5)",
         display: "flex",
-        alignItems: "center",
+        alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",
         zIndex: 1000,
       }}
@@ -154,9 +165,11 @@ function CreateEventModal({
       <div
         style={{
           background: "white",
-          padding: "1.5rem",
-          borderRadius: "0.5rem",
-          width: "min(400px, 90vw)",
+          padding: isMobile ? "1rem" : "1.5rem",
+          borderRadius: isMobile ? 0 : "0.5rem",
+          width: isMobile ? "100%" : "min(400px, 90vw)",
+          maxHeight: isMobile ? "100vh" : "90vh",
+          overflow: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -216,6 +229,7 @@ function CreateEventModal({
         <div
           style={{
             display: "flex",
+            flexDirection: isMobile ? "column" : "row",
             gap: "0.5rem",
             justifyContent: "flex-end",
           }}
@@ -230,6 +244,7 @@ function CreateEventModal({
               background: colors.background,
               borderRadius: "0.25rem",
               cursor: submitting ? "wait" : "pointer",
+              width: isMobile ? "100%" : undefined,
             }}
           >
             キャンセル
@@ -245,6 +260,7 @@ function CreateEventModal({
               color: "white",
               borderRadius: "0.25rem",
               cursor: submitting ? "wait" : "pointer",
+              width: isMobile ? "100%" : undefined,
             }}
           >
             {submitting ? "作成中..." : "作成"}
