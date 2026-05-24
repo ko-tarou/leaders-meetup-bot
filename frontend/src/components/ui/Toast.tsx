@@ -161,15 +161,20 @@ function ToastViewport({
   onDismiss: (id: string) => void;
 }) {
   if (toasts.length === 0) return null;
+  // mobile (< 640px) では右上の固定 360px ボックスだと
+  // 画面端からはみ出して読めない / ハンバーガーメニューと被ることがあるため、
+  // 左右両端に margin を入れて画面全幅に近い帯として配置する。
   const containerStyle: CSSProperties = {
     position: "fixed",
     top: space.lg,
     right: space.lg,
+    // mobile 安全策: 画面が狭い場合に左端からはみ出さないよう left も指定。
+    // CSS の min() で 360px を上限にする。
+    left: `max(${space.lg}, calc(100vw - 360px - ${space.lg}))`,
     zIndex: 9999,
     display: "flex",
     flexDirection: "column",
     gap: space.sm,
-    maxWidth: 360,
     pointerEvents: "none",
   };
   return (

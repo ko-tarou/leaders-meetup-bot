@@ -3,6 +3,7 @@
 // データ所有・副作用は親 (gmailAccounts / refreshKey / confirm)。本子は
 // 描画と install/delete の委譲のみ。マークアップ・style は一字一句不変。
 import type { GmailAccount } from "../../types";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 import { GmailWatcherEditor } from "../../components/GmailWatcherEditor";
 
@@ -19,6 +20,7 @@ export function GmailAccountsSection({
   onInstall: () => void;
   onDelete: (acc: GmailAccount) => void;
 }) {
+  const isMobile = useIsMobile();
   return (
     <section
       style={{
@@ -30,19 +32,21 @@ export function GmailAccountsSection({
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          // mobile はタイトル + ボタンを縦並び (横並びだとボタンが見切れる)
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "center",
           marginBottom: "0.5rem",
           gap: "0.5rem",
         }}
       >
-        <h2 style={{ margin: 0 }}>
+        <h2 style={{ margin: 0, fontSize: isMobile ? "1.05rem" : undefined }}>
           Gmail 連携 ({gmailAccounts.length}件)
         </h2>
         <button
           onClick={onInstall}
           disabled={isReadOnly || gmailInstallLoading}
           style={{
-            marginLeft: "auto",
+            marginLeft: isMobile ? undefined : "auto",
             background: colors.primary,
             color: colors.textInverse,
             border: "none",
@@ -52,6 +56,7 @@ export function GmailAccountsSection({
             fontSize: "0.95rem",
             cursor:
               isReadOnly || gmailInstallLoading ? "not-allowed" : "pointer",
+            minHeight: 44,
           }}
         >
           {gmailInstallLoading ? "遷移中..." : "+ Gmail を連携"}
@@ -83,8 +88,15 @@ export function GmailAccountsSection({
               marginBottom: "0.5rem",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <div style={{ flex: 1 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: isMobile ? "stretch" : "center",
+                flexDirection: isMobile ? "column" : "row",
+                gap: isMobile ? "0.5rem" : 0,
+              }}
+            >
+              <div style={{ flex: 1, wordBreak: "break-all" }}>
                 <strong>{acc.email}</strong>
                 <div
                   style={{
@@ -101,6 +113,12 @@ export function GmailAccountsSection({
                 style={{
                   background: colors.danger,
                   color: colors.textInverse,
+                  padding: "0.4rem 0.9rem",
+                  borderRadius: "0.25rem",
+                  border: "none",
+                  minHeight: 40,
+                  // mobile では全幅でタップしやすく
+                  width: isMobile ? "100%" : undefined,
                 }}
               >
                 解除

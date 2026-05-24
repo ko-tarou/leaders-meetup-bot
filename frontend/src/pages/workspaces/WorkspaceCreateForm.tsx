@@ -3,6 +3,7 @@
 // 手動登録は OAuth が使えない場合の fallback (ADR-0007)。
 import { useState } from "react";
 import { api } from "../../api";
+import { useIsMobile } from "../../hooks/useIsMobile";
 import { colors } from "../../styles/tokens";
 
 export function WorkspaceCreateForm({
@@ -12,6 +13,7 @@ export function WorkspaceCreateForm({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [name, setName] = useState("");
   const [botToken, setBotToken] = useState("");
   const [signingSecret, setSigningSecret] = useState("");
@@ -45,7 +47,8 @@ export function WorkspaceCreateForm({
         inset: 0,
         background: "rgba(0,0,0,0.5)",
         display: "flex",
-        alignItems: "center",
+        // mobile では上端から表示 (キーボード出現時の見切れ防止)
+        alignItems: isMobile ? "stretch" : "center",
         justifyContent: "center",
         zIndex: 1000,
       }}
@@ -54,10 +57,10 @@ export function WorkspaceCreateForm({
       <div
         style={{
           background: "white",
-          padding: "1.5rem",
-          borderRadius: "0.5rem",
-          width: "min(500px, 90vw)",
-          maxHeight: "90vh",
+          padding: isMobile ? "1rem" : "1.5rem",
+          borderRadius: isMobile ? 0 : "0.5rem",
+          width: isMobile ? "100%" : "min(500px, 90vw)",
+          maxHeight: isMobile ? "100vh" : "90vh",
           overflow: "auto",
         }}
         onClick={(e) => e.stopPropagation()}
@@ -120,11 +123,20 @@ export function WorkspaceCreateForm({
         <div
           style={{
             display: "flex",
+            flexDirection: isMobile ? "column" : "row",
             gap: "0.5rem",
             justifyContent: "flex-end",
           }}
         >
-          <button onClick={onClose} disabled={submitting}>
+          <button
+            onClick={onClose}
+            disabled={submitting}
+            style={{
+              width: isMobile ? "100%" : undefined,
+              minHeight: 40,
+              padding: "0.5rem 1rem",
+            }}
+          >
             キャンセル
           </button>
           <button
@@ -132,7 +144,13 @@ export function WorkspaceCreateForm({
             disabled={
               submitting || !botToken.trim() || !signingSecret.trim()
             }
-            style={{ background: colors.primary, color: colors.textInverse }}
+            style={{
+              background: colors.primary,
+              color: colors.textInverse,
+              width: isMobile ? "100%" : undefined,
+              minHeight: 40,
+              padding: "0.5rem 1rem",
+            }}
           >
             {submitting ? "登録中..." : "登録"}
           </button>

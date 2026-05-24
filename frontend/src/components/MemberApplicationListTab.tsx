@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { Application, ApplicationStatus } from "../types";
 import { HOW_FOUND_LABEL, INTERVIEW_LOCATION_LABEL } from "../types";
 import { api } from "../api";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { useConfirm } from "./ui/ConfirmDialog";
@@ -382,6 +383,7 @@ function ApplicationDetailModal({
 }) {
   const toast = useToast();
   const { confirm } = useConfirm();
+  const isMobile = useIsMobile();
   const [submitting, setSubmitting] = useState(false);
   const [decisionNote, setDecisionNote] = useState(
     application.decisionNote || "",
@@ -433,9 +435,24 @@ function ApplicationDetailModal({
     }
   };
 
+  // mobile では full-screen modal にする (応募詳細は項目が多く縦に長い)
+  const overlayStyle: CSSProperties = isMobile
+    ? { ...styles.modalOverlay, alignItems: "stretch", padding: 0 }
+    : styles.modalOverlay;
+  const modalStyle: CSSProperties = isMobile
+    ? {
+        ...styles.modal,
+        width: "100%",
+        maxWidth: "100%",
+        maxHeight: "100vh",
+        borderRadius: 0,
+        padding: "1rem",
+      }
+    : styles.modal;
+
   return (
-    <div style={styles.modalOverlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
         <div style={styles.modalHeader}>
           <h3 style={{ margin: 0 }}>{application.name}</h3>
           <span
@@ -510,7 +527,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("scheduled")}
             disabled={submitting}
-            style={btnStyle(colors.primary)}
+            style={btnStyle(colors.primary, isMobile)}
           >
             面談予定にする
           </button>
@@ -518,7 +535,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("passed")}
             disabled={submitting}
-            style={btnStyle(colors.success)}
+            style={btnStyle(colors.success, isMobile)}
           >
             合格
           </button>
@@ -526,7 +543,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("failed")}
             disabled={submitting}
-            style={btnStyle(colors.danger)}
+            style={btnStyle(colors.danger, isMobile)}
           >
             不合格
           </button>
@@ -534,7 +551,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("rejected")}
             disabled={submitting}
-            style={btnStyle(colors.textMuted)}
+            style={btnStyle(colors.textMuted, isMobile)}
           >
             辞退
           </button>
@@ -542,7 +559,7 @@ function ApplicationDetailModal({
             type="button"
             onClick={() => handleStatusChange("pending")}
             disabled={submitting}
-            style={btnStyle(colors.textSecondary)}
+            style={btnStyle(colors.textSecondary, isMobile)}
           >
             未対応に戻す
           </button>
@@ -550,7 +567,13 @@ function ApplicationDetailModal({
             type="button"
             onClick={handleDelete}
             disabled={submitting}
-            style={styles.deleteBtn}
+            style={{
+              ...styles.deleteBtn,
+              // mobile では削除ボタンも全幅、marginLeft: auto を解除
+              marginLeft: isMobile ? 0 : "auto",
+              width: isMobile ? "100%" : undefined,
+              minHeight: 40,
+            }}
           >
             削除
           </button>
@@ -640,7 +663,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function btnStyle(color: string): CSSProperties {
+function btnStyle(color: string, isMobile = false): CSSProperties {
   return {
     background: color,
     color: "white",
@@ -648,6 +671,9 @@ function btnStyle(color: string): CSSProperties {
     padding: "0.5rem 1rem",
     borderRadius: "0.25rem",
     cursor: "pointer",
+    // mobile では全幅 + 40px 高でタップ領域を確保 (誤タップ防止)
+    width: isMobile ? "100%" : undefined,
+    minHeight: 40,
   };
 }
 
