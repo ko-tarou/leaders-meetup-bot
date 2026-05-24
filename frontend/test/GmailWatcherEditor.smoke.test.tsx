@@ -313,6 +313,109 @@ describe("GmailWatcherEditor smoke (Phase4-6 番人)", () => {
     });
   });
 
+  // Sprint 28: 返信のみ通知 (replyOnly) チェックボックス
+  it("replyOnly チェックボックスが表示され、ON/OFF できる", async () => {
+    const user = userEvent.setup();
+    renderEditor({
+      enabled: true,
+      rules: [rule({ id: "a", name: "AR", keywords: ["x"] })],
+    });
+    await expand(user);
+    await user.click(screen.getByRole("button", { name: /1\. AR/ }));
+    // ラベルを部分一致で取得 (説明文は別行)
+    const cb = screen.getByRole("checkbox", {
+      name: /返信のみ通知/,
+    }) as HTMLInputElement;
+    expect(cb).toBeInTheDocument();
+    expect(cb.checked).toBe(false);
+    await user.click(cb);
+    expect(cb.checked).toBe(true);
+    await user.click(cb);
+    expect(cb.checked).toBe(false);
+  });
+
+  it("保存時に payload へ replyOnly が含まれる", async () => {
+    const user = userEvent.setup();
+    // fetch を独自 stub して PUT 時の body を捕捉する
+    const putBodies: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const method = init?.method ?? "GET";
+        if (url.includes("/gmail-accounts/g1/watcher") && method === "PUT") {
+          putBodies.push(String(init?.body ?? ""));
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url.includes("/gmail-accounts/g1/watcher")) {
+          // 初期 GET
+          return new Response(
+            JSON.stringify({
+              enabled: true,
+              rules: [
+                {
+                  id: "a",
+                  name: "AR",
+                  keywords: ["x"],
+                  workspaceId: "ws1",
+                  channelId: "C1",
+                  channelName: "general",
+                  mentionUserIds: [],
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.includes("/workspaces/ws1/members")) {
+          return new Response(JSON.stringify(members), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url.includes("/workspaces")) {
+          return new Response(JSON.stringify([ws1]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    render(
+      <ToastProvider>
+        <GmailWatcherEditor account={account} />
+      </ToastProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /メール監視設定/ }));
+    await waitFor(() =>
+      expect(screen.getByText("監視を有効にする")).toBeInTheDocument(),
+    );
+    // rule を展開
+    await user.click(screen.getByRole("button", { name: /1\. AR/ }));
+    // replyOnly ON
+    await user.click(screen.getByRole("checkbox", { name: /返信のみ通知/ }));
+    // 保存
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(putBodies.length).toBeGreaterThan(0);
+    });
+    const body = JSON.parse(putBodies[0]);
+    // 第一ルールに replyOnly: true が含まれる
+    expect(body.rules[0].replyOnly).toBe(true);
+  });
+
   it("不正入力耐性: legacy config (channelId 直下) を rules[0] に変換", async () => {
     const user = userEvent.setup();
     renderEditor({

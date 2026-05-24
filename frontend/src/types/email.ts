@@ -54,6 +54,10 @@ export type GmailWatcherRule = {
   mentionUserIds: string[];
   messageTemplate?: string;
   autoReply?: GmailWatcherAutoReply;
+  // Sprint 28: 「返信のみ通知」フラグ。
+  // true なら subject が "Re:" で始まる、または In-Reply-To ヘッダがある
+  // メールだけ Slack 通知する。既存 rule は undefined のままで旧挙動を保つ。
+  replyOnly?: boolean;
 };
 
 export type GmailWatcherConfig = {
