@@ -596,6 +596,23 @@ function RuleCard(props: RuleCardProps) {
             </div>
           )}
 
+          {/* Sprint 28: 返信のみ通知フラグ。else でも使えるよう常時表示する。 */}
+          <div style={styles.field}>
+            <label style={styles.toggleRow}>
+              <input
+                type="checkbox"
+                checked={!!rule.replyOnly}
+                disabled={disabled}
+                onChange={(e) => onChange({ replyOnly: e.target.checked })}
+              />
+              <span>返信のみ通知（Re: で始まる or In-Reply-To ヘッダあり）</span>
+            </label>
+            <div style={styles.metaSmall}>
+              ON にすると、自分や他人への返信メールのみ通知します。
+            </div>
+          </div>
+
+
           <div style={styles.field}>
             <label style={styles.label}>通知先ワークスペース</label>
             {workspaces.length === 0 ? (

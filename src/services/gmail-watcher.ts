@@ -80,6 +80,12 @@ export type WatcherRule = {
   mentionUserIds: string[];
   messageTemplate?: string;
   autoReply?: WatcherAutoReply;
+  // Sprint 28: 返信メール (Re: で始まる or In-Reply-To ヘッダあり) のみ通知する。
+  // true のときは keyword 条件 AND 「返信判定」が成立しなければ match させない。
+  // false / undefined のときは既存挙動 (keyword 条件のみ) を維持する。
+  // 厳密な「bot 送信メールへの返信」検出ではなく、subject prefix or ヘッダで判定する
+  // 軽量実装 (kota との合意済み)。
+  replyOnly?: boolean;
 };
 
 export type WatcherConfig = {
@@ -234,7 +240,12 @@ async function processOneAccount(
     const meta = extractMessageMeta(msg);
 
     // first-match: rules を順に評価し、最初に match した rule で通知する。
-    const matchedRule = pickMatchingRule(cfg, meta.subject, meta.snippet);
+    const matchedRule = pickMatchingRule(
+      cfg,
+      meta.subject,
+      meta.snippet,
+      meta.inReplyTo,
+    );
     if (matchedRule) {
       matchedLocal++;
       const sent = await sendSlackNotification(
@@ -341,9 +352,13 @@ async function fetchGmailMessage(
   accessToken: string,
   messageId: string,
 ): Promise<Response> {
+  // Sprint 28: replyOnly 判定のため In-Reply-To ヘッダを取得する。
+  // metadataHeaders は OR で複数指定可能。既存 rule にも全件取得しておく
+  // (追加コストはほぼゼロ、payload size は数十 bytes 増のみ)。
   const url =
     `${GMAIL_LIST_URL}/${encodeURIComponent(messageId)}?format=metadata` +
-    `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`;
+    `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date` +
+    `&metadataHeaders=In-Reply-To`;
   return fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -355,6 +370,8 @@ type MessageMeta = {
   from: string;
   receivedAt: string; // JST formatted
   snippet: string;
+  // Sprint 28: replyOnly 判定で使う。空文字なら「ヘッダなし」。
+  inReplyTo: string;
 };
 
 function extractMessageMeta(msg: GmailMessageMetadata): MessageMeta {
@@ -376,6 +393,7 @@ function extractMessageMeta(msg: GmailMessageMetadata): MessageMeta {
     receivedAt: utcToJstFormat(receivedIso),
     // Gmail の snippet は HTML entity decoded されていないが、表示用なのでそのまま使う。
     snippet: msg.snippet ?? "",
+    inReplyTo: getHeader("In-Reply-To"),
   };
 }
 
@@ -401,21 +419,43 @@ export function matchKeywords(
 }
 
 /**
+ * Sprint 28: 「返信メール」かを軽量に判定する。
+ *   - subject が `Re:` / `RE:` / `re:` 等で始まる (大文字小文字無視、コロンの空白許容)
+ *   - または In-Reply-To ヘッダが空でない (= 返信元 message-id が存在)
+ * 厳密な bot 送信メールの追跡はしない (スコープ外、kota との合意済み)。
+ */
+export function isReplyEmail(subject: string, inReplyTo: string): boolean {
+  if (inReplyTo && inReplyTo.trim().length > 0) return true;
+  // `Re:`, `RE:`, `re:`, 全角コロン無し / コロン後の空白は任意。
+  // ローカライズ (`Aw:` 等) は対象外 (国内 Gmail はほぼ "Re:" 固定)。
+  if (/^re\s*:/i.test(subject.trim())) return true;
+  return false;
+}
+
+/**
  * rules を配列順に評価し、最初に match した rule を返す。
  * どれも match しなかった場合、elseRule があれば elseRule を返す。
  * elseRule も無ければ null を返す (= 通知しない)。
+ *
+ * Sprint 28: rule.replyOnly === true の場合、keyword 条件 AND 返信判定 (isReplyEmail)
+ *   が両方成立しないと match させない。elseRule にも同じ条件を適用する
+ *   (elseRule.replyOnly=true なら catchall でも「返信のみ」に絞れる)。
  */
 export function pickMatchingRule(
   cfg: WatcherConfig,
   subject: string,
   snippet: string,
+  inReplyTo: string = "",
 ): { rule: WatcherRule; ruleName: string } | null {
   for (const rule of cfg.rules) {
-    if (matchKeywords(rule.keywords, subject, snippet)) {
-      return { rule, ruleName: rule.name || "(無名ルール)" };
-    }
+    if (!matchKeywords(rule.keywords, subject, snippet)) continue;
+    if (rule.replyOnly && !isReplyEmail(subject, inReplyTo)) continue;
+    return { rule, ruleName: rule.name || "(無名ルール)" };
   }
   if (cfg.elseRule) {
+    if (cfg.elseRule.replyOnly && !isReplyEmail(subject, inReplyTo)) {
+      return null;
+    }
     return { rule: cfg.elseRule, ruleName: cfg.elseRule.name || "else" };
   }
   return null;
@@ -635,6 +675,9 @@ function normalizeRule(raw: unknown): WatcherRule | null {
     messageTemplate:
       typeof r.messageTemplate === "string" ? r.messageTemplate : undefined,
     autoReply: normalizeAutoReply(r.autoReply),
+    // Sprint 28: 既存 rule は replyOnly キー自体が無いので undefined のまま
+    // (= 後方互換)。boolean 以外は undefined に正規化する。
+    replyOnly: typeof r.replyOnly === "boolean" ? r.replyOnly : undefined,
   };
 }
 
