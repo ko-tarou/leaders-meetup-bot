@@ -18,6 +18,7 @@ import { feedbackRouter } from "./api/feedback";
 import { participationRouter } from "./api/participation";
 import { rosterRouter } from "./api/roster";
 import { rosterExtrasRouter } from "./api/roster-extras";
+import { kejimeRouter } from "./api/kejime";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -105,5 +106,8 @@ api.route("/", rosterRouter);
 // 名簿管理 (member_roster) 拡張 API: 合格者取り込み候補 + ロール連携
 // PR1 (roster_members CRUD) と同 prefix にぶら下がる。マージ時にルーターを統合してもよい。
 api.route("/", rosterExtrasRouter);
+// 003 朝勉強会けじめ制度 PR3: late 判定 + 免除 admin API。
+// /api/orgs/:eventId/actions/:actionId/kejime/* で adminAuth に保護される。
+api.route("/", kejimeRouter);
 
 export { api };
