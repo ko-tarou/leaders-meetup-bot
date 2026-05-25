@@ -8,6 +8,7 @@ import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
 import { processMorningStandup } from "./services/morning-standup";
 import { processLateJudgment } from "./services/kejime-late-judge";
+import { processKejimeStatusPost } from "./services/kejime-status-post";
 import { processAttendanceCheck } from "./services/attendance-check";
 import { processGmailWatchers } from "./services/gmail-watcher";
 import { processSlackInviteMonitors } from "./services/slack-invite-monitor";
@@ -58,6 +59,7 @@ export default {
       "roleAutoInvites",
       "morningStandup",
       "kejimeLateJudge",
+      "kejimeStatusPost",
     ];
     const tasks: Array<Promise<unknown>> = [
       processScheduledJobs(env.DB, client),
@@ -78,6 +80,10 @@ export default {
       // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に late 判定 + ポイント加算。
       // processLateJudgment は内部で 8:00-8:04 / 平日 window 判定して no-op に落とす。
       processLateJudgment(env.DB),
+      // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST にけじめチャンネルへ
+      // 「現在のステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
+      // 内部で 8:05-8:09 / 平日 window 判定して no-op に落とす。
+      processKejimeStatusPost(env.DB, client),
     ];
     if (isDailyRosterSyncWindow) {
       // 名簿 Slack 連携強化 PR4: 0:00-0:04 JST のみ実行。全 member_roster
