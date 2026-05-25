@@ -6,6 +6,7 @@ import { api } from "./routes/api";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
+import { processMorningStandup } from "./services/morning-standup";
 import { processAttendanceCheck } from "./services/attendance-check";
 import { processGmailWatchers } from "./services/gmail-watcher";
 import { processSlackInviteMonitors } from "./services/slack-invite-monitor";
@@ -54,6 +55,7 @@ export default {
       "gmailWatchers",
       "slackInviteMonitors",
       "roleAutoInvites",
+      "morningStandup",
     ];
     const tasks: Array<Promise<unknown>> = [
       processScheduledJobs(env.DB, client),
@@ -69,6 +71,8 @@ export default {
       // role-auto-invite: role_management で autoInviteEnabled な action を
       // 毎朝 9:00 JST に invite だけ自動実行する (kick は実行しない)。
       processRoleAutoInvites(env),
+      // 003 朝勉強会けじめ制度 PR2: 平日 7:30/8:00 JST にリマインダー/締切投稿。
+      processMorningStandup(env.DB, client),
     ];
     if (isDailyRosterSyncWindow) {
       // 名簿 Slack 連携強化 PR4: 0:00-0:04 JST のみ実行。全 member_roster

@@ -7,6 +7,7 @@ import {
   handleAttendanceVote,
   type AttendanceChoice,
 } from "../../services/attendance-check";
+import { handleMorningAttend } from "../../services/morning-standup";
 import {
   meetings,
   tasks,
@@ -116,6 +117,36 @@ interactionsRouter.post("/interactions", async (c) => {
         })(),
       );
 
+      return c.json({ ok: true });
+    }
+
+    // 003 朝勉強会けじめ制度 PR2: 朝活「参加」ボタン。
+    // action_id = morning_attend:<eventActionId>:<YYYYMMDD>
+    if (action.action_id?.startsWith("morning_attend:")) {
+      const userId = payload.user?.id;
+      const responseUrl: string | null = payload.response_url ?? null;
+      const messageTs: string | null = payload.message?.ts ?? null;
+      const parts = action.action_id.split(":");
+      if (!userId || parts.length !== 3) return c.json({ ok: true });
+      c.executionCtx.waitUntil((async () => {
+        try {
+          const res = await handleMorningAttend(c.env.DB, {
+            eventActionId: parts[1], ymdCompact: parts[2],
+            slackUserId: userId, messageTs,
+          });
+          if (responseUrl) {
+            await fetch(responseUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                response_type: "ephemeral", replace_original: false, text: res.text,
+              }),
+            });
+          }
+        } catch (e) {
+          console.error("Failed to handle morning_attend:", e);
+        }
+      })());
       return c.json({ ok: true });
     }
 
