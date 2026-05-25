@@ -64,6 +64,16 @@ export const ACTION_META: Record<
     description: "メンバー名簿を Excel ライクに一覧 / 編集できます",
     icon: "📒",
   },
+  morning_standup: {
+    label: "朝活リマインダー",
+    description: "曜日別テーマで毎朝の参加確認を投稿します",
+    icon: "📚",
+  },
+  kejime_tracker: {
+    label: "けじめポイント管理",
+    description: "遅刻ポイントの加算・記事消費・激辛カウントを管理します",
+    icon: "🌶",
+  },
 };
 
 // 共通タブ (イベント直下)

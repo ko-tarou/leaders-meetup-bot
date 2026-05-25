@@ -144,6 +144,9 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "attendance_check",
     "role_management",
     "member_roster",
+    // 朝勉強会けじめ制度 PR1: アクション登録 API のみ対応。UI は後続 PR。
+    "morning_standup",
+    "kejime_tracker",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -184,6 +187,24 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
   // member_roster は schemaVersion を持たせて将来の論理マイグレーションに備える。
   const DEFAULT_CONFIG: Record<string, string> = {
     member_roster: JSON.stringify({ schemaVersion: 1 }),
+    morning_standup: JSON.stringify({
+      schemaVersion: 1,
+      channelId: null,
+      roleId: null,
+      themes: {
+        mon: "ハードウェア",
+        tue: "フロントエンド",
+        wed: "バックエンド",
+        thu: "Android",
+        fri: "Unity",
+      },
+    }),
+    kejime_tracker: JSON.stringify({
+      schemaVersion: 1,
+      kejimeChannelId: null,
+      roleId: null,
+      minArticleLength: 500,
+    }),
   };
   const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";
 

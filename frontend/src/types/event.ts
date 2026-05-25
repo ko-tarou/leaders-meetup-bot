@@ -17,7 +17,10 @@ export type EventActionType =
   | "weekly_reminder"
   | "attendance_check"
   | "role_management"
-  | "member_roster";
+  | "member_roster"
+  // 朝勉強会けじめ制度 PR1 (UI は PR2 以降)
+  | "morning_standup"
+  | "kejime_tracker";
 
 export type EventAction = {
   id: string;

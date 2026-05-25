@@ -789,6 +789,102 @@ export const rosterMemberValues = sqliteTable(
   ],
 );
 
+// 朝勉強会けじめ制度 PR1 (migrations 0053-0056)。
+// CHECK 制約 (type / status enum) は migration 側 (生 SQL) で物理的に強制。
+export const kejimeMembers = sqliteTable(
+  "kejime_members",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    roleMemberId: text("role_member_id"),
+    slackUserId: text("slack_user_id").notNull(),
+    displayName: text("display_name").notNull(),
+    currentPoints: integer("current_points").notNull().default(0),
+    ramenCount: integer("ramen_count").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_members_event_action_id").on(t.eventActionId),
+    uniqueIndex("uq_kejime_members_action_slack_user").on(
+      t.eventActionId,
+      t.slackUserId,
+    ),
+  ],
+);
+
+export const kejimeEvents = sqliteTable(
+  "kejime_events",
+  {
+    id: text("id").primaryKey(),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => kejimeMembers.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    pointsDelta: integer("points_delta").notNull().default(0),
+    ramenDelta: integer("ramen_delta").notNull().default(0),
+    ref: text("ref"),
+    note: text("note"),
+    decidedBy: text("decided_by"),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_events_member_id").on(t.memberId),
+    index("idx_kejime_events_occurred_at").on(t.occurredAt),
+  ],
+);
+
+// date は YYYY-MM-DD (JST)。
+export const morningAttendance = sqliteTable(
+  "morning_attendance",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    status: text("status").notNull(),
+    messageTs: text("message_ts"),
+    recordedAt: text("recorded_at").notNull(),
+  },
+  (t) => [
+    index("idx_morning_attendance_action_date").on(t.eventActionId, t.date),
+    uniqueIndex("uq_morning_attendance_action_date_user").on(
+      t.eventActionId,
+      t.date,
+      t.slackUserId,
+    ),
+  ],
+);
+
+export const kejimeArticleRequests = sqliteTable(
+  "kejime_article_requests",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => kejimeMembers.id, { onDelete: "cascade" }),
+    qiitaUrl: text("qiita_url").notNull(),
+    bodyLength: integer("body_length"),
+    status: text("status").notNull(),
+    threadTs: text("thread_ts"),
+    channelId: text("channel_id"),
+    decidedBy: text("decided_by"),
+    decidedAt: text("decided_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_article_requests_event_action_id").on(t.eventActionId),
+    index("idx_kejime_article_requests_status").on(t.status),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
