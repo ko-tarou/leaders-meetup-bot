@@ -7,6 +7,7 @@ import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
 import { processMorningStandup } from "./services/morning-standup";
+import { processLateJudgment } from "./services/kejime-late-judge";
 import { processAttendanceCheck } from "./services/attendance-check";
 import { processGmailWatchers } from "./services/gmail-watcher";
 import { processSlackInviteMonitors } from "./services/slack-invite-monitor";
@@ -56,6 +57,7 @@ export default {
       "slackInviteMonitors",
       "roleAutoInvites",
       "morningStandup",
+      "kejimeLateJudge",
     ];
     const tasks: Array<Promise<unknown>> = [
       processScheduledJobs(env.DB, client),
@@ -73,6 +75,9 @@ export default {
       processRoleAutoInvites(env),
       // 003 朝勉強会けじめ制度 PR2: 平日 7:30/8:00 JST にリマインダー/締切投稿。
       processMorningStandup(env.DB, client),
+      // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に late 判定 + ポイント加算。
+      // processLateJudgment は内部で 8:00-8:04 / 平日 window 判定して no-op に落とす。
+      processLateJudgment(env.DB),
     ];
     if (isDailyRosterSyncWindow) {
       // 名簿 Slack 連携強化 PR4: 0:00-0:04 JST のみ実行。全 member_roster
