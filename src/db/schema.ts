@@ -789,6 +789,117 @@ export const rosterMemberValues = sqliteTable(
   ],
 );
 
+// 朝勉強会けじめ制度 PR1: kejime_members (migration 0053)
+// 1 event_action (kejime_tracker) : N member。current_points / ramen_count
+// は累積カウンタ。表示時は min(points, 5) で 5pt キャップ表示する (アプリ層)。
+// role_member_id は将来「勉強会チーム」ロールと紐付ける際のための optional
+// TEXT 参照 (FK は付けない: roles は別 PR で連携)。
+export const kejimeMembers = sqliteTable(
+  "kejime_members",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    roleMemberId: text("role_member_id"),
+    slackUserId: text("slack_user_id").notNull(),
+    displayName: text("display_name").notNull(),
+    currentPoints: integer("current_points").notNull().default(0),
+    ramenCount: integer("ramen_count").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_members_event_action_id").on(t.eventActionId),
+    uniqueIndex("uq_kejime_members_action_slack_user").on(
+      t.eventActionId,
+      t.slackUserId,
+    ),
+  ],
+);
+
+// 朝勉強会けじめ制度 PR1: kejime_events (migration 0054)
+// ポイント変動のイミュータブルなジャーナル。type は CHECK で 4 値固定:
+// 'late' | 'article' | 'exemption' | 'ramen_reset'。
+// points_delta / ramen_delta は符号付き (記事承認 -1 / 遅刻 +1 等)。
+export const kejimeEvents = sqliteTable(
+  "kejime_events",
+  {
+    id: text("id").primaryKey(),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => kejimeMembers.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    pointsDelta: integer("points_delta").notNull().default(0),
+    ramenDelta: integer("ramen_delta").notNull().default(0),
+    ref: text("ref"),
+    note: text("note"),
+    decidedBy: text("decided_by"),
+    occurredAt: text("occurred_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_events_member_id").on(t.memberId),
+    index("idx_kejime_events_occurred_at").on(t.occurredAt),
+  ],
+);
+
+// 朝勉強会けじめ制度 PR1: morning_attendance (migration 0055)
+// 7:30 参加ボタン / 8:00 締め切り判定の日次結果。date は YYYY-MM-DD (JST)。
+// status は CHECK で 'attended' | 'late' | 'excused' に固定。
+// (action_id, date, slack_user_id) UNIQUE で 1 日 1 user 1 行を強制。
+export const morningAttendance = sqliteTable(
+  "morning_attendance",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    status: text("status").notNull(),
+    messageTs: text("message_ts"),
+    recordedAt: text("recorded_at").notNull(),
+  },
+  (t) => [
+    index("idx_morning_attendance_action_date").on(t.eventActionId, t.date),
+    uniqueIndex("uq_morning_attendance_action_date_user").on(
+      t.eventActionId,
+      t.date,
+      t.slackUserId,
+    ),
+  ],
+);
+
+// 朝勉強会けじめ制度 PR1: kejime_article_requests (migration 0056)
+// けじめch に投稿された Qiita 記事 URL の承認管理。status は CHECK で:
+// 'pending' | 'approved' | 'rejected_short' | 'rejected_domain' | 'rejected_fetch_error'。
+// 勉強会チームロール所属者のいいねで承認 → -1pt (アプリ層で kejime_events
+// type='article' を発行)。
+export const kejimeArticleRequests = sqliteTable(
+  "kejime_article_requests",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => kejimeMembers.id, { onDelete: "cascade" }),
+    qiitaUrl: text("qiita_url").notNull(),
+    bodyLength: integer("body_length"),
+    status: text("status").notNull(),
+    threadTs: text("thread_ts"),
+    channelId: text("channel_id"),
+    decidedBy: text("decided_by"),
+    decidedAt: text("decided_at"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_article_requests_event_action_id").on(t.eventActionId),
+    index("idx_kejime_article_requests_status").on(t.status),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
