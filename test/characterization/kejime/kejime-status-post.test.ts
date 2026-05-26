@@ -44,11 +44,29 @@ function trackerCfg(over: Record<string, unknown> = {}) {
   });
 }
 
-async function setupTracker(cfg = trackerCfg()) {
+// PR12: kejime_status_post は同 event の morning_standup.config.closeTime + 5min を
+// 発火位相とするため、デフォルトでは closeTime 未指定 (= 08:00 default) の
+// morning_standup action を一緒に作る。closeTime override は opts で渡す。
+function morningCfg(over: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    schemaVersion: 1, channelId: "C-MORNING", themes: {}, ...over,
+  });
+}
+
+async function setupTracker(
+  cfg = trackerCfg(),
+  opts: { morning?: string | null } = {},
+) {
   const ev = await makeEvent();
   const tracker = await makeEventAction(ev.id, {
     actionType: "kejime_tracker", config: cfg,
   });
+  // morning が明示的に null の場合のみ skip (= morning 不在ケースのテスト)。
+  if (opts.morning !== null) {
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup", config: opts.morning ?? morningCfg(),
+    });
+  }
   return { ev, tracker };
 }
 
@@ -211,14 +229,74 @@ describe("processKejimeStatusPost: 平日 8:05 投稿", () => {
       actionType: "kejime_tracker",
       config: trackerCfg({ kejimeChannelId: "C-A" }),
     });
+    await makeEventAction(ev1.id, {
+      actionType: "morning_standup", config: morningCfg(),
+    });
     await makeEventAction(ev2.id, {
       actionType: "kejime_tracker",
       config: trackerCfg({ kejimeChannelId: "C-B" }),
+    });
+    await makeEventAction(ev2.id, {
+      actionType: "morning_standup", config: morningCfg(),
     });
     const res = await processKejimeStatusPost(testD1(), slackClient);
     expect(res).toEqual({ posted: 2 });
     const channels = slack.callsOf("postMessage")
       .map((c) => (c.args as string[])[0]).sort();
     expect(channels).toEqual(["C-A", "C-B"]);
+  });
+});
+
+// PR12: closeTime configurable に追随する (8:00 hardcode 廃止)。
+describe("processKejimeStatusPost: closeTime 追随 (PR12)", () => {
+  it("closeTime=14:00 → 14:05 で post (8:05 では発火しない)", async () => {
+    freezeJst(MON, "08:05");
+    await setupTracker(trackerCfg(), {
+      morning: morningCfg({ closeTime: "14:00" }),
+    });
+    // closeTime=14:00 の場合 8:05 では発火しない。
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 0 });
+
+    // 14:05 (= closeTime + 5min) で発火。
+    freezeJst(MON, "14:05");
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 1 });
+    expect(slack.callsOf("postMessage")).toHaveLength(1);
+  });
+
+  it("closeTime=14:00 → 14:09 まで発火、14:10 で窓外", async () => {
+    freezeJst(MON, "14:09");
+    await setupTracker(trackerCfg(), {
+      morning: morningCfg({ closeTime: "14:00" }),
+    });
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 1 });
+
+    // dedup された後でも 14:10 では別件として呼ばれても窓外。
+    freezeJst(MON, "14:10");
+    // 新しい event で別 tracker を作って (dedup の影響を避ける)。
+    const ev2 = await makeEvent();
+    await makeEventAction(ev2.id, {
+      actionType: "kejime_tracker",
+      config: trackerCfg({ kejimeChannelId: "C-LATE" }),
+    });
+    await makeEventAction(ev2.id, {
+      actionType: "morning_standup", config: morningCfg({ closeTime: "14:00" }),
+    });
+    const r2 = await processKejimeStatusPost(testD1(), slackClient);
+    // 既存 (14:00) tracker は dedup、14:10 では新規 tracker も窓外 → posted:0。
+    expect(r2).toEqual({ posted: 0 });
+  });
+
+  it("morning_standup が存在しない → warn して skip", async () => {
+    freezeJst(MON, "08:05");
+    await setupTracker(trackerCfg(), { morning: null });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 0 });
+    expect(slack.calls).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
