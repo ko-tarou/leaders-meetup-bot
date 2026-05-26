@@ -50,9 +50,15 @@ export function formatDateLabel(ymd: string): string {
   return `${ymd} (${DOW_JA[jst.getUTCDay()]})`;
 }
 
-/** pure: Slack Block Kit を 1 section にまとめて返す。テスタブル。 */
+/**
+ * pure: Slack Block Kit を組み立てて返す。テスタブル。
+ *
+ * PR14: trackerActionId を渡すと末尾に「📝 記事を申請」ボタン (actions block) を
+ * 追加する。未指定なら従来通り section 1 件のみ返す (既存呼び出し互換)。
+ */
 export function buildStatusBlocks(
   members: MemberRow[], articles: ArticleRow[], dateLabel: string,
+  trackerActionId?: string,
 ): Block[] {
   const lines: string[] = [`:coffee: *朝活けじめステータス* ─ ${dateLabel}`];
 
@@ -88,7 +94,20 @@ export function buildStatusBlocks(
     }
   }
 
-  return [mrkdwnSection(lines.join("\n"))];
+  const blocks: Block[] = [mrkdwnSection(lines.join("\n"))];
+  if (trackerActionId) {
+    blocks.push({
+      type: "actions",
+      elements: [{
+        type: "button",
+        text: { type: "plain_text", text: "📝 記事を申請" },
+        style: "primary",
+        action_id: `kejime_article_submit:${trackerActionId}`,
+        value: trackerActionId,
+      }],
+    });
+  }
+  return blocks;
 }
 
 /** PR11: display_name == slack_user_id (= 未解決) な行を Slack で resolve し DB に書き戻す。 */
@@ -227,7 +246,9 @@ async function postOnce(
     displayName: nameMap.get(a.slackUserId) ?? a.displayName,
   }));
 
-  const blocks = buildStatusBlocks(members, resolvedArticleRows, formatDateLabel(ymd));
+  const blocks = buildStatusBlocks(
+    members, resolvedArticleRows, formatDateLabel(ymd), actionId,
+  );
   const text = `朝活けじめステータス (${ymd})`;
   try {
     await slackClient.postMessage(channelId, text, blocks);
