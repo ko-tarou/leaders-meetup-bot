@@ -13,9 +13,52 @@ import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
 
 type D1 = ReturnType<typeof drizzle>;
 type Poster = { postMessage: (ch: string, t: string) => Promise<unknown> };
+export type ArticleMessageTemplates = {
+  approved?: string;
+  rejectedShort?: string;
+  rejectedDomain?: string;
+  rejectedFetchError?: string;
+};
 type Tracker = {
   actionId: string; roleId: string; minLen: number; channelId: string;
+  messageTemplates?: ArticleMessageTemplates;
 };
+
+// PR15: 通知文面の default テンプレ。config.messageTemplates の各 key が
+// 未指定 / 空文字なら default を使う (既存 hardcode の文言を維持)。
+// placeholder: {user} {url} {length} {minLength} {newPoints}
+export const DEFAULT_APPROVED_TEMPLATE =
+  "🎉 <@{user}> の記事を承認しました (-1pt → {newPoints}pt)";
+export const DEFAULT_REJECTED_SHORT_TEMPLATE =
+  "記事の分量が少ないため却下です ({length}文字 / 必要 {minLength}文字)。";
+export const DEFAULT_REJECTED_DOMAIN_TEMPLATE =
+  "Qiita 記事 URL のみ受け付けています。";
+export const DEFAULT_REJECTED_FETCH_ERROR_TEMPLATE =
+  "記事取得に失敗しました。admin の手動承認をお待ちください。";
+export const DEFAULT_PENDING_TEMPLATE =
+  "Qiita 記事受領 ({length}文字)。勉強会チームのいいねで承認されます。";
+
+/** pure: template の placeholder を vars で置換する。未指定 placeholder は "" に置換。 */
+export function renderArticleTemplate(
+  tpl: string,
+  vars: { user?: string; url?: string; length?: number; minLength?: number; newPoints?: number },
+): string {
+  return tpl
+    .replace(/\{user\}/g, vars.user ?? "")
+    .replace(/\{url\}/g, vars.url ?? "")
+    .replace(/\{length\}/g, vars.length != null ? String(vars.length) : "")
+    .replace(/\{minLength\}/g, vars.minLength != null ? String(vars.minLength) : "")
+    .replace(/\{newPoints\}/g, vars.newPoints != null ? String(vars.newPoints) : "");
+}
+
+function pickTemplate(
+  templates: ArticleMessageTemplates | undefined,
+  key: keyof ArticleMessageTemplates,
+  fallback: string,
+): string {
+  const v = templates?.[key];
+  return v && v.trim() ? v : fallback;
+}
 
 const ARTICLE_REACTIONS = new Set(["+1", "thumbsup", "いいね", "raised_hands"]);
 const URL_RE = /https?:\/\/[^\s<>]+/;
@@ -62,12 +105,26 @@ function parseTracker(actionId: string, raw: string | null): Tracker | null {
     const o = JSON.parse(raw) as {
       kejimeChannelId?: string; channelId?: string;
       roleId?: string; minArticleLength?: number;
+      messageTemplates?: unknown;
     };
     const ch = o.kejimeChannelId ?? o.channelId;
     if (!ch || typeof o.roleId !== "string" || !o.roleId) return null;
+    // PR15: messageTemplates は object のときのみ採用。各 key は string のみ採用
+    // (空欄含む)。型違い / 未指定 は undefined のまま default 文言にフォールバック。
+    let templates: ArticleMessageTemplates | undefined;
+    if (o.messageTemplates && typeof o.messageTemplates === "object") {
+      const m = o.messageTemplates as Record<string, unknown>;
+      const t: ArticleMessageTemplates = {};
+      if (typeof m.approved === "string") t.approved = m.approved;
+      if (typeof m.rejectedShort === "string") t.rejectedShort = m.rejectedShort;
+      if (typeof m.rejectedDomain === "string") t.rejectedDomain = m.rejectedDomain;
+      if (typeof m.rejectedFetchError === "string") t.rejectedFetchError = m.rejectedFetchError;
+      templates = t;
+    }
     return {
       actionId, channelId: ch, roleId: o.roleId,
       minLen: o.minArticleLength ?? 500,
+      messageTemplates: templates,
     };
   } catch { return null; }
 }
@@ -162,19 +219,34 @@ async function processQiitaSubmissionInner(
 
   let status: string, length: number | null = null, notice: string;
   const parsed = parseQiitaUrl(args.url);
+  const tpls = tr.messageTemplates;
   if (!parsed) {
-    status = "rejected_domain"; notice = "Qiita 記事 URL のみ受け付けています。";
+    status = "rejected_domain";
+    notice = renderArticleTemplate(
+      pickTemplate(tpls, "rejectedDomain", DEFAULT_REJECTED_DOMAIN_TEMPLATE),
+      { user: args.slackUserId, url: args.url },
+    );
   } else {
     const r = await fetchQiitaBodyLength(parsed.itemId, fetchImpl);
     if (!r.ok) {
       status = "rejected_fetch_error";
-      notice = "記事取得に失敗しました。admin の手動承認をお待ちください。";
+      notice = renderArticleTemplate(
+        pickTemplate(tpls, "rejectedFetchError", DEFAULT_REJECTED_FETCH_ERROR_TEMPLATE),
+        { user: args.slackUserId, url: args.url },
+      );
     } else if (r.length < tr.minLen) {
       status = "rejected_short"; length = r.length;
-      notice = `記事の分量が少ないため却下です (${r.length}文字 / 必要 ${tr.minLen}文字)。`;
+      notice = renderArticleTemplate(
+        pickTemplate(tpls, "rejectedShort", DEFAULT_REJECTED_SHORT_TEMPLATE),
+        { user: args.slackUserId, url: args.url, length: r.length, minLength: tr.minLen },
+      );
     } else {
       status = "pending"; length = r.length;
-      notice = `Qiita 記事受領 (${r.length}文字)。勉強会チームのいいねで承認されます。`;
+      // pending notice は config 化対象外 (要望 3 つに含まれない / 仕様凍結)。
+      notice = renderArticleTemplate(
+        DEFAULT_PENDING_TEMPLATE,
+        { user: args.slackUserId, url: args.url, length: r.length },
+      );
     }
   }
   await d1.insert(kejimeArticleRequests).values({
@@ -224,6 +296,15 @@ export async function handleKejimeReactionAdded(
     ramenCount: sql`${kejimeMembers.ramenCount} + ${ramenBumped}`,
     updatedAt: now,
   }).where(eq(kejimeMembers.id, author.id));
-  await slack.postMessage(event.item.channel,
-    `🎉 <@${author.slackUserId}> の記事を承認しました (-1pt)`);
+  // PR15: approved 通知も config テンプレ対応。template 内の <@..> mention は
+  // template 側で書く前提なので、{user} には slack user id のみを渡す
+  // (default template が "<@{user}>" を保持して既存挙動 (-1pt 表記) を維持)。
+  const approvedNotice = renderArticleTemplate(
+    pickTemplate(tr.messageTemplates, "approved", DEFAULT_APPROVED_TEMPLATE),
+    {
+      user: author.slackUserId, url: req.qiitaUrl,
+      newPoints: Math.min(internalAfter, 5),
+    },
+  );
+  await slack.postMessage(event.item.channel, approvedNotice);
 }
