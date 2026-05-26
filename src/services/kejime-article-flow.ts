@@ -1,4 +1,7 @@
-// 朝勉強会けじめ制度 PR5: Qiita 記事 URL 投稿 + reaction_added 承認フロー。
+// 朝勉強会けじめ制度 PR5 / PR14: Qiita 記事 URL 投稿 + reaction_added 承認フロー。
+// PR14: 記事申請ボタン + Slack Modal から submit する経路を追加するため、
+// URL 処理コアを processQiitaArticleSubmission として抽出した
+// (handleKejimeChannelMessage は channel/text パース後にこのコアを呼ぶ薄い wrapper)。
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
@@ -10,7 +13,9 @@ import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
 
 type D1 = ReturnType<typeof drizzle>;
 type Poster = { postMessage: (ch: string, t: string) => Promise<unknown> };
-type Tracker = { actionId: string; roleId: string; minLen: number };
+type Tracker = {
+  actionId: string; roleId: string; minLen: number; channelId: string;
+};
 
 const ARTICLE_REACTIONS = new Set(["+1", "thumbsup", "いいね", "raised_hands"]);
 const URL_RE = /https?:\/\/[^\s<>]+/;
@@ -24,23 +29,47 @@ export type KejimeReactionEvent = {
   item?: { type?: string; channel?: string; ts?: string };
 };
 
-async function findTracker(d1: D1, channelId: string): Promise<Tracker | null> {
+async function findTrackerByChannel(
+  d1: D1, channelId: string,
+): Promise<Tracker | null> {
   const rows = await d1.select().from(eventActions).where(and(
     eq(eventActions.actionType, "kejime_tracker"), eq(eventActions.enabled, 1),
   )).all();
   for (const r of rows) {
-    if (!r.config) continue;
-    try {
-      const o = JSON.parse(r.config) as {
-        kejimeChannelId?: string; channelId?: string;
-        roleId?: string; minArticleLength?: number;
-      };
-      const ch = o.kejimeChannelId ?? o.channelId;
-      if (ch !== channelId || typeof o.roleId !== "string" || !o.roleId) continue;
-      return { actionId: r.id, roleId: o.roleId, minLen: o.minArticleLength ?? 500 };
-    } catch { /* skip */ }
+    const t = parseTracker(r.id, r.config);
+    if (t && t.channelId === channelId) return t;
   }
   return null;
+}
+
+/**
+ * PR14: actionId から tracker を引く (modal submit 経路で使う)。
+ * channelId は modal 通知の post 先として必要。
+ */
+async function findTrackerById(d1: D1, actionId: string): Promise<Tracker | null> {
+  const row = await d1.select().from(eventActions).where(and(
+    eq(eventActions.id, actionId),
+    eq(eventActions.actionType, "kejime_tracker"),
+    eq(eventActions.enabled, 1),
+  )).get();
+  if (!row) return null;
+  return parseTracker(row.id, row.config);
+}
+
+function parseTracker(actionId: string, raw: string | null): Tracker | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as {
+      kejimeChannelId?: string; channelId?: string;
+      roleId?: string; minArticleLength?: number;
+    };
+    const ch = o.kejimeChannelId ?? o.channelId;
+    if (!ch || typeof o.roleId !== "string" || !o.roleId) return null;
+    return {
+      actionId, channelId: ch, roleId: o.roleId,
+      minLen: o.minArticleLength ?? 500,
+    };
+  } catch { return null; }
 }
 
 async function ensureMember(d1: D1, actionId: string, userId: string): Promise<string> {
@@ -69,13 +98,70 @@ export async function handleKejimeChannelMessage(
   if (event.subtype === "bot_message" || event.subtype === "message_changed") return;
   if (!event.channel || !event.user || !event.text || !event.ts) return;
   const d1 = drizzle(db);
-  const tr = await findTracker(d1, event.channel); if (!tr) return;
+  const tr = await findTrackerByChannel(d1, event.channel); if (!tr) return;
   const m = event.text.match(URL_RE); if (!m) return;
-  const url = m[0];
-  const memberId = await ensureMember(d1, tr.actionId, event.user);
+  await processQiitaSubmissionInner(d1, slack, fetchImpl, {
+    tracker: tr, slackUserId: event.user, url: m[0],
+    threadTs: event.ts, channelId: event.channel,
+  });
+}
+
+/**
+ * PR14: けじめ記事申請の URL 処理コア。
+ *
+ * - チャンネルメッセージ経路: handleKejimeChannelMessage が channel/text パース
+ *   後に呼ぶ (threadTs = event.ts, channelId = event.channel)。
+ * - Slack Modal 経路: view_submission ハンドラが actionId + url で呼ぶ
+ *   (channelId = tracker から解決、threadTs 無し)。
+ *
+ * 副作用は 2 つ:
+ *   1) kejime_article_requests に 1 行 INSERT
+ *   2) tracker の kejime channel に notice メッセージを 1 件 post
+ */
+export type QiitaSubmitArgs = {
+  /** Modal 経路 / 直接呼び出しの両方で必須。actionId から tracker を解決する。 */
+  actionId: string;
+  slackUserId: string;
+  url: string;
+  /** チャンネル経路はメッセージの ts、modal 経路は null。 */
+  threadTs?: string | null;
+  /** メッセージ post 先。未指定なら tracker.channelId を使う。 */
+  channelId?: string;
+};
+
+/**
+ * PR14: 外部 API。D1Database を受け取り内部で drizzle を作る (既存 service の
+ * 慣例に合わせる)。modal submit ハンドラ / 将来の admin force-submit 等から
+ * 呼ばれる。
+ */
+export async function processQiitaArticleSubmission(
+  db: D1Database, slack: Poster, fetchImpl: typeof globalThis.fetch,
+  args: QiitaSubmitArgs,
+): Promise<{ status: string; length: number | null } | null> {
+  const d1 = drizzle(db);
+  const tr = await findTrackerById(d1, args.actionId);
+  if (!tr) return null;
+  return processQiitaSubmissionInner(d1, slack, fetchImpl, {
+    tracker: tr, slackUserId: args.slackUserId, url: args.url,
+    threadTs: args.threadTs ?? null, channelId: args.channelId,
+  });
+}
+
+type SubmissionInnerArgs = {
+  tracker: Tracker; slackUserId: string; url: string;
+  threadTs?: string | null; channelId?: string;
+};
+
+async function processQiitaSubmissionInner(
+  d1: D1, slack: Poster, fetchImpl: typeof globalThis.fetch,
+  args: SubmissionInnerArgs,
+): Promise<{ status: string; length: number | null }> {
+  const tr = args.tracker;
+  const channelId = args.channelId ?? tr.channelId;
+  const memberId = await ensureMember(d1, tr.actionId, args.slackUserId);
 
   let status: string, length: number | null = null, notice: string;
-  const parsed = parseQiitaUrl(url);
+  const parsed = parseQiitaUrl(args.url);
   if (!parsed) {
     status = "rejected_domain"; notice = "Qiita 記事 URL のみ受け付けています。";
   } else {
@@ -93,10 +179,13 @@ export async function handleKejimeChannelMessage(
   }
   await d1.insert(kejimeArticleRequests).values({
     id: crypto.randomUUID(), eventActionId: tr.actionId, memberId,
-    qiitaUrl: url, bodyLength: length, status,
-    threadTs: event.ts, channelId: event.channel, createdAt: new Date().toISOString(),
+    qiitaUrl: args.url, bodyLength: length, status,
+    threadTs: args.threadTs ?? null, channelId,
+    createdAt: new Date().toISOString(),
   });
-  await slack.postMessage(event.channel, notice);
+  await slack.postMessage(channelId,
+    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`);
+  return { status, length };
 }
 
 export async function handleKejimeReactionAdded(
@@ -105,7 +194,7 @@ export async function handleKejimeReactionAdded(
   if (!event.reaction || !ARTICLE_REACTIONS.has(event.reaction)) return;
   if (!event.user || !event.item?.channel || !event.item?.ts) return;
   const d1 = drizzle(db);
-  const tr = await findTracker(d1, event.item.channel); if (!tr) return;
+  const tr = await findTrackerByChannel(d1, event.item.channel); if (!tr) return;
   const req = await d1.select().from(kejimeArticleRequests).where(and(
     eq(kejimeArticleRequests.eventActionId, tr.actionId),
     eq(kejimeArticleRequests.threadTs, event.item.ts),
