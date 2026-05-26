@@ -101,6 +101,31 @@ export const roles = {
       `/orgs/${eventId}/actions/${actionId}/workspace-members`,
     ),
 
+  // 003 PR8: event/action コンテキスト無しの cross-event 単体 lookup。
+  // RoleNameDisplay が config.roleId だけからロール名を表示するために使う。
+  // 存在しない / 失敗時は null を返し caller がフォールバック UI を出す。
+  getRoleByGlobalId: async (
+    roleId: string,
+  ): Promise<{
+    id: string;
+    name: string;
+    description?: string | null;
+    eventActionId: string;
+    parentRoleId?: string | null;
+  } | null> => {
+    try {
+      return await request<{
+        id: string;
+        name: string;
+        description?: string | null;
+        eventActionId: string;
+        parentRoleId?: string | null;
+      }>(`/roles/${encodeURIComponent(roleId)}`);
+    } catch {
+      return null;
+    }
+  },
+
   // 同期: 各 channel の現状 vs 期待値を返す → 実行
   syncDiff: (eventId: string, actionId: string) =>
     request<SyncDiffResponse>(

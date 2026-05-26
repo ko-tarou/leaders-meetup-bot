@@ -4,11 +4,14 @@ import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 import { settingsFormStyles as s } from "../morning-standup/settingsFormStyles";
+import { ChannelSelector } from "../ChannelSelector";
+import { RoleNameDisplay } from "../role-management/RoleNameDisplay";
 
-// 003 PR7: kejime_tracker アクション専用の設定タブ。
+// 003 PR7 → PR8: kejime_tracker アクション専用の設定タブ。
 // config schema: { kejimeChannelId, roleId?, minArticleLength? }
-// - kejimeChannelId 空欄は cron skip / 空でないなら "C" prefix を要求。
-// - minArticleLength は 1 以上の整数を要求 (0 / 負数 / 非整数は弾く)。
+// - PR8: kejimeChannelId は ChannelSelector に置き換え (ID 直入力廃止)
+// - PR8: roleId は RoleNameDisplay でロール名を表示 (config 値は維持)
+// - minArticleLength は 1 以上の整数を要求
 
 type Config = { kejimeChannelId?: string; roleId?: string; minArticleLength?: number };
 
@@ -34,17 +37,16 @@ export function KejimeSettingsForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const channelInvalid =
-    kejimeChannelId.trim() !== "" && !kejimeChannelId.trim().startsWith("C");
   const minParsed = Number(minArticleLength);
   const minInvalid =
     minArticleLength.trim() === "" || !Number.isInteger(minParsed) || minParsed < 1;
 
   const handleSave = async () => {
     setError(null);
+    // ChannelSelector は valid な channelId しか返さないが、念のため "C" prefix 検証は維持
     const cid = kejimeChannelId.trim();
     if (cid !== "" && !cid.startsWith("C")) {
-      setError("kejimeChannelId は Slack の channel ID (C で始まる) を入力してください");
+      setError("kejimeChannelId は Slack の channel ID (C で始まる) を指定してください");
       return;
     }
     if (minInvalid) {
@@ -70,27 +72,22 @@ export function KejimeSettingsForm({
       <h3 style={{ marginTop: 0 }}>けじめ管理 設定</h3>
       <p style={s.intro}>
         けじめチャンネルへの記事 URL 申請 / 遅刻ステータス自動再投稿 / いいね承認の設定です。
-        kejimeChannelId が空のときは cron が skip します。
+        チャンネル未選択のときは cron が skip します。
       </p>
 
       {error && <div style={s.errorBox}>{error}</div>}
 
-      <Field label="けじめチャンネル ID">
-        <input
-          type="text" value={kejimeChannelId}
-          onChange={(e) => setKejimeChannelId(e.target.value)}
-          placeholder="C01ABC..." disabled={saving}
-          aria-invalid={channelInvalid} aria-label="けじめチャンネル ID"
-          style={{ ...s.input, ...(channelInvalid ? { borderColor: colors.danger } : {}) }}
+      <Field label="けじめチャンネル">
+        <ChannelSelector
+          value={kejimeChannelId}
+          onChange={(id) => setKejimeChannelId(id)}
         />
       </Field>
 
-      <Field label="勉強会チーム ロール ID">
-        <input
-          type="text" value={initial.roleId ?? ""} readOnly disabled
-          aria-label="勉強会チーム ロール ID" placeholder="(未設定)"
-          style={{ ...s.input, ...s.inputReadonly }}
-        />
+      <Field label="勉強会チーム ロール">
+        <div aria-label="勉強会チーム ロール">
+          <RoleNameDisplay roleId={initial.roleId ?? null} />
+        </div>
         <div style={s.hint}>
           変更したい場合は「メンバー」タブ → ロール → 勉強会チーム から行ってください。
         </div>
@@ -114,7 +111,6 @@ export function KejimeSettingsForm({
       <div style={s.tipBox}>
         <strong>💡 ヒント</strong>
         <ul style={s.tipList}>
-          <li>kejimeChannelId はけじめチャンネルの ID (C で始まる)</li>
           <li>記事は Qiita のみ受付 (https://qiita.com/&lt;user&gt;/items/&lt;id&gt;)</li>
           <li>「勉強会チーム」のいいねリアクションで承認 (自分自身は不可)</li>
           <li>{DEFAULT_MIN}文字未満は自動却下</li>
