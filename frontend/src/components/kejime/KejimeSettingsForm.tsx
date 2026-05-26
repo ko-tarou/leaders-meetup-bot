@@ -14,9 +14,26 @@ import { RoleNameDisplay } from "../role-management/RoleNameDisplay";
 // - PR8: roleId は RoleNameDisplay でロール名を表示 (config 値は維持)
 // - minArticleLength は 1 以上の整数を要求
 
-type Config = { kejimeChannelId?: string; roleId?: string; minArticleLength?: number };
+type MessageTemplates = {
+  approved?: string;
+  rejectedShort?: string;
+  rejectedDomain?: string;
+  rejectedFetchError?: string;
+};
+type Config = {
+  kejimeChannelId?: string; roleId?: string; minArticleLength?: number;
+  messageTemplates?: MessageTemplates;
+};
 
 const DEFAULT_MIN = 500;
+
+// PR15: 通知文面 textarea の placeholder ヒント。実 default は backend 側で適用。
+const TPL_DEFAULTS: Record<keyof MessageTemplates, string> = {
+  approved: "🎉 <@{user}> の記事を承認しました (-1pt → {newPoints}pt)",
+  rejectedShort: "記事の分量が少ないため却下です ({length}文字 / 必要 {minLength}文字)。",
+  rejectedDomain: "Qiita 記事 URL のみ受け付けています。",
+  rejectedFetchError: "記事取得に失敗しました。admin の手動承認をお待ちください。",
+};
 
 function parseConfig(raw: string | null | undefined): Config {
   if (!raw) return {};
@@ -37,6 +54,14 @@ export function KejimeSettingsForm({
   const [kejimeChannelName, setKejimeChannelName] = useState<string>("");
   const [minArticleLength, setMinArticleLength] = useState(
     String(initial.minArticleLength ?? DEFAULT_MIN),
+  );
+  // PR15: 通知文面 4 種 (空欄なら backend で default 文言)。
+  const initialTpls = initial.messageTemplates ?? {};
+  const [tplApproved, setTplApproved] = useState(initialTpls.approved ?? "");
+  const [tplRejectedShort, setTplRejectedShort] = useState(initialTpls.rejectedShort ?? "");
+  const [tplRejectedDomain, setTplRejectedDomain] = useState(initialTpls.rejectedDomain ?? "");
+  const [tplRejectedFetchError, setTplRejectedFetchError] = useState(
+    initialTpls.rejectedFetchError ?? "",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +96,16 @@ export function KejimeSettingsForm({
       setError("記事の最小文字数は 1 以上の整数で入力してください");
       return;
     }
-    const next: Config = { ...initial, kejimeChannelId: cid, minArticleLength: minParsed };
+    // PR15: messageTemplates は空文字を保持して保存する (空 = default を使う合図)。
+    const messageTemplates: MessageTemplates = {
+      approved: tplApproved,
+      rejectedShort: tplRejectedShort,
+      rejectedDomain: tplRejectedDomain,
+      rejectedFetchError: tplRejectedFetchError,
+    };
+    const next: Config = {
+      ...initial, kejimeChannelId: cid, minArticleLength: minParsed, messageTemplates,
+    };
 
     setSaving(true);
     try {
@@ -142,6 +176,52 @@ export function KejimeSettingsForm({
         <div style={s.hint}>
           default は {DEFAULT_MIN}。これ未満の記事は自動却下されます。
         </div>
+      </Field>
+
+      <Field label="通知文面 (承認時)">
+        <textarea
+          value={tplApproved} onChange={(e) => setTplApproved(e.target.value)}
+          disabled={saving} aria-label="通知文面 (承認時)"
+          placeholder={TPL_DEFAULTS.approved}
+          style={{ ...s.input, minHeight: "3rem", fontFamily: "inherit" }}
+        />
+        <div style={s.hint}>
+          placeholder: {"{user}"} (Slack user id), {"{newPoints}"}, {"{url}"}。
+          空欄なら default 文言が使われます。
+        </div>
+      </Field>
+
+      <Field label="通知文面 (却下: 文字数不足)">
+        <textarea
+          value={tplRejectedShort} onChange={(e) => setTplRejectedShort(e.target.value)}
+          disabled={saving} aria-label="通知文面 (却下: 文字数不足)"
+          placeholder={TPL_DEFAULTS.rejectedShort}
+          style={{ ...s.input, minHeight: "3rem", fontFamily: "inherit" }}
+        />
+        <div style={s.hint}>
+          placeholder: {"{length}"}, {"{minLength}"}, {"{user}"}, {"{url}"}。空欄なら default。
+        </div>
+      </Field>
+
+      <Field label="通知文面 (却下: 非 Qiita ドメイン)">
+        <textarea
+          value={tplRejectedDomain} onChange={(e) => setTplRejectedDomain(e.target.value)}
+          disabled={saving} aria-label="通知文面 (却下: 非 Qiita ドメイン)"
+          placeholder={TPL_DEFAULTS.rejectedDomain}
+          style={{ ...s.input, minHeight: "3rem", fontFamily: "inherit" }}
+        />
+        <div style={s.hint}>placeholder: {"{user}"}, {"{url}"}。空欄なら default。</div>
+      </Field>
+
+      <Field label="通知文面 (却下: 記事取得失敗)">
+        <textarea
+          value={tplRejectedFetchError}
+          onChange={(e) => setTplRejectedFetchError(e.target.value)}
+          disabled={saving} aria-label="通知文面 (却下: 記事取得失敗)"
+          placeholder={TPL_DEFAULTS.rejectedFetchError}
+          style={{ ...s.input, minHeight: "3rem", fontFamily: "inherit" }}
+        />
+        <div style={s.hint}>placeholder: {"{user}"}, {"{url}"}。空欄なら default。</div>
       </Field>
 
       <div style={s.tipBox}>

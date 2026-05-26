@@ -21,11 +21,12 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は 朝勉強会けじめ制度 PR1 で追加された 0056_create_kejime_article_requests。
+    // 末尾は 朝勉強会けじめ制度 PR15 で追加された
+    // 0057_kejime_events_add_manual_edit (kejime_events.type CHECK 拡張)。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
     expect(names[names.length - 1]).toBe(
-      "0056_create_kejime_article_requests",
+      "0057_kejime_events_add_manual_edit",
     );
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();

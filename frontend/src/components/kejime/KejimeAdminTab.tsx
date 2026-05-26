@@ -23,6 +23,53 @@ function Section({ title, empty, isEmpty, children }: {
   );
 }
 
+// PR15: admin がメンバーの current_points を直接編集する行コンポーネント。
+// 「編集」→ インライン input → 「保存」/ 「キャンセル」。0〜100 の整数のみ許可。
+function MemberRow({ m, busy, onEdit }: {
+  m: Member; busy: boolean; onEdit: (n: number) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(m.currentPoints));
+  const parsed = Number(value);
+  const invalid = value.trim() === ""
+    || !Number.isInteger(parsed) || parsed < 0 || parsed > 100;
+
+  if (!editing) {
+    return (
+      <div style={s.row}>
+        <span style={{ flex: 1 }}>{m.displayName}</span>
+        <span style={s.meta}>{m.currentPoints} / {m.displayPoints} / {m.ramenCount}</span>
+        <button className="btn btn-ghost btn-sm" disabled={busy}
+          aria-label={`${m.displayName} のポイントを編集`}
+          onClick={() => { setValue(String(m.currentPoints)); setEditing(true); }}>
+          編集
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div style={s.row}>
+      <span style={{ flex: 1 }}>{m.displayName}</span>
+      <input
+        type="number" min={0} max={100} step={1} value={value}
+        aria-label={`${m.displayName} の新しいポイント`}
+        aria-invalid={invalid} disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        style={{ width: "5rem", padding: "0.25rem", border: `1px solid ${colors.border}`,
+          borderRadius: "0.25rem", fontSize: "0.875rem" }}
+      />
+      <button className="btn btn-primary btn-sm" disabled={busy || invalid}
+        onClick={async () => { await onEdit(parsed); setEditing(false); }}>
+        保存
+      </button>
+      <button className="btn btn-ghost btn-sm" disabled={busy}
+        onClick={() => setEditing(false)}>
+        キャンセル
+      </button>
+    </div>
+  );
+}
+
 export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionId: string }) {
   const base = `/orgs/${eventId}/actions/${actionId}/kejime`;
   const [members, setMembers] = useState<Member[] | null>(null);
@@ -81,10 +128,25 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
       <Section title="📊 メンバー状況 (内部pt / 表示pt / 🌶)"
         empty="メンバー未登録" isEmpty={members.length === 0}>
         {members.map((m) => (
-          <div key={m.id} style={s.row}>
-            <span style={{ flex: 1 }}>{m.displayName}</span>
-            <span style={s.meta}>{m.currentPoints} / {m.displayPoints} / {m.ramenCount}</span>
-          </div>
+          <MemberRow
+            key={m.id} m={m} busy={busy === `p-${m.id}`}
+            onEdit={async (newPoints) => {
+              const ok = confirm(
+                `${m.displayName} のポイントを ${m.currentPoints}pt → ${newPoints}pt に変更します。よろしいですか？`,
+              );
+              if (!ok) return;
+              setBusy(`p-${m.id}`);
+              try {
+                await request(`${base}/edit-points`, {
+                  method: "POST",
+                  body: JSON.stringify({ memberId: m.id, newPoints }),
+                });
+                await load();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "edit failed");
+              } finally { setBusy(null); }
+            }}
+          />
         ))}
       </Section>
 
