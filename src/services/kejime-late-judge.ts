@@ -8,7 +8,7 @@ import { getJstNow } from "./time-utils";
 import { getUserName } from "./slack-names";
 import type { SlackClient } from "./slack-api";
 import {
-  DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime,
+  DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime, toHHMM,
 } from "./morning-standup";
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
@@ -75,7 +75,10 @@ export async function processLateJudgment(
     const closeTime = parseCloseTime(a.config);
     if (!isWithinFireWindow(now.hour, now.minute, closeTime)) continue;
     try {
-      judged += await judgeOne(d1, db, a.id, a.eventId, now.ymd, ymdC, slackClient);
+      // PR13: dedupKey に closeTime の HHMM を含めて、設定変更で別 dedup として扱う。
+      judged += await judgeOne(
+        d1, db, a.id, a.eventId, now.ymd, ymdC, toHHMM(closeTime), slackClient,
+      );
     } catch (e) { console.error(`kejime_late_judge error (action=${a.id}):`, e); }
   }
   return { judged };
@@ -83,7 +86,7 @@ export async function processLateJudgment(
 
 async function judgeOne(
   d1: D1, db: D1Database, morningActionId: string, eventId: string,
-  ymd: string, ymdC: string, slackClient?: SlackClient,
+  ymd: string, ymdC: string, hhmm: string, slackClient?: SlackClient,
 ): Promise<number> {
   const tracker = await d1.select().from(eventActions).where(and(
     eq(eventActions.eventId, eventId),
@@ -94,7 +97,9 @@ async function judgeOne(
   const roleId = parseRoleId(tracker.config);
   if (!roleId) { console.warn(`kejime_late_judge: bad config (action=${tracker.id})`); return 0; }
 
-  const dedupKey = `kejime_late_judge:${tracker.id}:${ymdC}`;
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
+  // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
+  const dedupKey = `kejime_late_judge:${tracker.id}:${ymdC}:${hhmm}`;
   const nowIso = new Date().toISOString();
   try {
     await d1.insert(scheduledJobs).values({

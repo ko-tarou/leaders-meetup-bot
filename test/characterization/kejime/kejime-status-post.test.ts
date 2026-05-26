@@ -6,6 +6,7 @@
  * 土日 / 窓外 / channelId 未設定 は no-op。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { MockSlackClient } from "../../mocks/slack";
 
 vi.mock("../../../src/services/slack-api", () => ({
@@ -210,15 +211,43 @@ describe("processKejimeStatusPost: 平日 8:05 投稿", () => {
     expect(slack.callsOf("postMessage")).toHaveLength(1);
   });
 
-  it("dedupKey 形式: kejime_status_post:<trackerId>:<YYYYMMDD>", async () => {
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。
+  // 形式: kejime_status_post:<trackerId>:<YYYYMMDD>:<HHMM>
+  // closeTime+5min を発火位相とするため default 08:05 → 0805。
+  it("dedupKey 形式: kejime_status_post:<trackerId>:<YYYYMMDD>:<HHMM>", async () => {
     freezeJst(MON, "08:05");
     const { tracker } = await setupTracker();
     await processKejimeStatusPost(testD1(), slackClient);
     const jobs = await testDb().select().from(scheduledJobs).all();
     expect(jobs).toHaveLength(1);
-    expect(jobs[0].dedupKey).toBe(`kejime_status_post:${tracker.id}:20260518`);
+    expect(jobs[0].dedupKey).toBe(`kejime_status_post:${tracker.id}:20260518:0805`);
     expect(jobs[0].type).toBe("kejime_status_post");
     expect(jobs[0].status).toBe("completed");
+  });
+
+  // PR13: 同日でも closeTime を変えれば別 dedupKey として再発火する。
+  it("同日でも closeTime を変えれば別 dedup として再発火する", async () => {
+    // 1 回目: closeTime=08:00 → fireAt=08:05 で post。
+    freezeJst(MON, "08:05");
+    await setupTracker();
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 1 });
+
+    // morning_standup の closeTime を 14:00 に変更し、14:05 で再呼出 → 別 dedup で再 post。
+    const db = testDb();
+    await db.update(eventActions)
+      .set({ config: morningCfg({ closeTime: "14:00" }) })
+      .where(eq(eventActions.actionType, "morning_standup"));
+    freezeJst(MON, "14:05");
+    expect(await processKejimeStatusPost(testD1(), slackClient))
+      .toEqual({ posted: 1 });
+
+    expect(slack.callsOf("postMessage")).toHaveLength(2);
+    const jobs = await db.select().from(scheduledJobs).all();
+    expect(jobs).toHaveLength(2);
+    const keys = jobs.map((j) => j.dedupKey).sort();
+    expect(keys[0]).toMatch(/:20260518:0805$/);
+    expect(keys[1]).toMatch(/:20260518:1405$/);
   });
 
   it("複数 tracker → それぞれの channel に post (posted=2)", async () => {
