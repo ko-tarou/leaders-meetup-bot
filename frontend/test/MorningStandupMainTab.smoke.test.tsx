@@ -188,7 +188,7 @@ describe("MorningStandupMainTab smoke", () => {
     expect(calls.length).toBe(baseCallCount);
   });
 
-  it("ロール未設定 (members 0) → 空状態 CTA が表示される", async () => {
+  it("ロール未設定 (members 0) → 空状態 CTA が表示される (ID 表記なし)", async () => {
     installFetchSpy({ dayMembers: [] });
     render(
       <MorningStandupMainTab
@@ -196,7 +196,10 @@ describe("MorningStandupMainTab smoke", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByText(/ロール未設定 or メンバー 0 名/)).toBeInTheDocument();
+      // PR11: 「roleId」等の技術用語を出さず、自然言語で案内する。
+      expect(screen.getByText(/ロール未設定またはメンバーが 0 名/)).toBeInTheDocument();
+      expect(screen.getByText(/勉強会チーム/)).toBeInTheDocument();
     });
+    expect(screen.queryByText(/roleId/)).not.toBeInTheDocument();
   });
 });
