@@ -212,4 +212,44 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
     expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  // PR15: 通知文面 textarea のスモーク
+  it("PR15: 既存の messageTemplates が textarea にロードされる", () => {
+    renderForm(
+      makeAction({
+        kejimeChannelId: "C0KEJI", roleId: "r1",
+        messageTemplates: {
+          approved: "OK <@{user}>",
+          rejectedShort: "短い ({length})",
+          rejectedDomain: "Qiita のみ",
+          rejectedFetchError: "取得失敗",
+        },
+      }),
+    );
+    expect(screen.getByLabelText("通知文面 (承認時)")).toHaveValue("OK <@{user}>");
+    expect(screen.getByLabelText("通知文面 (却下: 文字数不足)")).toHaveValue("短い ({length})");
+    expect(screen.getByLabelText("通知文面 (却下: 非 Qiita ドメイン)")).toHaveValue("Qiita のみ");
+    expect(screen.getByLabelText("通知文面 (却下: 記事取得失敗)")).toHaveValue("取得失敗");
+  });
+
+  it("PR15: textarea を編集して保存 → messageTemplates が PUT body に乗る", async () => {
+    const user = userEvent.setup();
+    const { onSaved, calls } = renderForm(
+      makeAction({ kejimeChannelId: "C0KEJI", roleId: "r1" }),
+    );
+    const approved = screen.getByLabelText("通知文面 (承認時)");
+    await user.clear(approved);
+    // userEvent.type は "{...}" を特殊キーとして扱うので {{ で escape する。
+    await user.type(approved, "🆗 <@{{user}>");
+    await user.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const putCall = calls.find(
+      (c) => c.method === "PUT" && c.url.includes(`/orgs/${EVENT_ID}/actions/act-kejime`),
+    );
+    const body = JSON.parse(JSON.parse(putCall!.body!).config);
+    expect(body.messageTemplates).toBeDefined();
+    expect(body.messageTemplates.approved).toBe("🆗 <@{user}>");
+    // 他 3 種は空文字 (default フォールバック)
+    expect(body.messageTemplates.rejectedShort).toBe("");
+  });
 });
