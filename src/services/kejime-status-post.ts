@@ -9,6 +9,7 @@ import { mrkdwnSection } from "../domain/slack-blocks/builders";
 import { getUserName } from "./slack-names";
 import {
   DEFAULT_CLOSE_TIME, addMinutesToHHMM, isWithinFireWindow, normalizeFireTime,
+  toHHMM,
 } from "./morning-standup";
 
 // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST window で kejime_tracker action
@@ -151,7 +152,10 @@ export async function processKejimeStatusPost(
     const fireAt = addMinutesToHHMM(closeTime, 5, DEFAULT_CLOSE_TIME);
     if (!isWithinFireWindow(now.hour, now.minute, fireAt)) continue;
     try {
-      if (await postOnce(d1, slackClient, a.id, ymdC, now.ymd, channelId, db)) {
+      // PR13: dedupKey に fireAt の HHMM を含めて、設定変更で別 dedup として扱う。
+      if (await postOnce(
+        d1, slackClient, a.id, ymdC, now.ymd, channelId, toHHMM(fireAt), db,
+      )) {
         posted++;
       }
     } catch (e) {
@@ -183,9 +187,12 @@ function parseCloseTimeRaw(raw: string | null | undefined): unknown {
 async function postOnce(
   d1: D1, slackClient: SlackClient,
   actionId: string, ymdC: string, ymd: string, channelId: string,
+  hhmm: string,
   db?: D1Database,
 ): Promise<boolean> {
-  const dedupKey = `kejime_status_post:${actionId}:${ymdC}`;
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
+  // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
+  const dedupKey = `kejime_status_post:${actionId}:${ymdC}:${hhmm}`;
   if (!(await reservePending(d1, dedupKey, actionId))) return false;
 
   const membersRaw = await d1.select({

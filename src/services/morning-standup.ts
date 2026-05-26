@@ -129,10 +129,13 @@ export async function processMorningStandup(
     if (isWithinFireWindow(now.hour, now.minute, cfg.reminderTime)) phase = "reminder";
     else if (isWithinFireWindow(now.hour, now.minute, cfg.closeTime)) phase = "close";
     if (!phase) continue;
+    // PR13: dedupKey に発火時刻 (HHMM) を含めて、設定変更で別 dedup として扱う。
+    // 本番運用 (時刻固定) では HHMM が同じなので結局 1 日 1 回しか発火しない。
+    const fireTime = phase === "reminder" ? cfg.reminderTime : cfg.closeTime;
     try {
       if (await fireOnce(db, slackClient, a.id, ymdCompact, now.ymd, phase,
                          cfg.channelId, cfg.themes[themeKey], themeKey,
-                         cfg.messageTemplates, cfg.roleId)) fired++;
+                         cfg.messageTemplates, cfg.roleId, toHHMM(fireTime))) fired++;
     } catch (e) {
       console.error(`morning_standup fireOnce error (action=${a.id}):`, e);
     }
@@ -158,6 +161,12 @@ function parseHm(hm: string): number | null {
   const min = Number(m[2]);
   if (h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h * 60 + min;
+}
+
+// PR13: "HH:MM" → "HHMM" 変換。dedupKey suffix 用 (例: "07:30" → "0730")。
+// 形式が不正な場合は ":" 除去のみで返す (落とさない方針)。
+export function toHHMM(hm: string): string {
+  return hm.replace(":", "");
 }
 
 // PR12: HH:MM に分を加算 (24h wrap)。
@@ -242,8 +251,11 @@ async function fireOnce(
   channelId: string, theme: string, themeKey: ThemeKey,
   templates: MessageTemplates | undefined,
   roleId: string | undefined,
+  hhmm: string,
 ): Promise<boolean> {
-  const dedupKey = `morning_standup:${actionId}:${ymdCompact}:${phase}`;
+  // PR13: dedupKey に HHMM を含める。設定変更 (reminderTime/closeTime 変更) で
+  // 別 dedup として扱われるため、テスト/設定変更後の再発火が可能になる。
+  const dedupKey = `morning_standup:${actionId}:${ymdCompact}:${phase}:${hhmm}`;
   const d1 = drizzle(db);
   if (!(await reservePending(d1, dedupKey, actionId, phase))) return false;
 
