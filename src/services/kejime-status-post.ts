@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
-  eventActions, kejimeArticleRequests, kejimeMembers, scheduledJobs,
+  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, scheduledJobs,
 } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
@@ -59,8 +59,19 @@ export function formatDateLabel(ymd: string): string {
 export function buildStatusBlocks(
   members: MemberRow[], articles: ArticleRow[], dateLabel: string,
   trackerActionId?: string,
+  todayLateSlackUserIds?: string[],
 ): Block[] {
   const lines: string[] = [`:coffee: *朝活けじめステータス* ─ ${dateLabel}`];
+
+  // 🚨 PR15: その日 late 認定された人を強めにメンション (吊し上げ)。
+  // 0 件 / undefined の日は section を出さない (静かな日の UX を壊さない)。
+  const late = todayLateSlackUserIds ?? [];
+  if (late.length > 0) {
+    lines.push(
+      "",
+      `:rotating_light: *本日のけじめ対象* ${late.map((u) => `<@${u}>`).join(" ")}`,
+    );
+  }
 
   // 🌶 激辛累計: ramen_count > 0 の人だけ。0 件なら省略。
   const ramenHolders = members.filter((m) => m.ramenCount > 0);
@@ -246,8 +257,27 @@ async function postOnce(
     displayName: nameMap.get(a.slackUserId) ?? a.displayName,
   }));
 
+  // PR15: 当日 type='late' の kejime_events から member の slackUserId を集めて
+  // 吊し上げメンション section に渡す。kejime_late_judge.ts は note=`auto: ${ymd}`
+  // (JST 日付) で late を記録しているため、note 文字列で JST 日付一致を判定する
+  // (occurred_at は UTC ISO で、JST 朝の post 時点で前日 UTC 23 時台になり日付境界
+  // をまたぐので prefix 検索は使えない)。
+  const lateRows = members.length === 0 ? [] : await d1.select({
+    slackUserId: kejimeMembers.slackUserId,
+  }).from(kejimeEvents)
+    .innerJoin(kejimeMembers, eq(kejimeEvents.memberId, kejimeMembers.id))
+    .where(and(
+      eq(kejimeMembers.eventActionId, actionId),
+      eq(kejimeEvents.type, "late"),
+      eq(kejimeEvents.note, `auto: ${ymd}`),
+    )).all();
+  const todayLateSlackUserIds = Array.from(
+    new Set(lateRows.map((r) => r.slackUserId)),
+  );
+
   const blocks = buildStatusBlocks(
     members, resolvedArticleRows, formatDateLabel(ymd), actionId,
+    todayLateSlackUserIds,
   );
   const text = `朝活けじめステータス (${ymd})`;
   try {
