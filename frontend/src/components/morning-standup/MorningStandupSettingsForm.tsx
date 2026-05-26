@@ -1,21 +1,22 @@
-import { useMemo, useState, type ReactNode } from "react";
-import type { EventAction } from "../../types";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { EventAction, Workspace } from "../../types";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 import { settingsFormStyles as s } from "./settingsFormStyles";
-import { ChannelSelector } from "../ChannelSelector";
+import { SingleChannelPicker } from "../ui/SingleChannelPicker";
 import { RoleNameDisplay } from "../role-management/RoleNameDisplay";
 
-// 003 PR7 → PR8: morning_standup アクション専用の設定タブ。
+// 003 PR7 → PR8 → PR9: morning_standup アクション専用の設定タブ。
 // config schema: {
 //   channelId, roleId?, themes?,
-//   messageTemplates?: { reminder?: string; close?: string }
+//   messageTemplates?: { reminder?: string; close?: string },
+//   reminderTime?: "HH:MM" (PR9), closeTime?: "HH:MM" (PR9)
 // }
 // - channelId 空欄は cron skip (一時停止用途)
-// - PR8: channelId は ChannelSelector に置き換え (ID 直入力廃止)
-// - PR8: roleId は RoleNameDisplay でロール名を表示 (config 値は維持)
-// - PR8: messageTemplates 空欄は default に fallback (backend と同方針)
+// - PR9: ChannelSelector → SingleChannelPicker (検索 + ページング)。
+//        workspace dropdown を追加 (1 件しか無ければ隠して自動選択)
+// - PR9: reminderTime / closeTime を編集可能に (default 07:30 / 08:00)
 
 type Themes = { mon: string; tue: string; wed: string; thu: string; fri: string };
 type MessageTemplates = { reminder?: string; close?: string };
@@ -24,6 +25,8 @@ type Config = {
   roleId?: string;
   themes?: Partial<Themes>;
   messageTemplates?: MessageTemplates;
+  reminderTime?: string;
+  closeTime?: string;
 };
 
 const DEFAULT_THEMES: Themes = {
@@ -34,9 +37,10 @@ const KEYS: Array<keyof Themes> = ["mon", "tue", "wed", "thu", "fri"];
 const LABEL: Record<keyof Themes, string> = {
   mon: "月曜", tue: "火曜", wed: "水曜", thu: "木曜", fri: "金曜",
 };
+const DEFAULT_REMINDER_TIME = "07:30";
+const DEFAULT_CLOSE_TIME = "08:00";
+const HM_RE = /^\d{2}:\d{2}$/;
 
-// 003 PR8: backend (morning-standup.ts) の DEFAULT_*_TEMPLATE と同期。
-// FE で文面プレビュー的に placeholder 表示する用 (空欄保存なら BE が default を使う)。
 const DEFAULT_REMINDER =
   ":books: *おはようございます！今日も朝活会あります*\n" +
   "今日のテーマ: *{theme}* ({dayLabel})\n集合: 8:00 JST / {date}";
@@ -51,32 +55,69 @@ function parseConfig(raw: string | null | undefined): Config {
   } catch { return {}; }
 }
 
+function parseHm(hm: string): number | null {
+  const m = HM_RE.exec(hm);
+  if (!m) return null;
+  const [h, min] = hm.split(":").map(Number);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
 export function MorningStandupSettingsForm({
   eventId, action, onSaved,
 }: { eventId: string; action: EventAction; onSaved: () => void }) {
   const toast = useToast();
   const initial = useMemo(() => parseConfig(action.config), [action.config]);
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [channelId, setChannelId] = useState(initial.channelId ?? "");
+  const [channelName, setChannelName] = useState<string>("");
   const [themes, setThemes] = useState<Themes>({
     mon: initial.themes?.mon ?? "", tue: initial.themes?.tue ?? "",
     wed: initial.themes?.wed ?? "", thu: initial.themes?.thu ?? "",
     fri: initial.themes?.fri ?? "",
   });
-  const [reminderTpl, setReminderTpl] = useState(
-    initial.messageTemplates?.reminder ?? "",
-  );
-  const [closeTpl, setCloseTpl] = useState(
-    initial.messageTemplates?.close ?? "",
-  );
+  const [reminderTpl, setReminderTpl] = useState(initial.messageTemplates?.reminder ?? "");
+  const [closeTpl, setCloseTpl] = useState(initial.messageTemplates?.close ?? "");
+  const [reminderTime, setReminderTime] = useState(initial.reminderTime ?? DEFAULT_REMINDER_TIME);
+  const [closeTime, setCloseTime] = useState(initial.closeTime ?? DEFAULT_CLOSE_TIME);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // workspace 一覧を取得 (1 件なら自動選択)
+  useEffect(() => {
+    let cancelled = false;
+    api.workspaces.list()
+      .then((list) => {
+        if (cancelled) return;
+        const ws = Array.isArray(list) ? list : [];
+        setWorkspaces(ws);
+        if (ws.length >= 1) setWorkspaceId(ws[0].id);
+      })
+      .catch(() => { if (!cancelled) setWorkspaces([]); });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSave = async () => {
     setError(null);
-    // ChannelSelector は valid な channelId しか返さないが、念のため "C" prefix 検証は維持
     const cid = channelId.trim();
     if (cid !== "" && !cid.startsWith("C")) {
       setError("channelId は Slack の channel ID (C で始まる) を指定してください");
+      return;
+    }
+    // PR9: 時刻バリデーション (HH:MM + 5 分単位 + reminder < close)
+    const rMin = parseHm(reminderTime);
+    const cMin = parseHm(closeTime);
+    if (rMin == null || cMin == null) {
+      setError("時刻は HH:MM 形式で入力してください");
+      return;
+    }
+    if (rMin % 5 !== 0 || cMin % 5 !== 0) {
+      setError("時刻は 5 分単位 (00, 05, 10, ...) で入力してください");
+      return;
+    }
+    if (rMin >= cMin) {
+      setError("締切時刻はリマインダー時刻より後にしてください");
       return;
     }
     const nextThemes: Partial<Themes> = {};
@@ -84,11 +125,13 @@ export function MorningStandupSettingsForm({
       const v = themes[k].trim();
       if (v !== "") nextThemes[k] = v;
     }
-    const next: Config = { ...initial, channelId: cid };
+    const next: Config = {
+      ...initial, channelId: cid,
+      reminderTime, closeTime,
+    };
     if (Object.keys(nextThemes).length > 0) next.themes = nextThemes;
     else delete next.themes;
 
-    // messageTemplates: 両方空 → 削除、片方でも値があれば指定だけ含める
     const tpl: MessageTemplates = {};
     if (reminderTpl.trim() !== "") tpl.reminder = reminderTpl;
     if (closeTpl.trim() !== "") tpl.close = closeTpl;
@@ -107,20 +150,40 @@ export function MorningStandupSettingsForm({
     } finally { setSaving(false); }
   };
 
+  const showWorkspaceDropdown = workspaces !== null && workspaces.length >= 2;
+
   return (
     <div style={s.wrap}>
       <h3 style={{ marginTop: 0 }}>朝活リマインダー設定</h3>
       <p style={s.intro}>
-        平日 7:30 JST に朝活会チャンネルへリマインダー、8:00 JST に締切投稿を行います。
+        平日に朝活会チャンネルへリマインダーと締切投稿を行います。
+        投稿時刻は config で変更可能 (default: 7:30 リマインダー / 8:00 締切)。
         チャンネル未選択のときは cron が skip するので「一時停止」用途にも使えます。
       </p>
 
       {error && <div style={s.errorBox}>{error}</div>}
 
+      {showWorkspaceDropdown && (
+        <Field label="ワークスペース">
+          <select
+            value={workspaceId}
+            onChange={(e) => { setWorkspaceId(e.target.value); setChannelId(""); setChannelName(""); }}
+            disabled={saving} aria-label="ワークスペース" style={s.input}
+          >
+            {workspaces!.map((w) => (
+              <option key={w.id} value={w.id}>{w.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+
       <Field label="朝活会チャンネル">
-        <ChannelSelector
+        <SingleChannelPicker
           value={channelId}
-          onChange={(id) => setChannelId(id)}
+          channelName={channelName || (channelId === initial.channelId ? initial.channelId : "")}
+          workspaceId={workspaceId}
+          onChange={(id, name) => { setChannelId(id); setChannelName(name); }}
+          disabled={saving}
         />
       </Field>
 
@@ -131,6 +194,25 @@ export function MorningStandupSettingsForm({
         <div style={s.hint}>
           変更したい場合は「メンバー」タブ → ロール → 勉強会チーム から行ってください。
         </div>
+      </Field>
+
+      <Field label="リマインダー投稿時刻 (JST)">
+        <input
+          type="time" step={300} value={reminderTime}
+          onChange={(e) => setReminderTime(e.target.value)}
+          disabled={saving} aria-label="リマインダー投稿時刻"
+          style={{ ...s.input, width: "10rem" }}
+        />
+        <div style={s.hint}>※ 5 分単位 (00, 05, 10, ...) 推奨。cron 粒度上 1-5 分のズレが発生します</div>
+      </Field>
+
+      <Field label="締切投稿時刻 (JST)">
+        <input
+          type="time" step={300} value={closeTime}
+          onChange={(e) => setCloseTime(e.target.value)}
+          disabled={saving} aria-label="締切投稿時刻"
+          style={{ ...s.input, width: "10rem" }}
+        />
       </Field>
 
       <Field label="曜日テーマ (空欄なら default 維持)">
@@ -152,26 +234,24 @@ export function MorningStandupSettingsForm({
         </div>
       </Field>
 
-      <Field label="7:30 リマインダー文面 (空欄なら default)">
+      <Field label="リマインダー文面 (空欄なら default)">
         <textarea
           value={reminderTpl}
           onChange={(e) => setReminderTpl(e.target.value)}
           placeholder={DEFAULT_REMINDER}
-          disabled={saving}
-          rows={5}
-          aria-label="7:30 リマインダー文面"
+          disabled={saving} rows={5}
+          aria-label="リマインダー文面"
           style={{ ...s.input, fontFamily: "monospace", resize: "vertical" }}
         />
       </Field>
 
-      <Field label="8:00 締切文面 (空欄なら default)">
+      <Field label="締切文面 (空欄なら default)">
         <textarea
           value={closeTpl}
           onChange={(e) => setCloseTpl(e.target.value)}
           placeholder={DEFAULT_CLOSE}
-          disabled={saving}
-          rows={3}
-          aria-label="8:00 締切文面"
+          disabled={saving} rows={3}
+          aria-label="締切文面"
           style={{ ...s.input, fontFamily: "monospace", resize: "vertical" }}
         />
       </Field>
