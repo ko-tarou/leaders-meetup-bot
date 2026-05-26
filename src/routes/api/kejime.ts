@@ -7,6 +7,23 @@ import {
   eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
+import { getUserNames } from "../../services/slack-names";
+import { SlackClient } from "../../services/slack-api";
+
+// PR11: kejime_members.display_name が slack_user_id と一致 (= 未解決) な
+// 場合に Slack で resolve して上書きする。UI 側で「U07ABC...」が露出するのを防ぐ。
+async function resolveMemberNames<T extends { slackUserId: string; displayName: string }>(
+  env: { DB: D1Database; SLACK_BOT_TOKEN: string; SLACK_SIGNING_SECRET: string },
+  rows: T[],
+): Promise<T[]> {
+  const need = rows.filter((r) => !r.displayName || r.displayName === r.slackUserId)
+    .map((r) => r.slackUserId);
+  if (need.length === 0) return rows;
+  const client = new SlackClient(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
+  const resolved = await getUserNames(env.DB, client, need);
+  return rows.map((r) => (!r.displayName || r.displayName === r.slackUserId)
+    ? { ...r, displayName: resolved[r.slackUserId] ?? r.slackUserId } : r);
+}
 
 // 003 朝勉強会けじめ制度 PR3: admin API。/api/orgs/.../actions/:actionId/kejime/*
 // は api.ts のグローバル adminAuth で自動保護 (bypass 対象外)。:actionId は
@@ -34,7 +51,8 @@ kejimeRouter.get(`${BASE}/members`, async (c: C) => {
   const rows = await db.select().from(kejimeMembers)
     .where(eq(kejimeMembers.eventActionId, r.action.id))
     .orderBy(asc(kejimeMembers.createdAt)).all();
-  return c.json(rows.map((m) => ({ ...m, displayPoints: Math.min(m.currentPoints, CAP) })));
+  const resolved = await resolveMemberNames(c.env, rows);
+  return c.json(resolved.map((m) => ({ ...m, displayPoints: Math.min(m.currentPoints, CAP) })));
 });
 
 kejimeRouter.get(`${BASE}/events`, async (c: C) => {
@@ -145,11 +163,19 @@ kejimeRouter.get(`${BASE}/articles`, async (c: C) => {
     qiitaUrl: kejimeArticleRequests.qiitaUrl, bodyLength: kejimeArticleRequests.bodyLength,
     status: kejimeArticleRequests.status, createdAt: kejimeArticleRequests.createdAt,
     memberDisplayName: kejimeMembers.displayName,
+    slackUserId: kejimeMembers.slackUserId,
   }).from(kejimeArticleRequests)
     .innerJoin(kejimeMembers, eq(kejimeArticleRequests.memberId, kejimeMembers.id))
     .where(and(...conds))
     .orderBy(desc(kejimeArticleRequests.createdAt)).all();
-  return c.json(rows);
+  // PR11: memberDisplayName が slackUserId と一致 (= 未解決) なら Slack で resolve。
+  const resolved = await resolveMemberNames(
+    c.env,
+    rows.map((r) => ({ ...r, displayName: r.memberDisplayName })),
+  );
+  return c.json(resolved.map(({ displayName, slackUserId: _u, ...rest }) => ({
+    ...rest, memberDisplayName: displayName,
+  })));
 });
 
 // PR6: admin による記事手動承認。pending or rejected_fetch_error のみ救済可能。

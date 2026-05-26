@@ -8,6 +8,8 @@ import {
   slackRoleMembers,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
+import { getUserNames } from "../../services/slack-names";
+import { SlackClient } from "../../services/slack-api";
 
 // 003 朝勉強会けじめ制度 PR10: 出席ダッシュボード用 admin API。
 // /api/orgs/:eventId/actions/:actionId/morning-attendance/* は api.ts の
@@ -55,14 +57,28 @@ async function resolveRoleId(db: DB, morningAction: { eventId: string; config: s
   return parseRoleId(tracker?.config);
 }
 
-// kejime_members から displayName 一覧を id でマップ化 (なければ slack_user_id をそのまま使う)。
-async function loadDisplayNames(db: DB, slackUserIds: string[]) {
+// PR11: kejime_members から displayName を引き、未解決 (= slackUserId と一致) な
+// 箇所は Slack 名で解決して返す。UI 上の「U07ABC...」露出を防ぐ。
+// SlackClient は env.SLACK_BOT_TOKEN (cron と同じ default token) で構築する。
+async function loadDisplayNames(
+  d1: D1Database, db: DB, slackUserIds: string[], slackToken: string, signingSecret: string,
+) {
   if (slackUserIds.length === 0) return new Map<string, string>();
   const rows = await db.select({
     slackUserId: kejimeMembers.slackUserId,
     displayName: kejimeMembers.displayName,
   }).from(kejimeMembers).where(inArray(kejimeMembers.slackUserId, slackUserIds)).all();
-  return new Map(rows.map((r) => [r.slackUserId, r.displayName]));
+  const dbMap = new Map(rows.map((r) => [r.slackUserId, r.displayName]));
+  // DB 値が 1) 無い 2) slackUserId と一致 のいずれかなら Slack で resolve する。
+  const needResolve = slackUserIds.filter((id) => {
+    const v = dbMap.get(id);
+    return !v || v === id;
+  });
+  if (needResolve.length === 0) return dbMap;
+  const client = new SlackClient(slackToken, signingSecret);
+  const resolved = await getUserNames(d1, client, needResolve);
+  return new Map(slackUserIds.map((id) => [id, dbMap.get(id) && dbMap.get(id) !== id
+    ? dbMap.get(id)! : resolved[id] ?? id]));
 }
 
 // GET 当日 (or 指定日) の attended/late/null をメンバー単位で返す。
@@ -84,7 +100,10 @@ morningAttendanceRouter.get(`${BASE}`, async (c: C) => {
     eq(morningAttendance.date, date),
   )).all();
   const byUser = new Map(attendance.map((a) => [a.slackUserId, a]));
-  const names = await loadDisplayNames(db, roleMembers.map((m) => m.slackUserId));
+  const names = await loadDisplayNames(
+    c.env.DB, db, roleMembers.map((m) => m.slackUserId),
+    c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET,
+  );
   return c.json({
     date,
     members: roleMembers.map((m) => {
@@ -127,7 +146,10 @@ morningAttendanceRouter.get(`${BASE}/stats`, async (c: C) => {
     else if (a.status === "late") cur.late++;
     counts.set(a.slackUserId, cur);
   }
-  const names = await loadDisplayNames(db, roleMembers.map((m) => m.slackUserId));
+  const names = await loadDisplayNames(
+    c.env.DB, db, roleMembers.map((m) => m.slackUserId),
+    c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET,
+  );
   return c.json({
     from: fromDate, to: todayJst, days,
     members: roleMembers.map((m) => {

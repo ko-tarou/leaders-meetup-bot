@@ -2,11 +2,12 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { RoleNameDisplay } from "../src/components/role-management/RoleNameDisplay";
 
-// 003 PR8: RoleNameDisplay は config.roleId だけからロール名を表示する。
+// 003 PR8 → PR11: RoleNameDisplay は config.roleId だけからロール名を表示する。
+// PR11 で ID 表示を全廃 (ユーザーには UUID は無意味なため)。
 // observer:
 //   - roleId 未指定 → "未設定"
-//   - 取得成功 → name + ID 表記
-//   - 取得失敗 (404 or null) → 警告 UI
+//   - 取得成功 → name のみ (ID は表示しない)
+//   - 取得失敗 (404 or null) → 警告 UI ("ロール取得失敗", ID は表示しない)
 
 function stubFetch(handler: (url: string) => Response) {
   vi.stubGlobal(
@@ -43,7 +44,7 @@ describe("RoleNameDisplay (003 PR8)", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("取得成功 → name + ID 表記", async () => {
+  it("取得成功 → name のみ表示 (ID は出さない)", async () => {
     stubFetch((url) => {
       if (url.includes("/api/roles/role-1")) {
         return new Response(
@@ -61,10 +62,12 @@ describe("RoleNameDisplay (003 PR8)", () => {
     await waitFor(() => {
       expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
     });
-    expect(screen.getByText(/ID: role-1/)).toBeInTheDocument();
+    // PR11: ID は表示しない
+    expect(screen.queryByText(/ID:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/role-1/)).not.toBeInTheDocument();
   });
 
-  it("取得失敗 (404) → 警告 UI", async () => {
+  it("取得失敗 (404) → 警告 UI (ID は出さない)", async () => {
     stubFetch(
       () =>
         new Response(JSON.stringify({ error: "role not found" }), {
@@ -75,7 +78,9 @@ describe("RoleNameDisplay (003 PR8)", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("ロール名取得失敗")).toBeInTheDocument();
     });
-    expect(screen.getByText(/role-gone/)).toBeInTheDocument();
+    // PR11: ID は表示しない
+    expect(screen.queryByText(/role-gone/)).not.toBeInTheDocument();
+    expect(screen.getByText("ロール取得失敗")).toBeInTheDocument();
   });
 
   it("network error → 警告 UI", async () => {

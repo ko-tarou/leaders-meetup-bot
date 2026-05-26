@@ -129,7 +129,7 @@ export function MorningStandupMainTab({ eventId, actionId, action }: {
 
         <Section
           title={`今日の出席状況 (${day.members.length}名)`}
-          empty="ロール未設定 or メンバー 0 名 — 設定タブで roleId を確認してください"
+          empty="ロール未設定またはメンバーが 0 名です。設定タブで「勉強会チーム」ロールを確認してください"
           isEmpty={day.members.length === 0}
         >
           {day.members.map((m) => {

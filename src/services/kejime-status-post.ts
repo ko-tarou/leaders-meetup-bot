@@ -6,6 +6,7 @@ import {
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
 import { mrkdwnSection } from "../domain/slack-blocks/builders";
+import { getUserName } from "./slack-names";
 
 // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST window で kejime_tracker action
 // ごとに「現在のけじめステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
@@ -86,6 +87,30 @@ export function buildStatusBlocks(
   return [mrkdwnSection(lines.join("\n"))];
 }
 
+/** PR11: display_name == slack_user_id (= 未解決) な行を Slack で resolve し DB に書き戻す。 */
+async function resolveAndPersist<T extends {
+  id: string; slackUserId: string; displayName: string;
+}>(
+  d1: D1, db: D1Database, slackClient: SlackClient, members: T[],
+): Promise<T[]> {
+  const nowIso = new Date().toISOString();
+  return Promise.all(members.map(async (m) => {
+    if (m.displayName && m.displayName !== m.slackUserId) return m;
+    try {
+      const name = await getUserName(db, slackClient, m.slackUserId);
+      if (name && name !== m.slackUserId) {
+        await d1.update(kejimeMembers)
+          .set({ displayName: name, updatedAt: nowIso })
+          .where(eq(kejimeMembers.id, m.id));
+        return { ...m, displayName: name };
+      }
+    } catch (e) {
+      console.warn(`kejime_status_post: name resolve failed (user=${m.slackUserId}):`, e);
+    }
+    return m;
+  }));
+}
+
 export async function processKejimeStatusPost(
   db: D1Database, slackClient: SlackClient,
 ): Promise<{ posted: number }> {
@@ -109,7 +134,7 @@ export async function processKejimeStatusPost(
       continue;
     }
     try {
-      if (await postOnce(d1, slackClient, a.id, ymdC, now.ymd, channelId)) {
+      if (await postOnce(d1, slackClient, a.id, ymdC, now.ymd, channelId, db)) {
         posted++;
       }
     } catch (e) {
@@ -131,28 +156,44 @@ function parseChannelId(raw: string | null | undefined): string | null {
 async function postOnce(
   d1: D1, slackClient: SlackClient,
   actionId: string, ymdC: string, ymd: string, channelId: string,
+  db?: D1Database,
 ): Promise<boolean> {
   const dedupKey = `kejime_status_post:${actionId}:${ymdC}`;
   if (!(await reservePending(d1, dedupKey, actionId))) return false;
 
-  const members = await d1.select({
+  const membersRaw = await d1.select({
+    id: kejimeMembers.id,
+    slackUserId: kejimeMembers.slackUserId,
     displayName: kejimeMembers.displayName,
     currentPoints: kejimeMembers.currentPoints,
     ramenCount: kejimeMembers.ramenCount,
   }).from(kejimeMembers).where(eq(kejimeMembers.eventActionId, actionId)).all();
 
+  // PR11: display_name が slack_user_id と一致 (= 未解決) の場合は Slack で resolve し
+  // DB を更新する (UI/Slack 投稿の両方で ID 露出を防ぐ)。db が無い古い呼び出し互換時は skip。
+  const members = db
+    ? await resolveAndPersist(d1, db, slackClient, membersRaw)
+    : membersRaw;
+
   // 申請待ち = status='pending'。member_id JOIN で display_name を解決。
   const articleRows = await d1.select({
     qiitaUrl: kejimeArticleRequests.qiitaUrl,
     displayName: kejimeMembers.displayName,
+    slackUserId: kejimeMembers.slackUserId,
   }).from(kejimeArticleRequests)
     .innerJoin(kejimeMembers, eq(kejimeArticleRequests.memberId, kejimeMembers.id))
     .where(and(
       eq(kejimeArticleRequests.eventActionId, actionId),
       eq(kejimeArticleRequests.status, "pending"),
     )).all();
+  // articleRows も同様に解決済み name で表示する (DB 更新は上の members で完了済)。
+  const nameMap = new Map(members.map((m) => [m.slackUserId, m.displayName]));
+  const resolvedArticleRows = articleRows.map((a) => ({
+    qiitaUrl: a.qiitaUrl,
+    displayName: nameMap.get(a.slackUserId) ?? a.displayName,
+  }));
 
-  const blocks = buildStatusBlocks(members, articleRows, formatDateLabel(ymd));
+  const blocks = buildStatusBlocks(members, resolvedArticleRows, formatDateLabel(ymd));
   const text = `朝活けじめステータス (${ymd})`;
   try {
     await slackClient.postMessage(channelId, text, blocks);

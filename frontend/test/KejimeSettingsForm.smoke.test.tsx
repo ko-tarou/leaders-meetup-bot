@@ -119,14 +119,16 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
     expect(screen.getByDisplayValue("500")).toBeInTheDocument();
   });
 
-  it("ロール名表示: name + ID + ヒント", async () => {
+  it("ロール名表示: name のみ (PR11: ID は出さない)", async () => {
     renderForm(makeAction({ roleId: "r1" }), {
       role: { id: "r1", name: "勉強会チーム" },
     });
     await waitFor(() => {
       expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
     });
-    expect(screen.getByText(/ID: r1/)).toBeInTheDocument();
+    // PR11: 内部 ID は表示しない
+    expect(screen.queryByText(/ID:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/r1/)).not.toBeInTheDocument();
   });
 
   it("roleId 未設定 → 「未設定」", async () => {

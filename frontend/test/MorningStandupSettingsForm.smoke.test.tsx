@@ -135,14 +135,16 @@ describe("MorningStandupSettingsForm smoke (003 PR9)", () => {
     expect(screen.getByLabelText("締切投稿時刻")).toHaveValue("09:00");
   });
 
-  it("ロール名表示: RoleNameDisplay が fetch して name を出す + ヒント維持", async () => {
+  it("ロール名表示: RoleNameDisplay が fetch して name のみ表示 (PR11: ID は出さない)", async () => {
     renderForm(makeAction({ channelId: "C1", roleId: "role-rrr" }), {
       role: { id: "role-rrr", name: "勉強会チーム" },
     });
     await waitFor(() => {
       expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
     });
-    expect(screen.getByText(/ID: role-rrr/)).toBeInTheDocument();
+    // PR11: 内部 ID は表示しない
+    expect(screen.queryByText(/role-rrr/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ID:/)).not.toBeInTheDocument();
   });
 
   it("roleId 未設定 → 「未設定」表示 + fetch しない", async () => {
