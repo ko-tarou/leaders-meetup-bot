@@ -65,11 +65,14 @@ export function buildStatusBlocks(
 
   // 🚨 PR15: その日 late 認定された人を強めにメンション (吊し上げ)。
   // 0 件 / undefined の日は section を出さない (静かな日の UX を壊さない)。
+  // PR16: 該当者がいるときは末尾に `cc <!channel>` を付けてチャンネル全員に
+  //       通知が飛ぶようにする (該当者個別だけだと周囲に見えづらいため)。
   const late = todayLateSlackUserIds ?? [];
   if (late.length > 0) {
+    const mentions = late.map((u) => `<@${u}>`).join(" ");
     lines.push(
       "",
-      `:rotating_light: *本日のけじめ対象* ${late.map((u) => `<@${u}>`).join(" ")}`,
+      `:rotating_light: *本日のけじめ対象* ${mentions} cc <!channel>`,
     );
   }
 
