@@ -19,6 +19,7 @@ import { participationRouter } from "./api/participation";
 import { rosterRouter } from "./api/roster";
 import { rosterExtrasRouter } from "./api/roster-extras";
 import { kejimeRouter } from "./api/kejime";
+import { morningAttendanceRouter } from "./api/morning-attendance";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -109,5 +110,8 @@ api.route("/", rosterExtrasRouter);
 // 003 朝勉強会けじめ制度 PR3: late 判定 + 免除 admin API。
 // /api/orgs/:eventId/actions/:actionId/kejime/* で adminAuth に保護される。
 api.route("/", kejimeRouter);
+// 003 朝勉強会けじめ制度 PR10: 出席ダッシュボード + 手動 attend/取消 API。
+// /api/orgs/:eventId/actions/:actionId/morning-attendance/* で adminAuth に保護される。
+api.route("/", morningAttendanceRouter);
 
 export { api };
