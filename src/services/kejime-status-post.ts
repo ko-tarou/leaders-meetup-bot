@@ -7,6 +7,9 @@ import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
 import { mrkdwnSection } from "../domain/slack-blocks/builders";
 import { getUserName } from "./slack-names";
+import {
+  DEFAULT_CLOSE_TIME, addMinutesToHHMM, isWithinFireWindow, normalizeFireTime,
+} from "./morning-standup";
 
 // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST window で kejime_tracker action
 // ごとに「現在のけじめステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
@@ -118,8 +121,6 @@ export async function processKejimeStatusPost(
   const now = getJstNow();
   const dow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay();
   if (dow < 1 || dow > 5) return { posted: 0 };
-  // 8:05-8:09 JST window (= 遅刻判定完了後の次 cron tick)。
-  if (now.hour !== 8 || now.minute < 5 || now.minute >= 10) return { posted: 0 };
 
   const ymdC = now.ymd.replace(/-/g, "");
   const actions = await d1.select().from(eventActions).where(and(
@@ -133,6 +134,22 @@ export async function processKejimeStatusPost(
       console.warn(`kejime_status_post: action ${a.id} has no kejimeChannelId; skip`);
       continue;
     }
+    // PR12: 同 event の morning_standup.config.closeTime + 5min を発火位相とする。
+    // morning_standup 不在ならログだけ出して skip (closeTime を決められないため)。
+    const morning = await d1.select().from(eventActions).where(and(
+      eq(eventActions.eventId, a.eventId),
+      eq(eventActions.actionType, "morning_standup"),
+      eq(eventActions.enabled, 1),
+    )).get();
+    if (!morning) {
+      console.warn(`kejime_status_post: no morning_standup (event=${a.eventId}); skip`);
+      continue;
+    }
+    const closeTime = normalizeFireTime(
+      parseCloseTimeRaw(morning.config), DEFAULT_CLOSE_TIME,
+    );
+    const fireAt = addMinutesToHHMM(closeTime, 5, DEFAULT_CLOSE_TIME);
+    if (!isWithinFireWindow(now.hour, now.minute, fireAt)) continue;
     try {
       if (await postOnce(d1, slackClient, a.id, ymdC, now.ymd, channelId, db)) {
         posted++;
@@ -151,6 +168,16 @@ function parseChannelId(raw: string | null | undefined): string | null {
     return typeof o.kejimeChannelId === "string" && o.kejimeChannelId.trim()
       ? o.kejimeChannelId : null;
   } catch { return null; }
+}
+
+// PR12: morning_standup.config.closeTime を raw 値で取り出す。
+// normalizeFireTime に渡して 5 分粒度に整える前段。
+function parseCloseTimeRaw(raw: string | null | undefined): unknown {
+  if (!raw) return undefined;
+  try {
+    const o = JSON.parse(raw) as { closeTime?: unknown };
+    return o.closeTime;
+  } catch { return undefined; }
 }
 
 async function postOnce(

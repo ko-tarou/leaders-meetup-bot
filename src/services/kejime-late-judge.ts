@@ -7,6 +7,9 @@ import {
 import { getJstNow } from "./time-utils";
 import { getUserName } from "./slack-names";
 import type { SlackClient } from "./slack-api";
+import {
+  DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime,
+} from "./morning-standup";
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -32,6 +35,16 @@ function parseRoleId(raw: string | null | undefined): string | null {
   } catch { return null; }
 }
 
+// PR12: morning_standup の config.closeTime を取り出す。
+// 未設定 / 不正は DEFAULT_CLOSE_TIME (08:00) にフォールバックし PR9 以前の挙動を維持。
+function parseCloseTime(raw: string | null | undefined): string {
+  if (!raw) return DEFAULT_CLOSE_TIME;
+  try {
+    const o = JSON.parse(raw) as { closeTime?: unknown };
+    return normalizeFireTime(o.closeTime, DEFAULT_CLOSE_TIME);
+  } catch { return DEFAULT_CLOSE_TIME; }
+}
+
 function isUnique(e: unknown): boolean {
   let cur: unknown = e;
   while (cur instanceof Error) {
@@ -50,7 +63,6 @@ export async function processLateJudgment(
   const now = getJstNow();
   const dow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay();
   if (dow < 1 || dow > 5) return { judged: 0 };
-  if (now.hour !== 8 || now.minute >= 5) return { judged: 0 };
 
   const ymdC = now.ymd.replace(/-/g, "");
   const actions = await d1.select().from(eventActions).where(and(
@@ -58,6 +70,10 @@ export async function processLateJudgment(
   )).all();
   let judged = 0;
   for (const a of actions) {
+    // PR12: closeTime hardcode (8:00) を廃止し morning_standup の config.closeTime を真のソースに。
+    // [closeTime, closeTime+5) の 5 分窓で発火 (morning_standup 本体の close 投稿と同位相)。
+    const closeTime = parseCloseTime(a.config);
+    if (!isWithinFireWindow(now.hour, now.minute, closeTime)) continue;
     try {
       judged += await judgeOne(d1, db, a.id, a.eventId, now.ymd, ymdC, slackClient);
     } catch (e) { console.error(`kejime_late_judge error (action=${a.id}):`, e); }

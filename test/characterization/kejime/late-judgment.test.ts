@@ -28,11 +28,20 @@ function freezeJst(ymd: string, hm: string) {
 const MON = "2026-05-18"; // 月曜
 const SAT = "2026-05-23"; // 土曜
 
-async function setupTrio(opts: { roleMembers: string[]; attendedUsers?: string[] }) {
+async function setupTrio(opts: {
+  roleMembers: string[];
+  attendedUsers?: string[];
+  closeTime?: string; // PR12: morning_standup.config.closeTime override
+  ymd?: string; // attendedUsers の date (default: MON)
+}) {
   const ev = await makeEvent();
+  const morningConfig: Record<string, unknown> = {
+    schemaVersion: 1, channelId: "C-X", themes: {},
+  };
+  if (opts.closeTime) morningConfig.closeTime = opts.closeTime;
   const morning = await makeEventAction(ev.id, {
     actionType: "morning_standup",
-    config: JSON.stringify({ schemaVersion: 1, channelId: "C-X", themes: {} }),
+    config: JSON.stringify(morningConfig),
   });
   const tracker = await makeEventAction(ev.id, {
     actionType: "kejime_tracker",
@@ -41,9 +50,10 @@ async function setupTrio(opts: { roleMembers: string[]; attendedUsers?: string[]
   const role = await makeSlackRole(tracker.id, { id: "role-tmp", name: "勉強会" });
   for (const u of opts.roleMembers) await makeSlackRoleMember(role.id, u);
   const db = testDb();
+  const attYmd = opts.ymd ?? MON;
   for (const u of opts.attendedUsers ?? []) {
     await db.insert(morningAttendance).values({
-      id: `att-${u}`, eventActionId: morning.id, date: MON,
+      id: `att-${u}`, eventActionId: morning.id, date: attYmd,
       slackUserId: u, status: "attended", recordedAt: "2026-05-18T07:45:00.000Z",
     });
   }
@@ -190,5 +200,39 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     expect(jobs[0].dedupKey).toBe(`kejime_late_judge:${tracker.id}:20260518`);
     expect(jobs[0].type).toBe("kejime_late_judge");
     expect(jobs[0].status).toBe("completed");
+  });
+});
+
+// PR12: closeTime configurable に追随する (8:00 hardcode 廃止)。
+describe("processLateJudgment: closeTime 追随 (PR12)", () => {
+  it("closeTime=14:00 → 14:00 で late 認定 / 8:00 では発火しない", async () => {
+    // 8:00 では発火しない (= judged:0)。
+    freezeJst(MON, "08:00");
+    await setupTrio({
+      roleMembers: ["U1", "U2"], attendedUsers: ["U1"], closeTime: "14:00",
+    });
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 0 });
+    expect(await testDb().select().from(kejimeEvents).all()).toHaveLength(0);
+
+    // 14:00 で発火 (U2 を late 判定)。
+    freezeJst(MON, "14:00");
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 1 });
+    const events = await testDb().select().from(kejimeEvents).all();
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("late");
+  });
+
+  it("closeTime=14:00 → 14:04 まで発火、14:05 で窓外", async () => {
+    freezeJst(MON, "14:04");
+    await setupTrio({
+      roleMembers: ["U1"], attendedUsers: [], closeTime: "14:00",
+    });
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 1 });
+  });
+
+  it("closeTime 未指定 (default 08:00) → 8:00 で従来通り発火", async () => {
+    freezeJst(MON, "08:00");
+    await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 1 });
   });
 });
