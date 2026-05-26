@@ -8,6 +8,8 @@ import {
   type AttendanceChoice,
 } from "../../services/attendance-check";
 import { handleMorningAttend } from "../../services/morning-standup";
+import { processQiitaArticleSubmission } from "../../services/kejime-article-flow";
+import { buildKejimeArticleModal } from "../../services/kejime-article-modal";
 import {
   meetings,
   tasks,
@@ -145,6 +147,30 @@ interactionsRouter.post("/interactions", async (c) => {
           }
         } catch (e) {
           console.error("Failed to handle morning_attend:", e);
+        }
+      })());
+      return c.json({ ok: true });
+    }
+
+    // 003 朝勉強会けじめ制度 PR14: けじめ ch の「📝 記事を申請」ボタン。
+    // action_id = kejime_article_submit:<trackerActionId>
+    // → Slack views.open で URL 入力モーダルを開く。trigger_id は 3 秒で失効
+    // するため waitUntil 内でも極力早く openView を叩く。
+    if (action.action_id?.startsWith("kejime_article_submit:")) {
+      const actionId = action.action_id.split(":")[1];
+      const triggerId = payload.trigger_id;
+      if (!actionId || !triggerId) return c.json({ ok: true });
+      c.executionCtx.waitUntil((async () => {
+        try {
+          const client = getSlackClient(c);
+          const res = await client.openView(
+            triggerId, buildKejimeArticleModal(actionId),
+          );
+          if (!res.ok) {
+            console.error("kejime_article_submit views.open not ok:", res);
+          }
+        } catch (e) {
+          console.error("Failed to open kejime article modal:", e);
         }
       })());
       return c.json({ ok: true });
@@ -904,6 +930,35 @@ interactionsRouter.post("/interactions", async (c) => {
 
   if (payload.type === "view_submission") {
     const view = payload.view;
+
+    // 003 朝勉強会けじめ制度 PR14: 記事申請モーダルの submit。
+    // callback_id = kejime_article_modal:<trackerActionId>
+    // URL を取り出して processQiitaArticleSubmission に委譲。waitUntil で非同期処理し、
+    // response_action: "clear" でモーダルを即閉じる (3 秒 ack 制約)。
+    if (view?.callback_id?.startsWith("kejime_article_modal:")) {
+      const actionId = view.callback_id.split(":")[1];
+      const url: string | undefined =
+        view.state?.values?.url_block?.url_input?.value;
+      const slackUserId: string | undefined = payload.user?.id;
+      if (!actionId || !url || !url.trim() || !slackUserId) {
+        return c.json({
+          response_action: "errors",
+          errors: { url_block: "URL を入力してください" },
+        });
+      }
+      c.executionCtx.waitUntil((async () => {
+        try {
+          const client = getSlackClient(c);
+          await processQiitaArticleSubmission(c.env.DB, client, fetch, {
+            actionId, slackUserId, url: url.trim(),
+          });
+        } catch (e) {
+          console.error("kejime article modal submit failed:", e);
+        }
+      })());
+      return c.json({ response_action: "clear" });
+    }
+
     if (view?.callback_id === "devhub_task_add_submit") {
       // 共通ハンドラに委譲（multi-review #32 R2 [must]）
       return handleTaskAddSubmission(c, payload, {
