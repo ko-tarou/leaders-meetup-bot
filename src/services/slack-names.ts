@@ -93,3 +93,19 @@ export async function getUserNames(
   );
   return result;
 }
+
+/**
+ * PR11: DB 上の display_name が slack_user_id と一致 (= 未解決) な箇所を
+ * Slack API で解決する。
+ * 一致しない既存値はそのまま返す (人が編集した値を上書きしない)。
+ * Slack API 失敗時は slackUserId を返す (getUserName の fallback)。
+ */
+export async function resolveDisplayName(
+  db: D1Database,
+  client: SlackClient,
+  slackUserId: string,
+  currentName: string | null | undefined,
+): Promise<string> {
+  if (currentName && currentName !== slackUserId) return currentName;
+  return getUserName(db, client, slackUserId);
+}

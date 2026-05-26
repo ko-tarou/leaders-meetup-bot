@@ -5,6 +5,8 @@ import {
   scheduledJobs, slackRoleMembers,
 } from "../db/schema";
 import { getJstNow } from "./time-utils";
+import { getUserName } from "./slack-names";
+import type { SlackClient } from "./slack-api";
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -39,7 +41,11 @@ function isUnique(e: unknown): boolean {
   return false;
 }
 
-export async function processLateJudgment(db: D1Database): Promise<{ judged: number }> {
+// PR11: SlackClient を optional で受け取り、lazy-create 時に Slack 名を解決する。
+// 未指定 (旧呼び出し互換) の場合は slackUserId を displayName に使う従来挙動。
+export async function processLateJudgment(
+  db: D1Database, slackClient?: SlackClient,
+): Promise<{ judged: number }> {
   const d1 = drizzle(db);
   const now = getJstNow();
   const dow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay();
@@ -52,14 +58,16 @@ export async function processLateJudgment(db: D1Database): Promise<{ judged: num
   )).all();
   let judged = 0;
   for (const a of actions) {
-    try { judged += await judgeOne(d1, a.id, a.eventId, now.ymd, ymdC); }
-    catch (e) { console.error(`kejime_late_judge error (action=${a.id}):`, e); }
+    try {
+      judged += await judgeOne(d1, db, a.id, a.eventId, now.ymd, ymdC, slackClient);
+    } catch (e) { console.error(`kejime_late_judge error (action=${a.id}):`, e); }
   }
   return { judged };
 }
 
 async function judgeOne(
-  d1: D1, morningActionId: string, eventId: string, ymd: string, ymdC: string,
+  d1: D1, db: D1Database, morningActionId: string, eventId: string,
+  ymd: string, ymdC: string, slackClient?: SlackClient,
 ): Promise<number> {
   const tracker = await d1.select().from(eventActions).where(and(
     eq(eventActions.eventId, eventId),
@@ -95,8 +103,10 @@ async function judgeOne(
   let lateCount = 0;
   for (const rm of roleMembers) {
     if (attendedSet.has(rm.slackUserId)) continue;
-    try { await recordLate(d1, tracker.id, morningActionId, rm.slackUserId, ymd); lateCount++; }
-    catch (e) { console.error(`recordLate failed (user=${rm.slackUserId}):`, e); }
+    try {
+      await recordLate(d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, slackClient);
+      lateCount++;
+    } catch (e) { console.error(`recordLate failed (user=${rm.slackUserId}):`, e); }
   }
   await d1.update(scheduledJobs).set({ status: "completed" })
     .where(eq(scheduledJobs.dedupKey, dedupKey));
@@ -104,7 +114,8 @@ async function judgeOne(
 }
 
 async function recordLate(
-  d1: D1, trackerActionId: string, morningActionId: string, slackUserId: string, ymd: string,
+  d1: D1, db: D1Database, trackerActionId: string, morningActionId: string,
+  slackUserId: string, ymd: string, slackClient?: SlackClient,
 ): Promise<void> {
   const now = new Date().toISOString();
   try {
@@ -120,8 +131,17 @@ async function recordLate(
   )).get();
   if (!member) {
     const id = crypto.randomUUID();
+    // PR11: 可能なら Slack 名で初期化 (ユーザーに ID を見せない)。失敗時のみ
+    // slackUserId fallback (warn 不要: getUserName 内で API 失敗時は ID を返す)。
+    let displayName = slackUserId;
+    if (slackClient) {
+      try { displayName = await getUserName(db, slackClient, slackUserId); }
+      catch (e) {
+        console.warn(`kejime_late_judge: getUserName failed (user=${slackUserId}):`, e);
+      }
+    }
     await d1.insert(kejimeMembers).values({
-      id, eventActionId: trackerActionId, slackUserId, displayName: slackUserId,
+      id, eventActionId: trackerActionId, slackUserId, displayName,
       currentPoints: 0, ramenCount: 0, createdAt: now, updatedAt: now,
     });
     member = (await d1.select().from(kejimeMembers).where(eq(kejimeMembers.id, id)).get())!;

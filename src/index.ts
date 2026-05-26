@@ -79,7 +79,8 @@ export default {
       processMorningStandup(env.DB, client),
       // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に late 判定 + ポイント加算。
       // processLateJudgment は内部で 8:00-8:04 / 平日 window 判定して no-op に落とす。
-      processLateJudgment(env.DB),
+      // PR11: lazy-create 時に Slack 名を解決するため client を渡す。
+      processLateJudgment(env.DB, client),
       // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST にけじめチャンネルへ
       // 「現在のステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
       // 内部で 8:05-8:09 / 平日 window 判定して no-op に落とす。
