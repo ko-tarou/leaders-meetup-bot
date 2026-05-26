@@ -885,6 +885,29 @@ export const kejimeArticleRequests = sqliteTable(
   ],
 );
 
+// 朝勉強会けじめ制度 PR16 (migration 0058):
+// 当日 (1 日 = JST YYYY-MM-DD) の status post の message_ts を覚えておく。
+// ポイント変動 / 申請 / 承認 が起きたら chat.update で in-place 更新する。
+// UNIQUE(action, date) で 1 日 1 行に限定。初回 post で INSERT、以降は更新。
+export const kejimeStatusPosts = sqliteTable(
+  "kejime_status_posts",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageTs: text("message_ts").notNull(),
+    postedAt: text("posted_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_kejime_status_posts_action_date").on(t.eventActionId, t.date),
+    index("idx_kejime_status_posts_action_date").on(t.eventActionId, t.date),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",

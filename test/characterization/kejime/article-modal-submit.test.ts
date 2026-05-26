@@ -174,9 +174,11 @@ describe("view_submission kejime_article_modal:*", () => {
     expect(reqs[0].bodyLength).toBe(800);
     expect(reqs[0].threadTs).toBeNull();
     expect(reqs[0].channelId).toBe(KEJIME_CH);
-    // notice post も走る (modal 経路はメンション付き)
+    // PR16: notice post (1 件目, mention 付き) + postOrUpdateKejimeStatus
+    // 経由の status post (初回のため postMessage 経路) で計 2 件発生する。
+    // 1 件目が mention 付き notice であることのみ固定する。
     const posts = slackInstances[0].callsOf("postMessage");
-    expect(posts).toHaveLength(1);
+    expect(posts.length).toBeGreaterThanOrEqual(1);
     expect(String(posts[0].args[1])).toContain("<@U-MODAL>");
   });
 

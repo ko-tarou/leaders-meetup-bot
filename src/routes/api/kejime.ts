@@ -9,6 +9,8 @@ import {
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
 import { getUserNames } from "../../services/slack-names";
 import { SlackClient } from "../../services/slack-api";
+import { postOrUpdateKejimeStatus } from "../../services/kejime-status-post";
+import { getJstNow } from "../../services/time-utils";
 
 // PR11: kejime_members.display_name が slack_user_id と一致 (= 未解決) な
 // 場合に Slack で resolve して上書きする。UI 側で「U07ABC...」が露出するのを防ぐ。
@@ -34,6 +36,18 @@ export const kejimeRouter = new Hono<{ Bindings: Env }>();
 type C = Context<{ Bindings: Env }>;
 const CAP = 5;
 const BASE = "/orgs/:eventId/actions/:actionId/kejime";
+
+// PR16: 各 mutation route (exemption / ramen-reset / article-manual-approve /
+// edit-points) の成功時に当日 status post を Slack に in-place 更新する。
+// SlackClient を内部で構築。fail-soft (失敗しても API レスポンスには影響なし)。
+async function triggerStatusUpdate(env: Env, trackerActionId: string): Promise<void> {
+  try {
+    const client = new SlackClient(env.SLACK_BOT_TOKEN, env.SLACK_SIGNING_SECRET);
+    await postOrUpdateKejimeStatus(env.DB, client, trackerActionId, getJstNow().ymd);
+  } catch (e) {
+    console.warn(`kejime status update hook failed (action=${trackerActionId}):`, e);
+  }
+}
 
 async function findAction(db: ReturnType<typeof drizzle>, actionId: string) {
   const a = await db.select().from(eventActions).where(eq(eventActions.id, actionId)).get();
@@ -103,6 +117,7 @@ kejimeRouter.post(`${BASE}/exemption`, async (c: C) => {
   await db.update(kejimeMembers).set({
     currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
   }).where(eq(kejimeMembers.id, memberId));
+  await triggerStatusUpdate(c.env, r.action.id);
   return c.json({ ok: true, exemption, member: {
     ...member, currentPoints: internalAfter, ramenCount: nextRamen,
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
@@ -134,6 +149,7 @@ kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   await db.insert(kejimeEvents).values(ev);
   await db.update(kejimeMembers).set({ ramenCount: 0, updatedAt: now })
     .where(eq(kejimeMembers.id, memberId));
+  await triggerStatusUpdate(c.env, r.action.id);
   return c.json({ ok: true, event: ev, member: {
     ...member, ramenCount: 0,
     displayPoints: Math.min(member.currentPoints, CAP), updatedAt: now,
@@ -215,6 +231,7 @@ kejimeRouter.post(`${BASE}/article-manual-approve`, async (c: C) => {
   await db.update(kejimeArticleRequests).set({
     status: "approved", decidedBy: "admin", decidedAt: now,
   }).where(eq(kejimeArticleRequests.id, req.id));
+  await triggerStatusUpdate(c.env, r.action.id);
   return c.json({ ok: true, event: ev, member: {
     ...member, currentPoints: internalAfter, ramenCount: nextRamen,
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
@@ -258,6 +275,7 @@ kejimeRouter.post(`${BASE}/edit-points`, async (c: C) => {
   await db.update(kejimeMembers).set({
     currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
   }).where(eq(kejimeMembers.id, memberId));
+  await triggerStatusUpdate(c.env, r.action.id);
   return c.json({ ok: true, event: ev, member: {
     ...member, currentPoints: internalAfter, ramenCount: nextRamen,
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,

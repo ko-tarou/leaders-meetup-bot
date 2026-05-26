@@ -1,7 +1,8 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
-  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, scheduledJobs,
+  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
+  kejimeStatusPosts, scheduledJobs,
 } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
@@ -65,11 +66,14 @@ export function buildStatusBlocks(
 
   // 🚨 PR15: その日 late 認定された人を強めにメンション (吊し上げ)。
   // 0 件 / undefined の日は section を出さない (静かな日の UX を壊さない)。
+  // PR16: 該当者がいるときは末尾に `cc <!channel>` を付けてチャンネル全員に
+  //       通知が飛ぶようにする (該当者個別だけだと周囲に見えづらいため)。
   const late = todayLateSlackUserIds ?? [];
   if (late.length > 0) {
+    const mentions = late.map((u) => `<@${u}>`).join(" ");
     lines.push(
       "",
-      `:rotating_light: *本日のけじめ対象* ${late.map((u) => `<@${u}>`).join(" ")}`,
+      `:rotating_light: *本日のけじめ対象* ${mentions} cc <!channel>`,
     );
   }
 
@@ -214,17 +218,17 @@ function parseCloseTimeRaw(raw: string | null | undefined): unknown {
   } catch { return undefined; }
 }
 
-async function postOnce(
-  d1: D1, slackClient: SlackClient,
-  actionId: string, ymdC: string, ymd: string, channelId: string,
-  hhmm: string,
+/**
+ * PR16: 当日のステータス用 Block Kit + 通知 text を組み立てる。
+ *
+ * postOnce (cron) と postOrUpdateKejimeStatus (hook) の両方から呼ばれる。
+ * I/O は DB の SELECT のみ。Slack post / update は呼び出し側が行う。
+ * db (D1Database) は display_name lazy-resolve に必要。null 可。
+ */
+async function buildLatestStatusBlocks(
+  d1: D1, slackClient: SlackClient, actionId: string, ymd: string,
   db?: D1Database,
-): Promise<boolean> {
-  // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
-  // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
-  const dedupKey = `kejime_status_post:${actionId}:${ymdC}:${hhmm}`;
-  if (!(await reservePending(d1, dedupKey, actionId))) return false;
-
+): Promise<{ blocks: Block[]; text: string }> {
   const membersRaw = await d1.select({
     id: kejimeMembers.id,
     slackUserId: kejimeMembers.slackUserId,
@@ -234,7 +238,7 @@ async function postOnce(
   }).from(kejimeMembers).where(eq(kejimeMembers.eventActionId, actionId)).all();
 
   // PR11: display_name が slack_user_id と一致 (= 未解決) の場合は Slack で resolve し
-  // DB を更新する (UI/Slack 投稿の両方で ID 露出を防ぐ)。db が無い古い呼び出し互換時は skip。
+  // DB を更新する (UI/Slack 投稿の両方で ID 露出を防ぐ)。db 無しは skip。
   const members = db
     ? await resolveAndPersist(d1, db, slackClient, membersRaw)
     : membersRaw;
@@ -250,7 +254,6 @@ async function postOnce(
       eq(kejimeArticleRequests.eventActionId, actionId),
       eq(kejimeArticleRequests.status, "pending"),
     )).all();
-  // articleRows も同様に解決済み name で表示する (DB 更新は上の members で完了済)。
   const nameMap = new Map(members.map((m) => [m.slackUserId, m.displayName]));
   const resolvedArticleRows = articleRows.map((a) => ({
     qiitaUrl: a.qiitaUrl,
@@ -259,9 +262,7 @@ async function postOnce(
 
   // PR15: 当日 type='late' の kejime_events から member の slackUserId を集めて
   // 吊し上げメンション section に渡す。kejime_late_judge.ts は note=`auto: ${ymd}`
-  // (JST 日付) で late を記録しているため、note 文字列で JST 日付一致を判定する
-  // (occurred_at は UTC ISO で、JST 朝の post 時点で前日 UTC 23 時台になり日付境界
-  // をまたぐので prefix 検索は使えない)。
+  // (JST 日付) で late を記録しているため、note 文字列で JST 日付一致を判定する。
   const lateRows = members.length === 0 ? [] : await d1.select({
     slackUserId: kejimeMembers.slackUserId,
   }).from(kejimeEvents)
@@ -280,8 +281,183 @@ async function postOnce(
     todayLateSlackUserIds,
   );
   const text = `朝活けじめステータス (${ymd})`;
+  return { blocks, text };
+}
+
+/**
+ * PR16: けじめポイント / 申請 / 承認 等が変動したら呼ぶ外部 API。
+ *
+ * - 当日の kejime_status_posts レコードを引く
+ * - 無ければ chat.postMessage → INSERT (初回 post も担当)
+ * - 有れば chat.update で in-place 更新 (新規メッセージは作らない)
+ * - update 失敗 (`message_not_found` 等 = 手動削除済) は fallback で再 post し
+ *   message_ts を上書きする (履歴の一貫性を保つ)
+ *
+ * fail-soft: 全工程を try/catch で囲み、失敗は console.warn のみ。
+ * mutation メイン処理 (ポイント加算等) は本関数の失敗で巻き戻さない。
+ *
+ * tracker / channelId 未設定の場合は noop (channel 未設定環境では post 不要)。
+ */
+export async function postOrUpdateKejimeStatus(
+  db: D1Database, slackClient: SlackClient,
+  trackerActionId: string, ymd: string,
+): Promise<void> {
   try {
-    await slackClient.postMessage(channelId, text, blocks);
+    const d1 = drizzle(db);
+    const action = await d1.select().from(eventActions)
+      .where(eq(eventActions.id, trackerActionId)).get();
+    if (!action || action.actionType !== "kejime_tracker" || action.enabled !== 1) {
+      return;
+    }
+    const channelId = parseChannelId(action.config);
+    if (!channelId) return;
+
+    const existing = await d1.select().from(kejimeStatusPosts).where(and(
+      eq(kejimeStatusPosts.eventActionId, trackerActionId),
+      eq(kejimeStatusPosts.date, ymd),
+    )).get();
+
+    const { blocks, text } = await buildLatestStatusBlocks(
+      d1, slackClient, trackerActionId, ymd, db,
+    );
+    const nowIso = new Date().toISOString();
+
+    if (existing) {
+      try {
+        const res = await slackClient.updateMessage(
+          channelId, existing.messageTs, text, blocks,
+        );
+        if (res && res.ok === false) {
+          await fallbackRepost(
+            d1, slackClient, channelId, text, blocks, existing.id, nowIso,
+          );
+        } else {
+          await d1.update(kejimeStatusPosts)
+            .set({ updatedAt: nowIso })
+            .where(eq(kejimeStatusPosts.id, existing.id));
+        }
+      } catch (e) {
+        console.warn(
+          `postOrUpdateKejimeStatus: chat.update threw (action=${trackerActionId}):`, e,
+        );
+        await fallbackRepost(
+          d1, slackClient, channelId, text, blocks, existing.id, nowIso,
+        ).catch((e2) => console.warn(
+          `postOrUpdateKejimeStatus: fallback failed (action=${trackerActionId}):`, e2,
+        ));
+      }
+    } else {
+      // 初回 post (cron 前に hook 経由で先行投稿するケース)。
+      try {
+        const res = await slackClient.postMessage(channelId, text, blocks);
+        const ts = typeof (res as { ts?: unknown }).ts === "string"
+          ? (res as unknown as { ts: string }).ts : null;
+        if (ts) {
+          await insertStatusPost(
+            d1, trackerActionId, ymd, channelId, ts, nowIso,
+          );
+        }
+      } catch (e) {
+        console.warn(
+          `postOrUpdateKejimeStatus: initial postMessage failed (action=${trackerActionId}):`, e,
+        );
+      }
+    }
+  } catch (e) {
+    // 想定外 (DB エラー等)。mutation 本処理は止めない。
+    console.warn(
+      `postOrUpdateKejimeStatus: unexpected error (action=${trackerActionId}):`, e,
+    );
+  }
+}
+
+async function fallbackRepost(
+  d1: D1, slackClient: SlackClient,
+  channelId: string, text: string, blocks: Block[],
+  existingRowId: string, nowIso: string,
+): Promise<void> {
+  const res = await slackClient.postMessage(channelId, text, blocks);
+  const ts = typeof (res as { ts?: unknown }).ts === "string"
+    ? (res as unknown as { ts: string }).ts : null;
+  if (ts) {
+    await d1.update(kejimeStatusPosts).set({
+      messageTs: ts, channelId, postedAt: nowIso, updatedAt: nowIso,
+    }).where(eq(kejimeStatusPosts.id, existingRowId));
+  } else {
+    // ts が無い (mock 等) 場合は updated_at のみ進めて整合性を保つ。
+    await d1.update(kejimeStatusPosts).set({ updatedAt: nowIso })
+      .where(eq(kejimeStatusPosts.id, existingRowId));
+  }
+}
+
+async function insertStatusPost(
+  d1: D1, actionId: string, ymd: string, channelId: string,
+  messageTs: string, nowIso: string,
+): Promise<void> {
+  try {
+    await d1.insert(kejimeStatusPosts).values({
+      id: crypto.randomUUID(),
+      eventActionId: actionId, date: ymd, channelId, messageTs,
+      postedAt: nowIso, updatedAt: nowIso,
+    });
+  } catch (e) {
+    // UNIQUE 衝突 = 並行で別経路が INSERT した。最新 ts に上書きする。
+    const msg = String(e);
+    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+      await d1.update(kejimeStatusPosts).set({
+        channelId, messageTs, updatedAt: nowIso,
+      }).where(and(
+        eq(kejimeStatusPosts.eventActionId, actionId),
+        eq(kejimeStatusPosts.date, ymd),
+      ));
+    } else {
+      throw e;
+    }
+  }
+}
+
+async function postOnce(
+  d1: D1, slackClient: SlackClient,
+  actionId: string, ymdC: string, ymd: string, channelId: string,
+  hhmm: string,
+  db?: D1Database,
+): Promise<boolean> {
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
+  // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
+  const dedupKey = `kejime_status_post:${actionId}:${ymdC}:${hhmm}`;
+  if (!(await reservePending(d1, dedupKey, actionId))) return false;
+
+  const { blocks, text } = await buildLatestStatusBlocks(
+    d1, slackClient, actionId, ymd, db,
+  );
+  const nowIso = new Date().toISOString();
+  try {
+    // PR16: 既に kejime_status_posts に当日レコードがあれば update 経路。
+    // cron 前に hook が走って INSERT 済みなら update で in-place 反映する。
+    const existing = await d1.select().from(kejimeStatusPosts).where(and(
+      eq(kejimeStatusPosts.eventActionId, actionId),
+      eq(kejimeStatusPosts.date, ymd),
+    )).get();
+    if (existing) {
+      const res = await slackClient.updateMessage(
+        channelId, existing.messageTs, text, blocks,
+      );
+      if (res && res.ok === false) {
+        await fallbackRepost(
+          d1, slackClient, channelId, text, blocks, existing.id, nowIso,
+        );
+      } else {
+        await d1.update(kejimeStatusPosts).set({ updatedAt: nowIso })
+          .where(eq(kejimeStatusPosts.id, existing.id));
+      }
+    } else {
+      const res = await slackClient.postMessage(channelId, text, blocks);
+      const ts = typeof (res as { ts?: unknown }).ts === "string"
+        ? (res as unknown as { ts: string }).ts : null;
+      if (ts) {
+        await insertStatusPost(d1, actionId, ymd, channelId, ts, nowIso);
+      }
+    }
     await d1.update(scheduledJobs).set({ status: "completed" })
       .where(eq(scheduledJobs.dedupKey, dedupKey));
     return true;

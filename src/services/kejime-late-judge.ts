@@ -10,6 +10,7 @@ import type { SlackClient } from "./slack-api";
 import {
   DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime, toHHMM,
 } from "./morning-standup";
+import { postOrUpdateKejimeStatus } from "./kejime-status-post";
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -131,6 +132,11 @@ async function judgeOne(
   }
   await d1.update(scheduledJobs).set({ status: "completed" })
     .where(eq(scheduledJobs.dedupKey, dedupKey));
+  // PR16: late が新規認定されたら当日 status post を update。slackClient が無い
+  // 旧呼び出し互換時は skip (fail-soft: judge 本処理は成功扱いのまま)。
+  if (lateCount > 0 && slackClient) {
+    await postOrUpdateKejimeStatus(db, slackClient, tracker.id, ymd);
+  }
   return lateCount;
 }
 
