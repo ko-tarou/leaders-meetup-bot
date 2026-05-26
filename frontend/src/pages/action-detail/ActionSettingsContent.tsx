@@ -3,6 +3,8 @@ import { MemberWelcomeConfigForm } from "../../components/MemberWelcomeConfigFor
 import { PRReviewSettingsForm } from "../../components/pr-review/PRReviewSettingsForm";
 import { AttendanceCheckForm } from "../../components/AttendanceCheckForm";
 import { RoleSettingsTab } from "../../components/role-management/RoleSettingsTab";
+import { MorningStandupSettingsForm } from "../../components/morning-standup/MorningStandupSettingsForm";
+import { KejimeSettingsForm } from "../../components/kejime/KejimeSettingsForm";
 import { PlaceholderContent } from "./PlaceholderContent";
 
 // Phase4-3: ActionDetailPage から純抽出。switch 分岐・props 配線すべて不変。
@@ -58,6 +60,22 @@ export function ActionSettingsContent({
     case "role_management":
       return (
         <RoleSettingsTab
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "morning_standup":
+      return (
+        <MorningStandupSettingsForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "kejime_tracker":
+      return (
+        <KejimeSettingsForm
           eventId={eventId}
           action={action}
           onSaved={onSaved}
