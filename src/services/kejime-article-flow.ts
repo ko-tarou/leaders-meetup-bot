@@ -10,6 +10,9 @@ import {
 } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
+import { postOrUpdateKejimeStatus } from "./kejime-status-post";
+import type { SlackClient } from "./slack-api";
+import { getJstNow } from "./time-utils";
 
 type D1 = ReturnType<typeof drizzle>;
 type Poster = { postMessage: (ch: string, t: string) => Promise<unknown> };
@@ -159,7 +162,7 @@ export async function handleKejimeChannelMessage(
   const m = event.text.match(URL_RE); if (!m) return;
   await processQiitaSubmissionInner(d1, slack, fetchImpl, {
     tracker: tr, slackUserId: event.user, url: m[0],
-    threadTs: event.ts, channelId: event.channel,
+    threadTs: event.ts, channelId: event.channel, db,
   });
 }
 
@@ -200,13 +203,16 @@ export async function processQiitaArticleSubmission(
   if (!tr) return null;
   return processQiitaSubmissionInner(d1, slack, fetchImpl, {
     tracker: tr, slackUserId: args.slackUserId, url: args.url,
-    threadTs: args.threadTs ?? null, channelId: args.channelId,
+    threadTs: args.threadTs ?? null, channelId: args.channelId, db,
   });
 }
 
 type SubmissionInnerArgs = {
   tracker: Tracker; slackUserId: string; url: string;
   threadTs?: string | null; channelId?: string;
+  // PR16: postOrUpdateKejimeStatus を呼ぶために必要。優先度低 (旧呼び出し
+  // 互換のため optional)。未指定なら status post update は skip。
+  db?: D1Database;
 };
 
 async function processQiitaSubmissionInner(
@@ -257,6 +263,14 @@ async function processQiitaSubmissionInner(
   });
   await slack.postMessage(channelId,
     args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`);
+  // PR16: 申請が pending (= 申請待ち section が増える) の場合のみ status post を
+  // 更新する。rejected_* は申請待ちセクションに出ないので update する意味が薄く、
+  // 不要な Slack API call を増やさない。fail-soft: 失敗してもメイン処理は成功扱い。
+  if (status === "pending" && args.db) {
+    await postOrUpdateKejimeStatus(
+      args.db, slack as unknown as SlackClient, tr.actionId, getJstNow().ymd,
+    ).catch((e) => console.warn("kejime_status_post hook (article submit):", e));
+  }
   return { status, length };
 }
 
@@ -307,4 +321,8 @@ export async function handleKejimeReactionAdded(
     },
   );
   await slack.postMessage(event.item.channel, approvedNotice);
+  // PR16: 承認でポイントが減ったので status post を update する。fail-soft。
+  await postOrUpdateKejimeStatus(
+    db, slack as unknown as SlackClient, tr.actionId, getJstNow().ymd,
+  ).catch((e) => console.warn("kejime_status_post hook (article approve):", e));
 }

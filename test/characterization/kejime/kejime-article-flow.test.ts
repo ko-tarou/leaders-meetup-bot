@@ -196,7 +196,11 @@ describe("handleKejimeReactionAdded", () => {
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("article");
     expect(events[0].pointsDelta).toBe(-1);
-    expect(slack.callsOf("postMessage")).toHaveLength(1);
+    // PR16: 承認通知 (1 件) + postOrUpdateKejimeStatus による status post (初回
+    // のため postMessage 経路) の 2 件。1 件目が承認通知であることのみ固定する。
+    const posts = slack.callsOf("postMessage");
+    expect(posts.length).toBeGreaterThanOrEqual(1);
+    expect(String((posts[0].args as unknown[])[1])).toContain("<@U-AUTHOR>");
   });
 
   it("5pt → -1: ramen_count -1 (5 割れ)", async () => {
