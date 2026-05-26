@@ -99,11 +99,33 @@ describe("buildReminderText / buildCloseText (003 PR8)", () => {
       { reminder: "", close: "x" },
       { theme: "T", dayLabel: "D", date: "2026-01-01" },
     );
+    // PR10: DEFAULT は先頭に "{mentions}\n" を含むが、mentions 未指定 (空文字) なら
+    // 先頭の "{mentions}\n" 一行は抑制される (空行が残らないよう renderTemplate 内で削除)。
     expect(r).toBe(
-      DEFAULT_REMINDER_TEMPLATE.replace("{theme}", "T")
+      DEFAULT_REMINDER_TEMPLATE.replace(/^\{mentions\}\n/, "")
+        .replace("{theme}", "T")
         .replace("{dayLabel}", "D")
         .replace("{date}", "2026-01-01"),
     );
+  });
+
+  it("PR10: mentions 指定 → {mentions} が <@U..> 列に展開される", () => {
+    const r = buildReminderText(undefined, {
+      theme: "Rust", dayLabel: "月", date: "2026-05-18",
+      mentions: "<@U1> <@U2>",
+    });
+    expect(r).toContain("<@U1> <@U2>");
+    expect(r).toContain("Rust");
+    // 先頭は mentions 行 + 改行 → 次行が :books:
+    expect(r.split("\n")[0]).toBe("<@U1> <@U2>");
+  });
+
+  it("PR10: mentions 未指定なら DEFAULT の先頭 {mentions}\\n は空行にならず消える", () => {
+    const r = buildReminderText(undefined, {
+      theme: "Rust", dayLabel: "月", date: "2026-05-18",
+    });
+    // 先頭が空行 (\n) で始まらず、いきなり :books: で始まる
+    expect(r.startsWith(":books:")).toBe(true);
   });
 
   it("templates.close が空文字 → DEFAULT を使う", () => {

@@ -1,6 +1,8 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
-import { eventActions, morningAttendance, scheduledJobs } from "../db/schema";
+import {
+  eventActions, morningAttendance, scheduledJobs, slackRoleMembers,
+} from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
 import { plainText, mrkdwnSection } from "../domain/slack-blocks/builders";
@@ -17,6 +19,10 @@ type Themes = Record<ThemeKey, string>;
 type MessageTemplates = { reminder?: string; close?: string };
 type Config = {
   channelId: string;
+  // PR10: roleId は morning_standup.config に直接持つ optional 値。
+  // 設定済みなら reminder 投稿時にロールメンバー全員へメンション (<@U..>) を打つ。
+  // 空 / 未設定 / メンバー 0 件 → {mentions} は空文字に展開し従来挙動を維持。
+  roleId?: string;
   themes: Themes;
   messageTemplates?: MessageTemplates;
   reminderTime: string; // "HH:MM" (5 分単位丸め済)
@@ -40,18 +46,33 @@ const DEFAULT_THEMES: Themes = {
 
 // 003 PR8: リマインド / 締切 文面のカスタマイズ対応。
 // テンプレ未指定 (or 空文字) なら従来の hardcoded 文言が使われる。
-// placeholder: {theme} {dayLabel} {date} {count}。
+// placeholder: {theme} {dayLabel} {date} {count} {mentions} (PR10)。
+// {mentions} はロールメンバー全員へのメンション文字列 ("<@U1> <@U2>") に展開される。
+// メンバー 0 件 or roleId 未設定なら空文字に展開し、先頭の改行も生まれないよう
+// default template では先頭に置く (空 = 1 行目が消えるだけで済む)。
 export const DEFAULT_REMINDER_TEMPLATE =
-  ":books: *おはようございます！今日も朝活会あります*\n" +
+  "{mentions}\n:books: *おはようございます！今日も朝活会あります*\n" +
   "今日のテーマ: *{theme}* ({dayLabel})\n集合: 8:00 JST / {date}";
 export const DEFAULT_CLOSE_TEMPLATE =
   ":alarm_clock: *朝活、締め切りです* ({date})\n本日の出席登録: *{count}名*";
 
 export function renderTemplate(
   tpl: string,
-  vars: { theme?: string; dayLabel?: string; date?: string; count?: number },
+  vars: {
+    theme?: string; dayLabel?: string; date?: string;
+    count?: number; mentions?: string;
+  },
 ): string {
-  return tpl
+  // mentions が空文字 (roleId 未設定 / メンバー 0 件) で、かつ template の
+  // 1 行目が "{mentions}" のみ (= default template の頭) のときは先頭の
+  // 空行を抑える。文中の {mentions} はそのまま空文字置換 (副作用なし)。
+  let body = tpl;
+  const m = vars.mentions ?? "";
+  if (!m && /^\{mentions\}\n/.test(body)) {
+    body = body.replace(/^\{mentions\}\n/, "");
+  }
+  return body
+    .replace(/\{mentions\}/g, m)
     .replace(/\{theme\}/g, vars.theme ?? "")
     .replace(/\{dayLabel\}/g, vars.dayLabel ?? "")
     .replace(/\{date\}/g, vars.date ?? "")
@@ -60,13 +81,19 @@ export function renderTemplate(
 
 export function buildReminderText(
   templates: MessageTemplates | undefined,
-  vars: { theme: string; dayLabel: string; date: string },
+  vars: { theme: string; dayLabel: string; date: string; mentions?: string },
 ): string {
   const tpl =
     templates?.reminder && templates.reminder.trim()
       ? templates.reminder
       : DEFAULT_REMINDER_TEMPLATE;
   return renderTemplate(tpl, vars);
+}
+
+// PR10: slack user id 配列 → "<@U1> <@U2>" 形式の mention 文字列を組み立てる。
+// 空配列は "" を返し、template 内 {mentions} は空文字置換される。
+export function buildMentionString(slackUserIds: string[]): string {
+  return slackUserIds.map((u) => `<@${u}>`).join(" ");
 }
 
 export function buildCloseText(
@@ -105,7 +132,7 @@ export async function processMorningStandup(
     try {
       if (await fireOnce(db, slackClient, a.id, ymdCompact, now.ymd, phase,
                          cfg.channelId, cfg.themes[themeKey], themeKey,
-                         cfg.messageTemplates)) fired++;
+                         cfg.messageTemplates, cfg.roleId)) fired++;
     } catch (e) {
       console.error(`morning_standup fireOnce error (action=${a.id}):`, e);
     }
@@ -150,6 +177,7 @@ function parseConfig(raw: string | null | undefined): Config | null {
   if (!p || typeof p !== "object") return null;
   const o = p as {
     channelId?: unknown;
+    roleId?: unknown;
     themes?: unknown;
     messageTemplates?: unknown;
     reminderTime?: unknown;
@@ -171,8 +199,11 @@ function parseConfig(raw: string | null | undefined): Config | null {
   }
   // PR9: reminderTime / closeTime は HH:MM。未設定 / 不正は default に fallback。
   // 5 分単位への丸めも実施 (cron 粒度に合わせる)。
+  const roleId =
+    typeof o.roleId === "string" && o.roleId.trim() ? o.roleId : undefined;
   return {
     channelId: o.channelId,
+    roleId,
     themes: { mon: pick("mon"), tue: pick("tue"), wed: pick("wed"), thu: pick("thu"), fri: pick("fri") },
     messageTemplates,
     reminderTime: normalizeFireTime(o.reminderTime, DEFAULT_REMINDER_TIME),
@@ -198,6 +229,7 @@ async function fireOnce(
   ymdCompact: string, ymd: string, phase: Phase,
   channelId: string, theme: string, themeKey: ThemeKey,
   templates: MessageTemplates | undefined,
+  roleId: string | undefined,
 ): Promise<boolean> {
   const dedupKey = `morning_standup:${actionId}:${ymdCompact}:${phase}`;
   const d1 = drizzle(db);
@@ -206,8 +238,18 @@ async function fireOnce(
   let text: string;
   let blocks: Block[];
   if (phase === "reminder") {
+    // PR10: reminder のみメンション。close は重いので付けない。
+    // roleId 未設定 / メンバー 0 件 → "" (template 側で空行抑制)。
+    const mentions = roleId
+      ? buildMentionString(
+          (await d1.select({ slackUserId: slackRoleMembers.slackUserId })
+            .from(slackRoleMembers)
+            .where(eq(slackRoleMembers.roleId, roleId)).all())
+            .map((r) => r.slackUserId),
+        )
+      : "";
     const body = buildReminderText(templates, {
-      theme, dayLabel: DOW_LABEL[themeKey], date: ymd,
+      theme, dayLabel: DOW_LABEL[themeKey], date: ymd, mentions,
     });
     text = `今日の朝活: ${theme}`;
     blocks = reminderBlocks(actionId, ymdCompact, body);
