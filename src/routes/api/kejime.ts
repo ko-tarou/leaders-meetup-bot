@@ -220,3 +220,46 @@ kejimeRouter.post(`${BASE}/article-manual-approve`, async (c: C) => {
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
   } }, 201);
 });
+
+// PR15: admin による current_points 直接編集。0 以上の整数で set し、
+// bumpPointsAndRamen で ramen を同期 (delta = new - current で再計算)。
+// 履歴は type='manual_edit' で kejime_events に 1 行残す (削除しない方針)。
+kejimeRouter.post(`${BASE}/edit-points`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const body = await c.req.json<{ memberId?: string; newPoints?: number; note?: string }>()
+    .catch(() => null);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
+  const memberId = (body.memberId ?? "").trim();
+  if (!memberId) return c.json({ error: "memberId is required" }, 400);
+  const newPoints = body.newPoints;
+  if (
+    typeof newPoints !== "number" || !Number.isInteger(newPoints) || newPoints < 0
+  ) {
+    return c.json({ error: "newPoints must be a non-negative integer" }, 400);
+  }
+  const member = await db.select().from(kejimeMembers)
+    .where(eq(kejimeMembers.id, memberId)).get();
+  if (!member || member.eventActionId !== r.action.id) {
+    return c.json({ error: "member not found" }, 404);
+  }
+  const delta = newPoints - member.currentPoints;
+  const now = new Date().toISOString();
+  // delta=0 でも履歴は残す (admin が「変更なし」を確認した記録として有用)。
+  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, delta);
+  const nextRamen = Math.max(0, member.ramenCount + ramenBumped);
+  const ev: typeof kejimeEvents.$inferInsert = {
+    id: crypto.randomUUID(), memberId, type: "manual_edit",
+    pointsDelta: delta, ramenDelta: ramenBumped,
+    note: body.note?.trim() || null, decidedBy: "admin", occurredAt: now,
+  };
+  await db.insert(kejimeEvents).values(ev);
+  await db.update(kejimeMembers).set({
+    currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
+  }).where(eq(kejimeMembers.id, memberId));
+  return c.json({ ok: true, event: ev, member: {
+    ...member, currentPoints: internalAfter, ramenCount: nextRamen,
+    displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
+  } }, 201);
+});
