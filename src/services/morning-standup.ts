@@ -14,7 +14,12 @@ type Block = Record<string, unknown>;
 type Phase = "reminder" | "close";
 type ThemeKey = "mon" | "tue" | "wed" | "thu" | "fri";
 type Themes = Record<ThemeKey, string>;
-type Config = { channelId: string; themes: Themes };
+type MessageTemplates = { reminder?: string; close?: string };
+type Config = {
+  channelId: string;
+  themes: Themes;
+  messageTemplates?: MessageTemplates;
+};
 
 const DOW_KEYS: Record<number, ThemeKey | null> = {
   0: null, 1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: null };
@@ -22,6 +27,48 @@ const DOW_LABEL: Record<ThemeKey, string> = {
   mon: "月曜日", tue: "火曜日", wed: "水曜日", thu: "木曜日", fri: "金曜日" };
 const DEFAULT_THEMES: Themes = {
   mon: "ハードウェア", tue: "フロントエンド", wed: "バックエンド", thu: "Android", fri: "Unity" };
+
+// 003 PR8: リマインド / 締切 文面のカスタマイズ対応。
+// テンプレ未指定 (or 空文字) なら従来の hardcoded 文言が使われる。
+// placeholder: {theme} {dayLabel} {date} {count}。
+export const DEFAULT_REMINDER_TEMPLATE =
+  ":books: *おはようございます！今日も朝活会あります*\n" +
+  "今日のテーマ: *{theme}* ({dayLabel})\n集合: 8:00 JST / {date}";
+export const DEFAULT_CLOSE_TEMPLATE =
+  ":alarm_clock: *朝活、締め切りです* ({date})\n本日の出席登録: *{count}名*";
+
+export function renderTemplate(
+  tpl: string,
+  vars: { theme?: string; dayLabel?: string; date?: string; count?: number },
+): string {
+  return tpl
+    .replace(/\{theme\}/g, vars.theme ?? "")
+    .replace(/\{dayLabel\}/g, vars.dayLabel ?? "")
+    .replace(/\{date\}/g, vars.date ?? "")
+    .replace(/\{count\}/g, vars.count != null ? String(vars.count) : "");
+}
+
+export function buildReminderText(
+  templates: MessageTemplates | undefined,
+  vars: { theme: string; dayLabel: string; date: string },
+): string {
+  const tpl =
+    templates?.reminder && templates.reminder.trim()
+      ? templates.reminder
+      : DEFAULT_REMINDER_TEMPLATE;
+  return renderTemplate(tpl, vars);
+}
+
+export function buildCloseText(
+  templates: MessageTemplates | undefined,
+  vars: { date: string; count: number },
+): string {
+  const tpl =
+    templates?.close && templates.close.trim()
+      ? templates.close
+      : DEFAULT_CLOSE_TEMPLATE;
+  return renderTemplate(tpl, vars);
+}
 
 export async function processMorningStandup(
   db: D1Database, slackClient: SlackClient,
@@ -44,7 +91,8 @@ export async function processMorningStandup(
     if (!cfg) { console.warn(`morning_standup: action ${a.id} invalid config; skip`); continue; }
     try {
       if (await fireOnce(db, slackClient, a.id, ymdCompact, now.ymd, phase,
-                         cfg.channelId, cfg.themes[themeKey], themeKey)) fired++;
+                         cfg.channelId, cfg.themes[themeKey], themeKey,
+                         cfg.messageTemplates)) fired++;
     } catch (e) {
       console.error(`morning_standup fireOnce error (action=${a.id}):`, e);
     }
@@ -65,23 +113,37 @@ function parseConfig(raw: string | null | undefined): Config | null {
   let p: unknown;
   try { p = JSON.parse(raw); } catch { return null; }
   if (!p || typeof p !== "object") return null;
-  const o = p as { channelId?: unknown; themes?: unknown };
+  const o = p as {
+    channelId?: unknown;
+    themes?: unknown;
+    messageTemplates?: unknown;
+  };
   if (typeof o.channelId !== "string" || !o.channelId.trim()) return null;
   const t = o.themes && typeof o.themes === "object" ? (o.themes as Record<string, unknown>) : {};
   const pick = (k: ThemeKey) =>
     typeof t[k] === "string" && (t[k] as string).trim() ? (t[k] as string) : DEFAULT_THEMES[k];
+  // messageTemplates: object 以外は無視。各 key は string のみ採用 (空欄含む)。
+  let messageTemplates: MessageTemplates | undefined;
+  if (o.messageTemplates && typeof o.messageTemplates === "object") {
+    const m = o.messageTemplates as { reminder?: unknown; close?: unknown };
+    const r = typeof m.reminder === "string" ? m.reminder : undefined;
+    const cl = typeof m.close === "string" ? m.close : undefined;
+    if (r !== undefined || cl !== undefined) {
+      messageTemplates = { reminder: r, close: cl };
+    }
+  }
   return {
     channelId: o.channelId,
     themes: { mon: pick("mon"), tue: pick("tue"), wed: pick("wed"), thu: pick("thu"), fri: pick("fri") },
+    messageTemplates,
   };
 }
 
-function reminderBlocks(theme: string, tk: ThemeKey, aid: string, ymdC: string, ymd: string): Block[] {
+function reminderBlocks(
+  aid: string, ymdC: string, body: string,
+): Block[] {
   return [
-    mrkdwnSection(
-      `:books: *おはようございます！今日も朝活会あります*\n` +
-      `今日のテーマ: *${theme}* (${DOW_LABEL[tk]})\n集合: 8:00 JST / ${ymd}`,
-    ),
+    mrkdwnSection(body),
     { type: "actions", elements: [{
       type: "button", text: plainText("参加"),
       action_id: `morning_attend:${aid}:${ymdC}`,
@@ -94,6 +156,7 @@ async function fireOnce(
   db: D1Database, slackClient: SlackClient, actionId: string,
   ymdCompact: string, ymd: string, phase: Phase,
   channelId: string, theme: string, themeKey: ThemeKey,
+  templates: MessageTemplates | undefined,
 ): Promise<boolean> {
   const dedupKey = `morning_standup:${actionId}:${ymdCompact}:${phase}`;
   const d1 = drizzle(db);
@@ -102,16 +165,18 @@ async function fireOnce(
   let text: string;
   let blocks: Block[];
   if (phase === "reminder") {
+    const body = buildReminderText(templates, {
+      theme, dayLabel: DOW_LABEL[themeKey], date: ymd,
+    });
     text = `今日の朝活: ${theme}`;
-    blocks = reminderBlocks(theme, themeKey, actionId, ymdCompact, ymd);
+    blocks = reminderBlocks(actionId, ymdCompact, body);
   } else {
     const rows = await d1.select().from(morningAttendance)
       .where(and(eq(morningAttendance.eventActionId, actionId), eq(morningAttendance.date, ymd))).all();
     const count = rows.filter((r) => r.status === "attended").length;
+    const body = buildCloseText(templates, { date: ymd, count });
     text = `朝活、締め切りです (${ymd})`;
-    blocks = [mrkdwnSection(
-      `:alarm_clock: *朝活、締め切りです* (${ymd})\n本日の出席登録: *${count}名*`,
-    )];
+    blocks = [mrkdwnSection(body)];
   }
 
   try {

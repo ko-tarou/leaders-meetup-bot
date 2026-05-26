@@ -716,6 +716,31 @@ rolesRouter.post(
 );
 
 // ----------------------------------------------------------------------------
+// Role lookup by global id (003 PR8)
+// ----------------------------------------------------------------------------
+//
+// FE の RoleNameDisplay は config.roleId だけを持っているので、event/action を
+// 知らずにロール名を引きたい。slack_roles.id は UUID で衝突しないため cross-event
+// に単純 SELECT で解決して返す。admin auth は api.ts レイヤで自動適用される。
+rolesRouter.get("/roles/:roleId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const roleId = c.req.param("roleId");
+  const row = await db
+    .select()
+    .from(slackRoles)
+    .where(eq(slackRoles.id, roleId))
+    .get();
+  if (!row) return c.json({ error: "role not found" }, 404);
+  return c.json({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    eventActionId: row.eventActionId,
+    parentRoleId: row.parentRoleId,
+  });
+});
+
+// ----------------------------------------------------------------------------
 // Bot bulk invite (005-user-oauth)
 // ----------------------------------------------------------------------------
 //
