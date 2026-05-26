@@ -5,6 +5,10 @@ import {
   maybeTriggerStickyRepost,
 } from "../../services/auto-respond";
 import { handleMemberJoinedChannel } from "../../services/member-welcome";
+import {
+  handleKejimeChannelMessage,
+  handleKejimeReactionAdded,
+} from "../../services/kejime-article-flow";
 import { getSlackClient, type SlackVariables } from "./utils";
 
 export const eventsRouter = new Hono<{
@@ -29,6 +33,22 @@ eventsRouter.post("/events", async (c) => {
     // ADR-0006 sticky board repost トリガー（10秒デバウンス）。
     // handleMessageEvent とは独立して走らせる（auto-respond の成否に関係なく動く）。
     maybeTriggerStickyRepost(c.env, c.executionCtx, body.event);
+    // 朝勉強会けじめ制度 PR5: けじめ ch への Qiita URL 投稿を検出。
+    c.executionCtx.waitUntil(
+      handleKejimeChannelMessage(c.env.DB, client, fetch, body.event).catch(
+        (e) => console.error("kejime channel message:", e),
+      ),
+    );
+  }
+
+  // 朝勉強会けじめ制度 PR5: reaction_added → 記事承認フロー。
+  if (body.type === "event_callback" && body.event?.type === "reaction_added") {
+    const client = getSlackClient(c);
+    c.executionCtx.waitUntil(
+      handleKejimeReactionAdded(c.env.DB, client, body.event).catch(
+        (e) => console.error("kejime reaction_added:", e),
+      ),
+    );
   }
 
   // ADR-0008: member_joined_channel イベント
