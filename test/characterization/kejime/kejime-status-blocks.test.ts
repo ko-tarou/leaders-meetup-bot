@@ -89,6 +89,40 @@ describe("buildStatusBlocks: 棒グラフと 5pt キャップ", () => {
   });
 });
 
+describe("buildStatusBlocks: PR14 記事申請ボタン", () => {
+  it("trackerActionId 未指定 → actions block は付かない (旧呼び出し互換)", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 1, ramenCount: 0 }],
+      [], "2026-05-19 (火)",
+    );
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0] as { type: string }).type).toBe("section");
+  });
+
+  it("trackerActionId 指定 → 末尾に primary ボタンを 1 つ持つ actions block を追加", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 1, ramenCount: 0 }],
+      [], "2026-05-19 (火)", "tracker-abc",
+    );
+    expect(blocks).toHaveLength(2);
+    const actions = blocks[1] as {
+      type: string;
+      elements: Array<{
+        type: string; text: { text: string };
+        style?: string; action_id: string; value: string;
+      }>;
+    };
+    expect(actions.type).toBe("actions");
+    expect(actions.elements).toHaveLength(1);
+    const btn = actions.elements[0];
+    expect(btn.type).toBe("button");
+    expect(btn.text.text).toBe("📝 記事を申請");
+    expect(btn.style).toBe("primary");
+    expect(btn.action_id).toBe("kejime_article_submit:tracker-abc");
+    expect(btn.value).toBe("tracker-abc");
+  });
+});
+
 describe("buildStatusBlocks: セクション省略", () => {
   it("ramen_count 全員 0 → 激辛セクションは出ない", () => {
     const blocks = buildStatusBlocks(
