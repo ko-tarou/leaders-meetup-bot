@@ -11,6 +11,7 @@
  *   2026-05-23 = 土曜 (sat / 走らない)
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { eq } from "drizzle-orm";
 import { MockSlackClient } from "../../mocks/slack";
 
 vi.mock("../../../src/services/slack-api", () => ({
@@ -307,7 +308,9 @@ describe("processMorningStandup: reminderTime / closeTime カスタマイズ (PR
 });
 
 describe("processMorningStandup: dedupKey 形式", () => {
-  it("morning_standup:<actionId>:<YYYYMMDD>:reminder", async () => {
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。
+  // 形式: morning_standup:<actionId>:<YYYYMMDD>:<phase>:<HHMM>
+  it("morning_standup:<actionId>:<YYYYMMDD>:reminder:<HHMM>", async () => {
     freezeJst(MON_YMD, "07:30");
     const ev = await makeEvent();
     const ea = await makeEventAction(ev.id, {
@@ -316,10 +319,10 @@ describe("processMorningStandup: dedupKey 形式", () => {
     });
     await processMorningStandup(testD1(), slackClient);
     const job = (await testDb().select().from(scheduledJobs).all())[0];
-    expect(job.dedupKey).toBe(`morning_standup:${ea.id}:20260518:reminder`);
+    expect(job.dedupKey).toBe(`morning_standup:${ea.id}:20260518:reminder:0730`);
   });
 
-  it("8:00 phase の dedupKey は :close で終わる", async () => {
+  it("8:00 phase の dedupKey は :close:0800 で終わる", async () => {
     freezeJst(MON_YMD, "08:00");
     const ev = await makeEvent();
     const ea = await makeEventAction(ev.id, {
@@ -328,6 +331,35 @@ describe("processMorningStandup: dedupKey 形式", () => {
     });
     await processMorningStandup(testD1(), slackClient);
     const job = (await testDb().select().from(scheduledJobs).all())[0];
-    expect(job.dedupKey).toBe(`morning_standup:${ea.id}:20260518:close`);
+    expect(job.dedupKey).toBe(`morning_standup:${ea.id}:20260518:close:0800`);
+  });
+
+  // PR13: 同じ日でも reminderTime を変えて再発火 → 別 dedupKey なので post 2 回。
+  it("同日でも reminderTime を変えれば別 dedup として再発火する", async () => {
+    const ev = await makeEvent();
+    const ea = await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "07:30" }),
+    });
+    freezeJst(MON_YMD, "07:30");
+    const r1 = await processMorningStandup(testD1(), slackClient);
+    expect(r1).toEqual({ fired: 1 });
+
+    // reminderTime を 09:00 に変更 + 9:00 で再呼出 → 別 dedup として fire。
+    const db = testDb();
+    await db.update(eventActions).set({
+      config: standupCfg({ reminderTime: "09:00" }),
+    }).where(eq(eventActions.id, ea.id));
+    freezeJst(MON_YMD, "09:00");
+    const r2 = await processMorningStandup(testD1(), slackClient);
+    expect(r2).toEqual({ fired: 1 });
+    expect(slack.callsOf("postMessage")).toHaveLength(2);
+    const jobs = await db.select().from(scheduledJobs).all();
+    expect(jobs).toHaveLength(2);
+    const keys = jobs.map((j) => j.dedupKey).sort();
+    expect(keys).toEqual([
+      `morning_standup:${ea.id}:20260518:reminder:0730`,
+      `morning_standup:${ea.id}:20260518:reminder:0900`,
+    ]);
   });
 });

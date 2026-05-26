@@ -191,15 +191,41 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     expect(await testDb().select().from(kejimeEvents).all()).toHaveLength(0);
   });
 
-  it("dedupKey 形式: kejime_late_judge:<trackerId>:<YYYYMMDD>", async () => {
+  // PR13: dedupKey に発火時刻 (HHMM) を含める。
+  // 形式: kejime_late_judge:<trackerId>:<YYYYMMDD>:<HHMM>
+  it("dedupKey 形式: kejime_late_judge:<trackerId>:<YYYYMMDD>:<HHMM>", async () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio({ roleMembers: ["U1"] });
     await processLateJudgment(testD1());
     const jobs = await testDb().select().from(scheduledJobs).all();
     expect(jobs).toHaveLength(1);
-    expect(jobs[0].dedupKey).toBe(`kejime_late_judge:${tracker.id}:20260518`);
+    expect(jobs[0].dedupKey).toBe(`kejime_late_judge:${tracker.id}:20260518:0800`);
     expect(jobs[0].type).toBe("kejime_late_judge");
     expect(jobs[0].status).toBe("completed");
+  });
+
+  // PR13: 同日でも closeTime を変えれば別 dedupKey として再発火する。
+  it("同日でも closeTime を変えれば別 dedup として再発火する", async () => {
+    // 1 回目: closeTime=08:00 で fire (U1 を late 判定)。
+    freezeJst(MON, "08:00");
+    await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 1 });
+
+    // closeTime を 10:00 に変更し、10:00 で再呼出 → 別 dedup として fire。
+    const db = testDb();
+    await db.update(eventActions)
+      .set({ config: JSON.stringify({
+        schemaVersion: 1, channelId: "C-X", themes: {}, closeTime: "10:00",
+      }) })
+      .where(eq(eventActions.actionType, "morning_standup"));
+    freezeJst(MON, "10:00");
+    expect(await processLateJudgment(testD1())).toEqual({ judged: 1 });
+
+    const jobs = await db.select().from(scheduledJobs).all();
+    expect(jobs).toHaveLength(2);
+    const keys = jobs.map((j) => j.dedupKey).sort();
+    expect(keys[0]).toMatch(/:20260518:0800$/);
+    expect(keys[1]).toMatch(/:20260518:1000$/);
   });
 });
 
