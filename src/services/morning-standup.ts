@@ -160,6 +160,18 @@ function parseHm(hm: string): number | null {
   return h * 60 + min;
 }
 
+// PR12: HH:MM に分を加算 (24h wrap)。
+// kejime-status-post が closeTime + 5min の窓で発火するために使う。
+// 入力が不正なら fallback を返す。
+export function addMinutesToHHMM(hm: string, minutes: number, fallback = "00:00"): string {
+  const parsed = parseHm(hm);
+  if (parsed == null) return fallback;
+  const total = ((parsed + minutes) % (24 * 60) + 24 * 60) % (24 * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 // 5 分単位への丸め (Math.floor)。HH:MM 形式以外は default を返す。
 export function normalizeFireTime(hm: unknown, fallback: string): string {
   if (typeof hm !== "string") return fallback;
