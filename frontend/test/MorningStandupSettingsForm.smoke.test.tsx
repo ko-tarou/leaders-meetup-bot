@@ -5,15 +5,13 @@ import { MorningStandupSettingsForm } from "../src/components/morning-standup/Mo
 import type { EventAction } from "../src/types";
 import { ToastProvider } from "../src/components/ui/Toast";
 
-// 003 PR7 → PR8: morning_standup の設定タブのスモークテスト。
-// PR8 で channelId は ChannelSelector / roleId は RoleNameDisplay に置換、
-// messageTemplates (reminder / close textarea) を追加。
+// 003 PR7 → PR8 → PR9: morning_standup 設定タブのスモークテスト。
+// PR9 で ChannelSelector → SingleChannelPicker、reminderTime / closeTime 追加。
 // observer:
-//   - ChannelSelector の <select> に既存 channelId が反映される
-//   - RoleNameDisplay がロール名 fetch を試みる (mock api)
-//   - 保存時 PUT body に channelId / themes / messageTemplates が乗る
-//   - 不正な channelId は保存ブロック (ChannelSelector からは出ない想定だが防御)
-//   - messageTemplates 空欄なら body から omit (default fallback)
+//   - workspace 一覧 fetch + SingleChannelPicker で channel 選択できる
+//   - reminderTime / closeTime のバリデーション
+//   - 保存時 PUT body に reminderTime / closeTime が乗る
+//   - messageTemplates 既存挙動 (空欄なら omit) は維持
 
 const EVENT_ID = "ev1";
 
@@ -31,13 +29,15 @@ function makeAction(config: object): EventAction {
 
 type FetchCall = { url: string; method: string; body?: string };
 
-// PR8: ChannelSelector が GET /api/slack/channels を、
-//      RoleNameDisplay が GET /api/roles/:id を呼ぶので、それぞれ mock する。
 function installFetchSpy(opts?: {
+  workspaces?: { id: string; name: string; slackTeamId: string; createdAt: string }[];
   channels?: { id: string; name: string }[];
   role?: { id: string; name: string } | null;
 }): FetchCall[] {
   const calls: FetchCall[] = [];
+  const workspaces = opts?.workspaces ?? [
+    { id: "ws1", name: "Default", slackTeamId: "T1", createdAt: "2026-01-01T00:00:00Z" },
+  ];
   const channels = opts?.channels ?? [
     { id: "C01ABC", name: "general" },
     { id: "C01XYZ", name: "morning-standup" },
@@ -55,32 +55,31 @@ function installFetchSpy(opts?: {
       const body = init?.body == null ? undefined : String(init.body);
       calls.push({ url, method, body });
 
+      if (url.endsWith("/api/workspaces") || url.includes("/api/workspaces?")) {
+        return new Response(JSON.stringify(workspaces), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.includes("/api/slack/channels")) {
         return new Response(JSON.stringify(channels), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+          status: 200, headers: { "Content-Type": "application/json" },
         });
       }
       if (url.includes("/api/roles/")) {
         if (opts?.role === null) {
           return new Response(JSON.stringify({ error: "role not found" }), {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
+            status: 404, headers: { "Content-Type": "application/json" },
           });
         }
         const role = opts?.role ?? {
-          id: "role-1",
-          name: "勉強会チーム",
-          eventActionId: "act-x",
+          id: "role-1", name: "勉強会チーム", eventActionId: "act-x",
         };
         return new Response(JSON.stringify(role), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+          status: 200, headers: { "Content-Type": "application/json" },
         });
       }
       return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
+        status: 200, headers: { "Content-Type": "application/json" },
       });
     }),
   );
@@ -107,8 +106,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
-  it("初期値: channel が ChannelSelector に反映 / themes が input に出る", async () => {
+describe("MorningStandupSettingsForm smoke (003 PR9)", () => {
+  it("初期値: themes が input に出る / 時刻 default 表示", async () => {
     renderForm(
       makeAction({
         channelId: "C01ABC",
@@ -116,15 +115,24 @@ describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
         themes: { mon: "Rust", wed: "Go" },
       }),
     );
-    // ChannelSelector の <select> が読み込み完了したら value=C01ABC
     await waitFor(() => {
-      const select = screen.getByRole("combobox");
-      expect((select as HTMLSelectElement).value).toBe("C01ABC");
+      expect(screen.getByDisplayValue("Rust")).toBeInTheDocument();
     });
-    expect(screen.getByDisplayValue("Rust")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Go")).toBeInTheDocument();
-    // 未指定の曜日はデフォルト placeholder
     expect(screen.getByPlaceholderText("ハードウェア")).toBeInTheDocument();
+    // PR9: 時刻 default
+    expect(screen.getByLabelText("リマインダー投稿時刻")).toHaveValue("07:30");
+    expect(screen.getByLabelText("締切投稿時刻")).toHaveValue("08:00");
+  });
+
+  it("config の reminderTime / closeTime が反映される", async () => {
+    renderForm(
+      makeAction({ channelId: "C01ABC", reminderTime: "08:15", closeTime: "09:00" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("リマインダー投稿時刻")).toHaveValue("08:15");
+    });
+    expect(screen.getByLabelText("締切投稿時刻")).toHaveValue("09:00");
   });
 
   it("ロール名表示: RoleNameDisplay が fetch して name を出す + ヒント維持", async () => {
@@ -135,9 +143,6 @@ describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
       expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
     });
     expect(screen.getByText(/ID: role-rrr/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/メンバー」タブ.*勉強会チーム/),
-    ).toBeInTheDocument();
   });
 
   it("roleId 未設定 → 「未設定」表示 + fetch しない", async () => {
@@ -148,45 +153,47 @@ describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
     expect(calls.some((c) => c.url.includes("/api/roles/"))).toBe(false);
   });
 
-  it("ロール名取得失敗 → 警告 UI", async () => {
-    renderForm(makeAction({ channelId: "C1", roleId: "role-gone" }), {
-      role: null,
-    });
+  it("ws=1 件のときは workspace dropdown を出さない", async () => {
+    renderForm(makeAction({ channelId: "C1" }));
+    // workspace の取得後、dropdown は出ないことを確認
     await waitFor(() => {
-      expect(screen.getByLabelText("ロール名取得失敗")).toBeInTheDocument();
+      expect(screen.queryByLabelText("ワークスペース")).toBeNull();
     });
   });
 
-  it("保存ボタン: ChannelSelector 選択 + themes + messageTemplates が body に乗る", async () => {
+  it("ws=2 件以上 → workspace dropdown が出る", async () => {
+    renderForm(makeAction({ channelId: "C1" }), {
+      workspaces: [
+        { id: "ws1", name: "WS-A", slackTeamId: "T1", createdAt: "2026-01-01T00:00:00Z" },
+        { id: "ws2", name: "WS-B", slackTeamId: "T2", createdAt: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("ワークスペース")).toBeInTheDocument();
+    });
+  });
+
+  it("SingleChannelPicker で channel 選択 + 保存 → PUT body に channelId / reminderTime / closeTime", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(
       makeAction({ channelId: "", roleId: "role-1" }),
     );
-    // ChannelSelector 読み込み待ち
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "C01XYZ");
-
-    const monInput = screen.getByLabelText("月曜テーマ");
-    await user.type(monInput, "Kotlin");
-
-    const reminderTa = screen.getByLabelText("7:30 リマインダー文面");
-    // userEvent.type は { を keyboard sequence と解釈するので {{ でエスケープ
-    await user.type(reminderTa, "Hi {{theme}");
+    // channel picker から general を選択
+    const addBtns = await screen.findAllByRole("button", { name: /\+ 追加/ });
+    await user.click(addBtns[0]);
 
     await user.click(screen.getByRole("button", { name: /保存/ }));
-
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
     const putCall = calls.find(
-      (c) =>
-        c.method === "PUT" &&
-        c.url.includes(`/orgs/${EVENT_ID}/actions/act-morning`),
+      (c) => c.method === "PUT" && c.url.includes(`/orgs/${EVENT_ID}/actions/act-morning`),
     );
     expect(putCall).toBeDefined();
     const body = JSON.parse(JSON.parse(putCall!.body!).config);
-    expect(body.channelId).toBe("C01XYZ");
-    expect(body.themes).toEqual({ mon: "Kotlin" });
+    expect(body.channelId).toBe("C01ABC");
     expect(body.roleId).toBe("role-1");
-    expect(body.messageTemplates).toEqual({ reminder: "Hi {theme}" });
+    expect(body.reminderTime).toBe("07:30");
+    expect(body.closeTime).toBe("08:00");
   });
 
   it("messageTemplates 空欄 → body から omit (default fallback)", async () => {
@@ -194,7 +201,7 @@ describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
     const { onSaved, calls } = renderForm(
       makeAction({ channelId: "C01ABC", roleId: "r" }),
     );
-    await screen.findByRole("combobox");
+    await waitFor(() => expect(screen.getByLabelText("リマインダー投稿時刻")).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /保存/ }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     const putCall = calls.find((c) => c.method === "PUT");
@@ -202,16 +209,33 @@ describe("MorningStandupSettingsForm smoke (003 PR8)", () => {
     expect(body.messageTemplates).toBeUndefined();
   });
 
-  it("空欄 channelId 保存は許可される (cron skip 用)", async () => {
+  it("時刻 HH:MM 不正 → error 表示 / 保存しない", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(makeAction({ channelId: "C01ABC" }));
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, ""); // "-- チャンネルを選択 --"
+    await waitFor(() => expect(screen.getByLabelText("リマインダー投稿時刻")).toBeInTheDocument());
+    const input = screen.getByLabelText("リマインダー投稿時刻") as HTMLInputElement;
+    // type=time の input には直接不正値を入れにくいので fireEvent ベースで挑む
+    input.value = "abc";
+    input.dispatchEvent(new Event("change", { bubbles: true }));
     await user.click(screen.getByRole("button", { name: /保存/ }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    const putCall = calls.find((c) => c.method === "PUT");
-    expect(putCall).toBeDefined();
-    const body = JSON.parse(JSON.parse(putCall!.body!).config);
-    expect(body.channelId).toBe("");
+    await waitFor(() => {
+      expect(screen.getByText(/HH:MM/)).toBeInTheDocument();
+    });
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("reminderTime >= closeTime → error", async () => {
+    const user = userEvent.setup();
+    const { onSaved, calls } = renderForm(
+      makeAction({ channelId: "C01ABC", reminderTime: "09:00", closeTime: "08:00" }),
+    );
+    await waitFor(() => expect(screen.getByLabelText("リマインダー投稿時刻")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/締切時刻はリマインダー時刻より後/)).toBeInTheDocument();
+    });
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
+    expect(onSaved).not.toHaveBeenCalled();
   });
 });

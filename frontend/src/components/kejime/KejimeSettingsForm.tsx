@@ -1,15 +1,16 @@
-import { useMemo, useState, type ReactNode } from "react";
-import type { EventAction } from "../../types";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { EventAction, Workspace } from "../../types";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 import { settingsFormStyles as s } from "../morning-standup/settingsFormStyles";
-import { ChannelSelector } from "../ChannelSelector";
+import { SingleChannelPicker } from "../ui/SingleChannelPicker";
 import { RoleNameDisplay } from "../role-management/RoleNameDisplay";
 
-// 003 PR7 → PR8: kejime_tracker アクション専用の設定タブ。
+// 003 PR7 → PR8 → PR9: kejime_tracker アクション専用の設定タブ。
 // config schema: { kejimeChannelId, roleId?, minArticleLength? }
-// - PR8: kejimeChannelId は ChannelSelector に置き換え (ID 直入力廃止)
+// - PR9: ChannelSelector → SingleChannelPicker (検索 + ページング)。
+//        workspace dropdown を追加 (1 件しか無ければ隠して自動選択)
 // - PR8: roleId は RoleNameDisplay でロール名を表示 (config 値は維持)
 // - minArticleLength は 1 以上の整数を要求
 
@@ -30,12 +31,29 @@ export function KejimeSettingsForm({
 }: { eventId: string; action: EventAction; onSaved: () => void }) {
   const toast = useToast();
   const initial = useMemo(() => parseConfig(action.config), [action.config]);
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [kejimeChannelId, setKejimeChannelId] = useState(initial.kejimeChannelId ?? "");
+  const [kejimeChannelName, setKejimeChannelName] = useState<string>("");
   const [minArticleLength, setMinArticleLength] = useState(
     String(initial.minArticleLength ?? DEFAULT_MIN),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // PR9: workspace 一覧 (1 件なら自動選択)
+  useEffect(() => {
+    let cancelled = false;
+    api.workspaces.list()
+      .then((list) => {
+        if (cancelled) return;
+        const ws = Array.isArray(list) ? list : [];
+        setWorkspaces(ws);
+        if (ws.length >= 1) setWorkspaceId(ws[0].id);
+      })
+      .catch(() => { if (!cancelled) setWorkspaces([]); });
+    return () => { cancelled = true; };
+  }, []);
 
   const minParsed = Number(minArticleLength);
   const minInvalid =
@@ -77,10 +95,27 @@ export function KejimeSettingsForm({
 
       {error && <div style={s.errorBox}>{error}</div>}
 
+      {workspaces !== null && workspaces.length >= 2 && (
+        <Field label="ワークスペース">
+          <select
+            value={workspaceId}
+            onChange={(e) => { setWorkspaceId(e.target.value); setKejimeChannelId(""); setKejimeChannelName(""); }}
+            disabled={saving} aria-label="ワークスペース" style={s.input}
+          >
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>{w.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+
       <Field label="けじめチャンネル">
-        <ChannelSelector
+        <SingleChannelPicker
           value={kejimeChannelId}
-          onChange={(id) => setKejimeChannelId(id)}
+          channelName={kejimeChannelName || (kejimeChannelId === initial.kejimeChannelId ? initial.kejimeChannelId : "")}
+          workspaceId={workspaceId}
+          onChange={(id, name) => { setKejimeChannelId(id); setKejimeChannelName(name); }}
+          disabled={saving}
         />
       </Field>
 

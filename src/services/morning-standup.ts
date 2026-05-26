@@ -19,7 +19,17 @@ type Config = {
   channelId: string;
   themes: Themes;
   messageTemplates?: MessageTemplates;
+  reminderTime: string; // "HH:MM" (5 分単位丸め済)
+  closeTime: string; // "HH:MM" (5 分単位丸め済)
 };
+
+// 003 PR9: 投稿時刻 / 締切時刻のカスタマイズ対応。
+// 既存挙動 (7:30 / 8:00 hardcode) を default として維持。
+// cron は 5 分粒度なので保存値は 5 分単位に丸める。
+export const DEFAULT_REMINDER_TIME = "07:30";
+export const DEFAULT_CLOSE_TIME = "08:00";
+// 5 分窓 (window = [t, t+5))。weekly-reminder と同じ思想 (cron 粒度に合わせる)。
+const FIRE_WINDOW_MINUTES = 5;
 
 const DOW_KEYS: Record<number, ThemeKey | null> = {
   0: null, 1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: null };
@@ -77,8 +87,6 @@ export async function processMorningStandup(
   const now = getJstNow();
   const themeKey = DOW_KEYS[new Date(Date.now() + 9 * 3600 * 1000).getUTCDay()];
   if (!themeKey) return { fired: 0 };
-  const phase = phaseFor(now.hour, now.minute);
-  if (!phase) return { fired: 0 };
 
   const ymdCompact = now.ymd.replace(/-/g, "");
   const actions = await d1.select().from(eventActions)
@@ -89,6 +97,11 @@ export async function processMorningStandup(
   for (const a of actions) {
     const cfg = parseConfig(a.config);
     if (!cfg) { console.warn(`morning_standup: action ${a.id} invalid config; skip`); continue; }
+    // PR9: config の reminderTime / closeTime と現時刻を 5 分窓で比較。
+    let phase: Phase | null = null;
+    if (isWithinFireWindow(now.hour, now.minute, cfg.reminderTime)) phase = "reminder";
+    else if (isWithinFireWindow(now.hour, now.minute, cfg.closeTime)) phase = "close";
+    if (!phase) continue;
     try {
       if (await fireOnce(db, slackClient, a.id, ymdCompact, now.ymd, phase,
                          cfg.channelId, cfg.themes[themeKey], themeKey,
@@ -100,12 +113,34 @@ export async function processMorningStandup(
   return { fired };
 }
 
-function phaseFor(h: number, m: number): Phase | null {
-  const cur = h * 60 + m;
-  // 7:30=450, 8:00=480。5 分窓 (window = [t, t+5))。
-  if (cur >= 450 && cur < 455) return "reminder";
-  if (cur >= 480 && cur < 485) return "close";
-  return null;
+// 5 分窓判定 (weekly-reminder.ts と同じ思想)。配信時刻 [t, t+5) に
+// 現時刻が含まれれば true。HH:MM が不正なら false。
+export function isWithinFireWindow(
+  nowHour: number, nowMinute: number, scheduled: string,
+): boolean {
+  const sched = parseHm(scheduled);
+  if (sched == null) return false;
+  const cur = nowHour * 60 + nowMinute;
+  return cur >= sched && cur < sched + FIRE_WINDOW_MINUTES;
+}
+
+function parseHm(hm: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(hm);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+// 5 分単位への丸め (Math.floor)。HH:MM 形式以外は default を返す。
+export function normalizeFireTime(hm: unknown, fallback: string): string {
+  if (typeof hm !== "string") return fallback;
+  const parsed = parseHm(hm);
+  if (parsed == null) return fallback;
+  const h = Math.floor(parsed / 60);
+  const m = Math.floor((parsed % 60) / 5) * 5;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 function parseConfig(raw: string | null | undefined): Config | null {
@@ -117,6 +152,8 @@ function parseConfig(raw: string | null | undefined): Config | null {
     channelId?: unknown;
     themes?: unknown;
     messageTemplates?: unknown;
+    reminderTime?: unknown;
+    closeTime?: unknown;
   };
   if (typeof o.channelId !== "string" || !o.channelId.trim()) return null;
   const t = o.themes && typeof o.themes === "object" ? (o.themes as Record<string, unknown>) : {};
@@ -132,10 +169,14 @@ function parseConfig(raw: string | null | undefined): Config | null {
       messageTemplates = { reminder: r, close: cl };
     }
   }
+  // PR9: reminderTime / closeTime は HH:MM。未設定 / 不正は default に fallback。
+  // 5 分単位への丸めも実施 (cron 粒度に合わせる)。
   return {
     channelId: o.channelId,
     themes: { mon: pick("mon"), tue: pick("tue"), wed: pick("wed"), thu: pick("thu"), fri: pick("fri") },
     messageTemplates,
+    reminderTime: normalizeFireTime(o.reminderTime, DEFAULT_REMINDER_TIME),
+    closeTime: normalizeFireTime(o.closeTime, DEFAULT_CLOSE_TIME),
   };
 }
 

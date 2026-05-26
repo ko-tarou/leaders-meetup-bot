@@ -243,6 +243,69 @@ describe("processMorningStandup: 走らない条件", () => {
   });
 });
 
+describe("processMorningStandup: reminderTime / closeTime カスタマイズ (PR9)", () => {
+  it("config.reminderTime = '08:15' → 8:15 にリマインダー (default 7:30 では fire しない)", async () => {
+    freezeJst(MON_YMD, "08:15");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "08:15", closeTime: "08:45" }),
+    });
+    const res = await processMorningStandup(testD1(), slackClient);
+    expect(res).toEqual({ fired: 1 });
+    const posts = slack.callsOf("postMessage");
+    // reminder phase → 参加ボタンが付く
+    expect(JSON.stringify(posts[0].args)).toContain("morning_attend:");
+  });
+
+  it("config.closeTime = '08:30' → 8:30 に締切 (default 8:00 では fire しない)", async () => {
+    freezeJst(MON_YMD, "08:30");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "07:30", closeTime: "08:30" }),
+    });
+    const res = await processMorningStandup(testD1(), slackClient);
+    expect(res).toEqual({ fired: 1 });
+    const text = (slack.callsOf("postMessage")[0].args as string[])[1];
+    expect(text).toContain("締め切り");
+  });
+
+  it("config の reminderTime は 5 分単位に丸められる (08:17 → 08:15)", async () => {
+    // 08:15 配信で fire window は [08:15, 08:20)。08:17 は 08:15 設定として丸められる
+    freezeJst(MON_YMD, "08:17");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "08:17" }),
+    });
+    const res = await processMorningStandup(testD1(), slackClient);
+    expect(res).toEqual({ fired: 1 });
+  });
+
+  it("config の reminderTime 不正 → default (07:30) に fallback", async () => {
+    freezeJst(MON_YMD, "07:30");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "invalid" }),
+    });
+    const res = await processMorningStandup(testD1(), slackClient);
+    expect(res).toEqual({ fired: 1 });
+  });
+
+  it("窓外 (reminderTime=08:15, 現在 08:20) → fired:0", async () => {
+    freezeJst(MON_YMD, "08:20");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: standupCfg({ reminderTime: "08:15", closeTime: "09:00" }),
+    });
+    const res = await processMorningStandup(testD1(), slackClient);
+    expect(res).toEqual({ fired: 0 });
+  });
+});
+
 describe("processMorningStandup: dedupKey 形式", () => {
   it("morning_standup:<actionId>:<YYYYMMDD>:reminder", async () => {
     freezeJst(MON_YMD, "07:30");

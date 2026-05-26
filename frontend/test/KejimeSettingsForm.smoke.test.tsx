@@ -5,11 +5,10 @@ import { KejimeSettingsForm } from "../src/components/kejime/KejimeSettingsForm"
 import type { EventAction } from "../src/types";
 import { ToastProvider } from "../src/components/ui/Toast";
 
-// 003 PR7 → PR8: kejime_tracker の設定タブのスモークテスト。
-// PR8: kejimeChannelId は ChannelSelector / roleId は RoleNameDisplay。
+// 003 PR7 → PR8 → PR9: kejime_tracker 設定タブのスモークテスト。
+// PR9 で ChannelSelector → SingleChannelPicker。
 // observer:
-//   - 初期値が config から読まれる (channel select / minArticleLength)
-//   - ロール名表示 (fetch 成功 / null / fail)
+//   - workspace 一覧 fetch + SingleChannelPicker で channel 選択できる
 //   - 保存時 PUT body 検証
 //   - minArticleLength バリデーション
 //   - 空欄 channelId 許可
@@ -31,10 +30,14 @@ function makeAction(config: object): EventAction {
 type FetchCall = { url: string; method: string; body?: string };
 
 function installFetchSpy(opts?: {
+  workspaces?: { id: string; name: string; slackTeamId: string; createdAt: string }[];
   channels?: { id: string; name: string }[];
   role?: { id: string; name: string } | null;
 }): FetchCall[] {
   const calls: FetchCall[] = [];
+  const workspaces = opts?.workspaces ?? [
+    { id: "ws1", name: "Default", slackTeamId: "T1", createdAt: "2026-01-01T00:00:00Z" },
+  ];
   const channels = opts?.channels ?? [
     { id: "C0KEJI", name: "kejime" },
     { id: "C0NEW", name: "kejime-test" },
@@ -52,32 +55,31 @@ function installFetchSpy(opts?: {
       const body = init?.body == null ? undefined : String(init.body);
       calls.push({ url, method, body });
 
+      if (url.endsWith("/api/workspaces") || url.includes("/api/workspaces?")) {
+        return new Response(JSON.stringify(workspaces), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.includes("/api/slack/channels")) {
         return new Response(JSON.stringify(channels), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+          status: 200, headers: { "Content-Type": "application/json" },
         });
       }
       if (url.includes("/api/roles/")) {
         if (opts?.role === null) {
           return new Response(JSON.stringify({ error: "role not found" }), {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
+            status: 404, headers: { "Content-Type": "application/json" },
           });
         }
         const role = opts?.role ?? {
-          id: "r1",
-          name: "勉強会チーム",
-          eventActionId: "act-x",
+          id: "r1", name: "勉強会チーム", eventActionId: "act-x",
         };
         return new Response(JSON.stringify(role), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
+          status: 200, headers: { "Content-Type": "application/json" },
         });
       }
       return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
+        status: 200, headers: { "Content-Type": "application/json" },
       });
     }),
   );
@@ -104,20 +106,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("KejimeSettingsForm smoke (003 PR8)", () => {
-  it("初期値: ChannelSelector / minArticleLength が反映される", async () => {
+describe("KejimeSettingsForm smoke (003 PR9)", () => {
+  it("初期値: minArticleLength が反映される", async () => {
     renderForm(
-      makeAction({
-        kejimeChannelId: "C0KEJI",
-        roleId: "role-rrr",
-        minArticleLength: 800,
-      }),
+      makeAction({ kejimeChannelId: "C0KEJI", roleId: "role-rrr", minArticleLength: 800 }),
     );
-    await waitFor(() => {
-      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(
-        "C0KEJI",
-      );
-    });
     expect(screen.getByDisplayValue("800")).toBeInTheDocument();
   });
 
@@ -134,9 +127,6 @@ describe("KejimeSettingsForm smoke (003 PR8)", () => {
       expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
     });
     expect(screen.getByText(/ID: r1/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/メンバー」タブ.*勉強会チーム/),
-    ).toBeInTheDocument();
   });
 
   it("roleId 未設定 → 「未設定」", async () => {
@@ -153,36 +143,53 @@ describe("KejimeSettingsForm smoke (003 PR8)", () => {
     });
   });
 
-  it("保存 → PUT body に kejimeChannelId / minArticleLength が乗る", async () => {
+  it("ws=1 → workspace dropdown を出さない", async () => {
+    renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("ワークスペース")).toBeNull();
+    });
+  });
+
+  it("ws=2+ → workspace dropdown が出る", async () => {
+    renderForm(makeAction({ kejimeChannelId: "C0KEJI" }), {
+      workspaces: [
+        { id: "ws1", name: "WS-A", slackTeamId: "T1", createdAt: "2026-01-01T00:00:00Z" },
+        { id: "ws2", name: "WS-B", slackTeamId: "T2", createdAt: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("ワークスペース")).toBeInTheDocument();
+    });
+  });
+
+  it("保存 → SingleChannelPicker で選択した kejimeChannelId が PUT body に乗る", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(
       makeAction({ kejimeChannelId: "", roleId: "r1" }),
     );
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "C0NEW");
+    const addBtns = await screen.findAllByRole("button", { name: /\+ 追加/ });
+    await user.click(addBtns[0]); // kejime (C0KEJI)
+
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "600");
 
     await user.click(screen.getByRole("button", { name: /保存/ }));
-
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
     const putCall = calls.find(
-      (c) =>
-        c.method === "PUT" &&
-        c.url.includes(`/orgs/${EVENT_ID}/actions/act-kejime`),
+      (c) => c.method === "PUT" && c.url.includes(`/orgs/${EVENT_ID}/actions/act-kejime`),
     );
     expect(putCall).toBeDefined();
     const body = JSON.parse(JSON.parse(putCall!.body!).config);
-    expect(body.kejimeChannelId).toBe("C0NEW");
+    expect(body.kejimeChannelId).toBe("C0KEJI");
     expect(body.minArticleLength).toBe(600);
-    expect(body.roleId).toBe("r1"); // 温存
+    expect(body.roleId).toBe("r1");
   });
 
   it("minArticleLength = 0 は弾く", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
-    await screen.findByRole("combobox");
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "0");
@@ -195,7 +202,6 @@ describe("KejimeSettingsForm smoke (003 PR8)", () => {
   it("minArticleLength = 負数 は弾く", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
-    await screen.findByRole("combobox");
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "-3");
@@ -203,20 +209,5 @@ describe("KejimeSettingsForm smoke (003 PR8)", () => {
     await user.click(screen.getByRole("button", { name: /保存/ }));
     expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
     expect(onSaved).not.toHaveBeenCalled();
-  });
-
-  it("空欄 channelId 保存は許可される", async () => {
-    const user = userEvent.setup();
-    const { onSaved, calls } = renderForm(
-      makeAction({ kejimeChannelId: "C0KEJI", minArticleLength: 500 }),
-    );
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "");
-    await user.click(screen.getByRole("button", { name: /保存/ }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    const putCall = calls.find((c) => c.method === "PUT");
-    expect(putCall).toBeDefined();
-    const body = JSON.parse(JSON.parse(putCall!.body!).config);
-    expect(body.kejimeChannelId).toBe("");
   });
 });
