@@ -5,13 +5,14 @@ import { KejimeSettingsForm } from "../src/components/kejime/KejimeSettingsForm"
 import type { EventAction } from "../src/types";
 import { ToastProvider } from "../src/components/ui/Toast";
 
-// 003 PR7: kejime_tracker の設定タブのスモークテスト。
+// 003 PR7 → PR8: kejime_tracker の設定タブのスモークテスト。
+// PR8: kejimeChannelId は ChannelSelector / roleId は RoleNameDisplay。
 // observer:
-//   - 初期値が config から読まれる (kejimeChannelId / minArticleLength / roleId)
-//   - 保存時に PUT で body に正しい値が乗る
-//   - 不正な kejimeChannelId は保存ブロック + エラー
-//   - minArticleLength = 0 / 負数 / 非整数 は弾く
-//   - 空欄 channelId は許可される (cron skip)
+//   - 初期値が config から読まれる (channel select / minArticleLength)
+//   - ロール名表示 (fetch 成功 / null / fail)
+//   - 保存時 PUT body 検証
+//   - minArticleLength バリデーション
+//   - 空欄 channelId 許可
 
 const EVENT_ID = "ev1";
 
@@ -29,8 +30,15 @@ function makeAction(config: object): EventAction {
 
 type FetchCall = { url: string; method: string; body?: string };
 
-function installFetchSpy(): FetchCall[] {
+function installFetchSpy(opts?: {
+  channels?: { id: string; name: string }[];
+  role?: { id: string; name: string } | null;
+}): FetchCall[] {
   const calls: FetchCall[] = [];
+  const channels = opts?.channels ?? [
+    { id: "C0KEJI", name: "kejime" },
+    { id: "C0NEW", name: "kejime-test" },
+  ];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -43,6 +51,30 @@ function installFetchSpy(): FetchCall[] {
       const method = init?.method ?? "GET";
       const body = init?.body == null ? undefined : String(init.body);
       calls.push({ url, method, body });
+
+      if (url.includes("/api/slack/channels")) {
+        return new Response(JSON.stringify(channels), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/api/roles/")) {
+        if (opts?.role === null) {
+          return new Response(JSON.stringify({ error: "role not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        const role = opts?.role ?? {
+          id: "r1",
+          name: "勉強会チーム",
+          eventActionId: "act-x",
+        };
+        return new Response(JSON.stringify(role), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -52,9 +84,9 @@ function installFetchSpy(): FetchCall[] {
   return calls;
 }
 
-function renderForm(action: EventAction) {
+function renderForm(action: EventAction, opts?: Parameters<typeof installFetchSpy>[0]) {
   const onSaved = vi.fn();
-  const calls = installFetchSpy();
+  const calls = installFetchSpy(opts);
   render(
     <ToastProvider>
       <KejimeSettingsForm
@@ -72,8 +104,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("KejimeSettingsForm smoke (003 PR7)", () => {
-  it("初期値が config から読まれる", () => {
+describe("KejimeSettingsForm smoke (003 PR8)", () => {
+  it("初期値: ChannelSelector / minArticleLength が反映される", async () => {
     renderForm(
       makeAction({
         kejimeChannelId: "C0KEJI",
@@ -81,32 +113,53 @@ describe("KejimeSettingsForm smoke (003 PR7)", () => {
         minArticleLength: 800,
       }),
     );
-    expect(screen.getByDisplayValue("C0KEJI")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("role-rrr")).toBeInTheDocument();
+    await waitFor(() => {
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(
+        "C0KEJI",
+      );
+    });
     expect(screen.getByDisplayValue("800")).toBeInTheDocument();
   });
 
-  it("minArticleLength 未設定なら default 500 が出る", () => {
-    renderForm(makeAction({ kejimeChannelId: "C1" }));
+  it("minArticleLength 未設定なら default 500", () => {
+    renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
     expect(screen.getByDisplayValue("500")).toBeInTheDocument();
   });
 
-  it("ロール ID は readonly + ヒント", () => {
-    renderForm(makeAction({ roleId: "r1" }));
-    const roleInput = screen.getByLabelText("勉強会チーム ロール ID");
-    expect(roleInput).toHaveAttribute("readonly");
+  it("ロール名表示: name + ID + ヒント", async () => {
+    renderForm(makeAction({ roleId: "r1" }), {
+      role: { id: "r1", name: "勉強会チーム" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("勉強会チーム")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/ID: r1/)).toBeInTheDocument();
     expect(
       screen.getByText(/メンバー」タブ.*勉強会チーム/),
     ).toBeInTheDocument();
   });
 
-  it("保存 → PUT で kejimeChannelId / minArticleLength が body に乗る", async () => {
+  it("roleId 未設定 → 「未設定」", async () => {
+    renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
+    await waitFor(() => {
+      expect(screen.getByText("未設定")).toBeInTheDocument();
+    });
+  });
+
+  it("ロール取得失敗 → 警告 UI", async () => {
+    renderForm(makeAction({ roleId: "gone" }), { role: null });
+    await waitFor(() => {
+      expect(screen.getByLabelText("ロール名取得失敗")).toBeInTheDocument();
+    });
+  });
+
+  it("保存 → PUT body に kejimeChannelId / minArticleLength が乗る", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(
       makeAction({ kejimeChannelId: "", roleId: "r1" }),
     );
-    const channelInput = screen.getByLabelText("けじめチャンネル ID");
-    await user.type(channelInput, "C0NEW");
+    const select = await screen.findByRole("combobox");
+    await user.selectOptions(select, "C0NEW");
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "600");
@@ -126,24 +179,10 @@ describe("KejimeSettingsForm smoke (003 PR7)", () => {
     expect(body.roleId).toBe("r1"); // 温存
   });
 
-  it("不正な kejimeChannelId は保存ブロック + エラー表示", async () => {
-    const user = userEvent.setup();
-    const { onSaved, calls } = renderForm(makeAction({}));
-    const input = screen.getByLabelText("けじめチャンネル ID");
-    await user.type(input, "BADCHAN");
-    expect(input).toHaveAttribute("aria-invalid", "true");
-
-    await user.click(screen.getByRole("button", { name: /保存/ }));
-    expect(
-      screen.getByText(/kejimeChannelId は Slack の channel ID/),
-    ).toBeInTheDocument();
-    expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
-    expect(onSaved).not.toHaveBeenCalled();
-  });
-
   it("minArticleLength = 0 は弾く", async () => {
     const user = userEvent.setup();
-    const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C1" }));
+    const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
+    await screen.findByRole("combobox");
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "0");
@@ -155,7 +194,8 @@ describe("KejimeSettingsForm smoke (003 PR7)", () => {
 
   it("minArticleLength = 負数 は弾く", async () => {
     const user = userEvent.setup();
-    const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C1" }));
+    const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
+    await screen.findByRole("combobox");
     const minInput = screen.getByLabelText("記事の最小文字数");
     await user.clear(minInput);
     await user.type(minInput, "-3");
@@ -168,11 +208,10 @@ describe("KejimeSettingsForm smoke (003 PR7)", () => {
   it("空欄 channelId 保存は許可される", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(
-      makeAction({ kejimeChannelId: "C-OLD", minArticleLength: 500 }),
+      makeAction({ kejimeChannelId: "C0KEJI", minArticleLength: 500 }),
     );
-    const input = screen.getByLabelText("けじめチャンネル ID");
-    await user.clear(input);
-
+    const select = await screen.findByRole("combobox");
+    await user.selectOptions(select, "");
     await user.click(screen.getByRole("button", { name: /保存/ }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     const putCall = calls.find((c) => c.method === "PUT");
