@@ -65,7 +65,11 @@ export function SingleChannelPicker({
     <div>
       {value && (
         <div style={currentRowStyle}>
-          選択中: <code>#{channelName || value}</code>
+          {/* PR11: ユーザーには channel ID を見せず、名前未取得時は注意文に置き換える。 */}
+          選択中:{" "}
+          {channelName
+            ? <code>#{channelName}</code>
+            : <span style={{ color: colors.textMuted }}>(設定済み — 下のリストから再選択して名前を確認)</span>}
         </div>
       )}
       <ChannelPicker

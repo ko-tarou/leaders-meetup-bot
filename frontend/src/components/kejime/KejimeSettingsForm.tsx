@@ -64,7 +64,7 @@ export function KejimeSettingsForm({
     // ChannelSelector は valid な channelId しか返さないが、念のため "C" prefix 検証は維持
     const cid = kejimeChannelId.trim();
     if (cid !== "" && !cid.startsWith("C")) {
-      setError("kejimeChannelId は Slack の channel ID (C で始まる) を指定してください");
+      setError("正しいけじめチャンネルを選択してください");
       return;
     }
     if (minInvalid) {
@@ -110,9 +110,10 @@ export function KejimeSettingsForm({
       )}
 
       <Field label="けじめチャンネル">
+        {/* PR11: 初期値時 channelName 未取得でも channel ID は出さない。 */}
         <SingleChannelPicker
           value={kejimeChannelId}
-          channelName={kejimeChannelName || (kejimeChannelId === initial.kejimeChannelId ? initial.kejimeChannelId : "")}
+          channelName={kejimeChannelName}
           workspaceId={workspaceId}
           onChange={(id, name) => { setKejimeChannelId(id); setKejimeChannelName(name); }}
           disabled={saving}

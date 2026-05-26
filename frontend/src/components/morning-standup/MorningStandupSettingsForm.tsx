@@ -102,7 +102,7 @@ export function MorningStandupSettingsForm({
     setError(null);
     const cid = channelId.trim();
     if (cid !== "" && !cid.startsWith("C")) {
-      setError("channelId は Slack の channel ID (C で始まる) を指定してください");
+      setError("正しい朝活会チャンネルを選択してください");
       return;
     }
     // PR9: 時刻バリデーション (HH:MM + 5 分単位 + reminder < close)
@@ -178,9 +178,11 @@ export function MorningStandupSettingsForm({
       )}
 
       <Field label="朝活会チャンネル">
+        {/* PR11: 初期値時 channelName 未取得でも channel ID は出さない。
+            SingleChannelPicker 側で「(設定済み — 再選択で名前を確認)」と注意文を出す。 */}
         <SingleChannelPicker
           value={channelId}
-          channelName={channelName || (channelId === initial.channelId ? initial.channelId : "")}
+          channelName={channelName}
           workspaceId={workspaceId}
           onChange={(id, name) => { setChannelId(id); setChannelName(name); }}
           disabled={saving}
