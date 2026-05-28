@@ -22,6 +22,7 @@ import { rosterExtrasRouter } from "./api/roster-extras";
 import { kejimeRouter } from "./api/kejime";
 import { morningAttendanceRouter } from "./api/morning-attendance";
 import { whitelistAdminRouter } from "./api/whitelist-admin";
+import { goalReminderRouter } from "./api/goal-reminder";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -122,5 +123,8 @@ api.route("/", morningAttendanceRouter);
 // 宗教イベント PR3: whitelist admin API (メンバー同期 / リンク管理 / 結果)。
 // /api/orgs/:eventId/actions/:actionId/whitelist/* で adminAuth に保護される。
 api.route("/", whitelistAdminRouter);
+// 宗教イベント PR1: goal_reminder 手動送信 API (送信テスト)。
+// /api/orgs/:eventId/actions/:actionId/goal-reminder/send で adminAuth に保護される。
+api.route("/", goalReminderRouter);
 
 export { api };
