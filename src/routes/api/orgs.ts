@@ -147,6 +147,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // 朝勉強会けじめ制度 PR1: アクション登録 API のみ対応。UI は後続 PR。
     "morning_standup",
     "kejime_tracker",
+    // 宗教イベント PR1: whitelist アクション登録のみ対応。ビジネスロジック / UI は後続 PR。
+    "whitelist",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
