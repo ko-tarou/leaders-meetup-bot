@@ -8,6 +8,7 @@ import { KejimeAdminTab } from "../../components/kejime/KejimeAdminTab";
 import { WhitelistAdminTab } from "../../components/whitelist/WhitelistAdminTab";
 import { MorningStandupMainTab } from "../../components/morning-standup/MorningStandupMainTab";
 import { GoalReminderMainTab } from "../../components/goal-reminder/GoalReminderMainTab";
+import { TutorialMainTab } from "../../components/tutorial/TutorialMainTab";
 import { RosterPage } from "../roster/RosterPage";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
@@ -59,6 +60,10 @@ export function ActionMainContent({
     case "goal_reminder":
       return (
         <GoalReminderMainTab eventId={eventId} actionId={action.id} action={action} />
+      );
+    case "tutorial":
+      return (
+        <TutorialMainTab eventId={eventId} actionId={action.id} action={action} />
       );
     default:
       return null;
