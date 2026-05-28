@@ -10,11 +10,12 @@
  *  - adminAuth: x-admin-token 無し → 401
  *  - members/sync: role メンバーを取り込み (unique token / displayName fail-soft) /
  *      再実行で冪等 (重複 row なし・既存 token 不変)
- *  - GET members: ステータスのみ (entries / 件数を露出しない)
- *  - rotate-token: token が変わる
+ *  - GET members: ステータスのみ (entries / 件数 / token を露出しない)
+ *  - distribute: 各メンバーへ DM (postMessage) を送り {sent,failed,total} を返す
+ *  - rotate-token: token が変わる (レスポンスに token は含まない / {ok:true})
  *  - results: whitelist_unanimous を notifiedAt 降順で返す
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { MockSlackClient } from "../../mocks/slack";
@@ -28,6 +29,10 @@ vi.mock("../../../src/services/slack-api", () => ({
 }));
 
 import { api } from "../../../src/routes/api";
+import {
+  setSlackClientProvider,
+  resetSlackClientProvider,
+} from "../../../src/services/workspace";
 import { testDb } from "../../helpers/db";
 import { makeEnv } from "../../helpers/env";
 import {
@@ -62,10 +67,32 @@ function authReq(path: string, init: RequestInit = {}) {
   });
 }
 
+/**
+ * workspace の DI seam (setSlackClientProvider) で postMessage を記録する
+ * fake client に差し替える。sync が使う getUserInfo も {ok:true} を返すので
+ * displayName fail-soft (= slackUserId) の振る舞いは vi.mock 版と同一。
+ */
+function setupSlackSpy(): { posts: Array<{ channel: string; text: string }> } {
+  const posts: Array<{ channel: string; text: string }> = [];
+  const fake = {
+    postMessage: async (channel: string, text: string) => {
+      posts.push({ channel, text });
+      return { ok: true, ts: "1.0" };
+    },
+    getUserInfo: async () => ({ ok: true }),
+  };
+  setSlackClientProvider(async () => fake as never);
+  return { posts };
+}
+
 beforeEach(async () => {
   const db = testDb();
   await db.delete(whitelistMembers);
   await db.delete(whitelistUnanimous);
+});
+
+afterEach(() => {
+  resetSlackClientProvider();
 });
 
 /** whitelist action を 1 つ seed し、config.roleId は seed した role を指す。 */
@@ -128,10 +155,11 @@ describe("POST .../members/sync", () => {
     const body = (await res.json()) as Array<{
       id: string;
       displayName: string;
-      token: string;
       submitted: boolean;
     }>;
     expect(body).toHaveLength(2);
+    // sync レスポンス (= listMembers) には token を含まない。
+    expect(body[0]).not.toHaveProperty("token");
 
     // DB 上に 2 row、token は非空かつ互いに異なる。
     const rows = await testDb()
@@ -201,7 +229,7 @@ describe("POST .../members/sync", () => {
 // GET members (status only)
 // ---------------------------------------------------------------------------
 describe("GET .../members", () => {
-  it("ステータスのみを返し、name 以外の内容 (entries / 件数) を露出しない", async () => {
+  it("ステータスのみを返し、name 以外の内容 (entries / 件数 / token) を露出しない", async () => {
     const { ev, action, role } = await setup();
     await makeSlackRoleMember(role.id, "U1");
     await authReq(`${base(ev.id, action.id)}/members/sync`, { method: "POST" });
@@ -211,12 +239,13 @@ describe("GET .../members", () => {
     const body = (await res.json()) as Array<Record<string, unknown>>;
     expect(body).toHaveLength(1);
     const m = body[0];
-    // 公開して良いキーのみ。
+    // 公開して良いキーのみ。token は本人専用フォームの鍵なので露出しない。
     expect(Object.keys(m).sort()).toEqual(
-      ["displayName", "id", "submitted", "submittedAt", "token"].sort(),
+      ["displayName", "id", "submitted", "submittedAt"].sort(),
     );
     expect(m.submitted).toBe(false);
-    // entries / nameEncrypted / count 系は一切含まれない。
+    // token / entries / nameEncrypted / count 系は一切含まれない。
+    expect(m).not.toHaveProperty("token");
     expect(m).not.toHaveProperty("entries");
     expect(m).not.toHaveProperty("nameEncrypted");
     expect(m).not.toHaveProperty("entriesCount");
@@ -225,10 +254,74 @@ describe("GET .../members", () => {
 });
 
 // ---------------------------------------------------------------------------
+// distribute (Bot DM 配布)
+// ---------------------------------------------------------------------------
+describe("POST .../distribute", () => {
+  it("各メンバーに postMessage を送り {sent,failed,total} を返す", async () => {
+    const { ev, action, role } = await setup();
+    await makeSlackRoleMember(role.id, "U1");
+    await makeSlackRoleMember(role.id, "U2");
+    await authReq(`${base(ev.id, action.id)}/members/sync`, { method: "POST" });
+
+    const { posts } = setupSlackSpy();
+    const res = await authReq(`${base(ev.id, action.id)}/distribute`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: 2, failed: 0, total: 2 });
+
+    // 各メンバーの DM 先 (= slackUserId) へ送られている。
+    expect(posts).toHaveLength(2);
+    expect(posts.map((p) => p.channel).sort()).toEqual(["U1", "U2"]);
+    // 文面に本人専用リンクが含まれる (token はレスポンスに無いが DM 本文には載る)。
+    expect(posts.every((p) => p.text.includes("/whitelist/"))).toBe(true);
+  });
+
+  it("メンバー 0 → {sent:0,failed:0,total:0} で postMessage 0 回", async () => {
+    const { ev, action } = await setup();
+    const { posts } = setupSlackSpy();
+    const res = await authReq(`${base(ev.id, action.id)}/distribute`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: 0, failed: 0, total: 0 });
+    expect(posts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// members/:memberId/send (単一再送)
+// ---------------------------------------------------------------------------
+describe("POST .../members/:memberId/send", () => {
+  it("単一メンバーへ postMessage を送り {sent:1,failed:0,total:1} を返す", async () => {
+    const { ev, action, role } = await setup();
+    await makeSlackRoleMember(role.id, "U1");
+    await authReq(`${base(ev.id, action.id)}/members/sync`, { method: "POST" });
+    const member = (
+      await testDb()
+        .select()
+        .from(whitelistMembers)
+        .where(eq(whitelistMembers.eventActionId, action.id))
+        .all()
+    )[0];
+
+    const { posts } = setupSlackSpy();
+    const res = await authReq(
+      `${base(ev.id, action.id)}/members/${member.id}/send`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: 1, failed: 0, total: 1 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].channel).toBe("U1");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rotate-token
 // ---------------------------------------------------------------------------
 describe("POST .../members/:memberId/rotate-token", () => {
-  it("token が変わる", async () => {
+  it("token が変わる (レスポンスに token は含まず {ok:true})", async () => {
     const { ev, action, role } = await setup();
     await makeSlackRoleMember(role.id, "U1");
     await authReq(`${base(ev.id, action.id)}/members/sync`, { method: "POST" });
@@ -246,16 +339,19 @@ describe("POST .../members/:memberId/rotate-token", () => {
       { method: "POST" },
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { token: string };
-    expect(body.token).toBeTruthy();
-    expect(body.token).not.toBe(oldToken);
+    const body = (await res.json()) as Record<string, unknown>;
+    // 管理者はトークンを一切見ない: レスポンスに token を含めない。
+    expect(body).toEqual({ ok: true });
+    expect(body).not.toHaveProperty("token");
 
+    // DB 上の token は更新されている (旧 token を失効)。
     const after = await testDb()
       .select()
       .from(whitelistMembers)
       .where(eq(whitelistMembers.id, memberId))
       .get();
-    expect(after?.token).toBe(body.token);
+    expect(after?.token).toBeTruthy();
+    expect(after?.token).not.toBe(oldToken);
   });
 
   it("存在しない memberId → 404", async () => {
