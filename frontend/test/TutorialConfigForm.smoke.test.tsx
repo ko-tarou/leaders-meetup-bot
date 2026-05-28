@@ -103,6 +103,14 @@ describe("TutorialConfigForm smoke (宗教 PR2)", () => {
     expect(ta.value).toContain("ようこそ");
   });
 
+  // 宗教 PR4: 命名規則テンプレ同期。default 案内文の例が
+  // 「漢字フルネーム ( ローマ字 )」形式 (高岡 己太朗 ( Takaoka Kotaro )) になっている。
+  it("default 案内文の命名規則例が同期済み (高岡 己太朗 ( Takaoka Kotaro ))", async () => {
+    renderForm(makeAction({}));
+    const ta = (await screen.findByLabelText("案内文")) as HTMLTextAreaElement;
+    expect(ta.value).toContain("高岡 己太朗 ( Takaoka Kotaro )");
+  });
+
   it("初期 config の値が各フィールドに反映される", async () => {
     renderForm(
       makeAction({
