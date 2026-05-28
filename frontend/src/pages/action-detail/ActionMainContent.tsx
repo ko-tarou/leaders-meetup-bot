@@ -5,6 +5,7 @@ import { MemberApplicationListTab } from "../../components/MemberApplicationList
 import { AttendanceCheckMain } from "../../components/AttendanceCheckForm";
 import { RoleMainTab } from "../../components/role-management/RoleMainTab";
 import { KejimeAdminTab } from "../../components/kejime/KejimeAdminTab";
+import { WhitelistAdminTab } from "../../components/whitelist/WhitelistAdminTab";
 import { MorningStandupMainTab } from "../../components/morning-standup/MorningStandupMainTab";
 import { RosterPage } from "../roster/RosterPage";
 import { PlaceholderContent } from "./PlaceholderContent";
@@ -48,6 +49,8 @@ export function ActionMainContent({
       return <RosterPage eventId={eventId} actionId={action.id} />;
     case "kejime_tracker":
       return <KejimeAdminTab eventId={eventId} actionId={action.id} />;
+    case "whitelist":
+      return <WhitelistAdminTab eventId={eventId} actionId={action.id} />;
     case "morning_standup":
       return (
         <MorningStandupMainTab eventId={eventId} actionId={action.id} action={action} />
