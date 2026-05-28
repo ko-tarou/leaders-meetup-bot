@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import { events, eventActions } from "../../db/schema";
 import { ensureDefaultActions } from "../../services/event-actions-bootstrap";
+import { DEFAULT_TUTORIAL_TEMPLATE } from "../../services/tutorial";
 
 export const orgsRouter = new Hono<{ Bindings: Env }>();
 
@@ -151,6 +152,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "whitelist",
     // 宗教イベント PR1: goal_reminder。毎朝/毎夜に目標を投稿 (cron + 手動送信)。UI は PR2。
     "goal_reminder",
+    // 宗教イベント PR1: tutorial。参加時オンボーディング投稿 (イベント駆動 + 手動送信)。UI は PR2。
+    "tutorial",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -223,6 +226,16 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
       morningTemplate:
         "🔥 私たちの目標は『{goal}』です。これに向けて全力で、死に物狂いで頑張りましょう。",
       nightTemplate: "🌙 『{goal}』に向けて、今日も一日お疲れ様でした。",
+    }),
+    // 宗教イベント PR1: tutorial。参加時オンボーディング投稿。
+    // 詳細は PR2 の設定 UI で編集可能。template は service と共有 (空投稿防止)。
+    tutorial: JSON.stringify({
+      schemaVersion: 1,
+      workspaceId: null,
+      triggerChannelId: null,
+      deliveryMode: "dm",
+      postChannelId: null,
+      template: DEFAULT_TUTORIAL_TEMPLATE,
     }),
   };
   const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";
