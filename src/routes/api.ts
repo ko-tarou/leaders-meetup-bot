@@ -16,6 +16,7 @@ import { publicTokensRouter } from "./api/public-tokens";
 import { gmailAccountsRouter } from "./api/gmail-accounts";
 import { feedbackRouter } from "./api/feedback";
 import { participationRouter } from "./api/participation";
+import { whitelistPublicRouter } from "./api/whitelist-public";
 import { rosterRouter } from "./api/roster";
 import { rosterExtrasRouter } from "./api/roster-extras";
 import { kejimeRouter } from "./api/kejime";
@@ -68,6 +69,8 @@ api.use("/*", async (c, next) => {
     // (prefill / event / submit)。/orgs/:eventId/participation-forms は
     // この prefix に該当しないため admin auth が維持される。
     sub.startsWith("/participation/") ||
+    // 宗教イベント PR2: whitelist メンバー向け公開フォーム (/whitelist/:token)。
+    sub.startsWith("/whitelist/") ||
     sub.startsWith("/interviewer-form/") ||
     sub === "/public-auth" ||
     // Sprint 26: Google OAuth callback は Google からのリダイレクトで届くため
@@ -103,6 +106,8 @@ api.route("/", publicTokensRouter);
 api.route("/", gmailAccountsRouter);
 api.route("/", feedbackRouter);
 api.route("/", participationRouter);
+// 宗教イベント PR2: whitelist メンバー向け公開フォーム API (/whitelist/:token)。
+api.route("/", whitelistPublicRouter);
 api.route("/", rosterRouter);
 // 名簿管理 (member_roster) 拡張 API: 合格者取り込み候補 + ロール連携
 // PR1 (roster_members CRUD) と同 prefix にぶら下がる。マージ時にルーターを統合してもよい。
