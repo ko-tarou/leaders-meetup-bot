@@ -5,6 +5,7 @@ import { AttendanceCheckForm } from "../../components/AttendanceCheckForm";
 import { RoleSettingsTab } from "../../components/role-management/RoleSettingsTab";
 import { MorningStandupSettingsForm } from "../../components/morning-standup/MorningStandupSettingsForm";
 import { KejimeSettingsForm } from "../../components/kejime/KejimeSettingsForm";
+import { WhitelistSettingsForm } from "../../components/whitelist/WhitelistSettingsForm";
 import { PlaceholderContent } from "./PlaceholderContent";
 
 // Phase4-3: ActionDetailPage から純抽出。switch 分岐・props 配線すべて不変。
@@ -76,6 +77,14 @@ export function ActionSettingsContent({
     case "kejime_tracker":
       return (
         <KejimeSettingsForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "whitelist":
+      return (
+        <WhitelistSettingsForm
           eventId={eventId}
           action={action}
           onSaved={onSaved}
