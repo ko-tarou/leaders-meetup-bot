@@ -55,6 +55,20 @@ describe("renderTutorialTemplate", () => {
   });
 });
 
+describe("DEFAULT_TUTORIAL_TEMPLATE (命名規則)", () => {
+  it("漢字フルネーム ( ローマ字 ) 形式の命名規則を含む", () => {
+    expect(DEFAULT_TUTORIAL_TEMPLATE).toContain("漢字フルネーム ( ローマ字 )");
+    expect(DEFAULT_TUTORIAL_TEMPLATE).toContain(
+      "高岡 己太朗 ( Takaoka Kotaro )",
+    );
+  });
+
+  it("旧 命名規則 (本名（フルネーム） / 山田太郎) は含まない", () => {
+    expect(DEFAULT_TUTORIAL_TEMPLATE).not.toContain("山田太郎");
+    expect(DEFAULT_TUTORIAL_TEMPLATE).not.toContain("本名（フルネーム）");
+  });
+});
+
 describe("parseTutorialConfig", () => {
   it("空 / null config は default + 未設定 (id=null) に落ちる", () => {
     const c = parseTutorialConfig(null);

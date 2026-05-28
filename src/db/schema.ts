@@ -969,6 +969,28 @@ export const whitelistUnanimous = sqliteTable(
   ],
 );
 
+// 宗教イベント PR3 (migration 0062): tutorial アクションの送信記録。
+// 1 event_action (tutorial) : N send。source は 'auto' (参加検知) / 'manual' (手動送信)。
+// (event_action_id, slack_user_id) UNIQUE で 1 ユーザー 1 行に集約し、再送は sentAt を更新する。
+export const tutorialSends = sqliteTable(
+  "tutorial_sends",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    source: text("source").notNull().default("auto"),
+    sentAt: text("sent_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("tutorial_sends_action_user_uniq").on(
+      t.eventActionId,
+      t.slackUserId,
+    ),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
