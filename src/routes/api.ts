@@ -23,6 +23,7 @@ import { kejimeRouter } from "./api/kejime";
 import { morningAttendanceRouter } from "./api/morning-attendance";
 import { whitelistAdminRouter } from "./api/whitelist-admin";
 import { goalReminderRouter } from "./api/goal-reminder";
+import { tutorialRouter } from "./api/tutorial";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -126,5 +127,8 @@ api.route("/", whitelistAdminRouter);
 // 宗教イベント PR1: goal_reminder 手動送信 API (送信テスト)。
 // /api/orgs/:eventId/actions/:actionId/goal-reminder/send で adminAuth に保護される。
 api.route("/", goalReminderRouter);
+// 宗教イベント PR1: tutorial 手動送信 API (オンボーディング送信テスト / 再送)。
+// /api/orgs/:eventId/actions/:actionId/tutorial/send で adminAuth に保護される。
+api.route("/", tutorialRouter);
 
 export { api };
