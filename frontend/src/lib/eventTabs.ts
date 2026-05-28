@@ -79,6 +79,11 @@ export const ACTION_META: Record<
     description: "メンバーが一緒に開発したい人を非公開で登録し、全会一致を検出します",
     icon: "🤝",
   },
+  goal_reminder: {
+    label: "目標リマインダー",
+    description: "チームの目標を毎朝・毎夜に Slack チャンネルへ自動投稿します",
+    icon: "🎯",
+  },
 };
 
 // 共通タブ (イベント直下)

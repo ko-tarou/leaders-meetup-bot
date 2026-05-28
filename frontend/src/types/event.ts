@@ -22,7 +22,9 @@ export type EventActionType =
   | "morning_standup"
   | "kejime_tracker"
   // 宗教イベント PR1 (UI は後続 PR)
-  | "whitelist";
+  | "whitelist"
+  // 宗教イベント goal_reminder PR1 (UI は PR2)
+  | "goal_reminder";
 
 export type EventAction = {
   id: string;
