@@ -74,6 +74,11 @@ export const ACTION_META: Record<
     description: "遅刻ポイントの加算・記事消費・激辛カウントを管理します",
     icon: "🌶",
   },
+  whitelist: {
+    label: "ホワイトリスト",
+    description: "メンバーが一緒に開発したい人を非公開で登録し、全会一致を検出します",
+    icon: "🤝",
+  },
 };
 
 // 共通タブ (イベント直下)

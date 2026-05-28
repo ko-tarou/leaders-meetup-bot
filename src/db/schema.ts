@@ -908,6 +908,67 @@ export const kejimeStatusPosts = sqliteTable(
   ],
 );
 
+// 宗教イベント PR1 (migration 0059): whitelist アクションの参加メンバー。
+// 1 event_action (whitelist) : N member。token は提出フォーム用の一意トークン。
+// submittedAt が NULL の間は未提出。(event_action_id, slack_user_id) UNIQUE。
+export const whitelistMembers = sqliteTable(
+  "whitelist_members",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    displayName: text("display_name").notNull(),
+    token: text("token").notNull().unique(),
+    submittedAt: text("submitted_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("whitelist_members_action_user_uniq").on(
+      t.eventActionId,
+      t.slackUserId,
+    ),
+    index("whitelist_members_token_idx").on(t.token),
+  ],
+);
+
+// 宗教イベント PR1 (migration 0060): メンバーが非公開で登録する名前のエントリ。
+// nameEncrypted は暗号化保存。FK は whitelist_members に CASCADE。
+export const whitelistEntries = sqliteTable(
+  "whitelist_entries",
+  {
+    id: text("id").primaryKey(),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => whitelistMembers.id, { onDelete: "cascade" }),
+    nameEncrypted: text("name_encrypted").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("whitelist_entries_member_idx").on(t.memberId)],
+);
+
+// 宗教イベント PR1 (migration 0061): 全会一致が検出された名前 (正規化済み) と通知時刻。
+// (event_action_id, name_normalized) UNIQUE で同一名の重複通知を防止。
+export const whitelistUnanimous = sqliteTable(
+  "whitelist_unanimous",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    nameNormalized: text("name_normalized").notNull(),
+    notifiedAt: text("notified_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("whitelist_unanimous_action_name_uniq").on(
+      t.eventActionId,
+      t.nameNormalized,
+    ),
+  ],
+);
+
 // スケジュール済みジョブ
 export const scheduledJobs = sqliteTable(
   "scheduled_jobs",
