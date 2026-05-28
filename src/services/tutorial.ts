@@ -22,7 +22,7 @@
  */
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
-import { eventActions } from "../db/schema";
+import { eventActions, tutorialSends } from "../db/schema";
 import {
   createSlackClientForWorkspace,
   getDecryptedWorkspace,
@@ -44,7 +44,7 @@ export const DEFAULT_TUTORIAL_TEMPLATE = `👋 ようこそ {workspace} へ！
 （ビジョン・目的をここに記載してください）
 
 ■ 表示名の命名規則
-・表示名は本名（フルネーム）で設定してください（例: 山田太郎）
+・表示名は「漢字フルネーム ( ローマ字 )」の形式で設定してください（例: 高岡 己太朗 ( Takaoka Kotaro )）
 ・アイコンも設定しておきましょう
 
 ■ 主要チャンネル
@@ -128,12 +128,17 @@ export function renderTutorialTemplate(
  *   無ければ先頭に `<@userId> ` を付けて必ず本人をメンションする。
  *   postChannelId 未設定 → not_configured
  * - 例外は fail-soft で {ok:false, error} に丸める。
+ *
+ * 投稿成功時は tutorial_sends に送信記録を UPSERT する (eventActionId+userId で
+ * 1 行に集約。再送は sentAt / source を更新)。記録の書き込み失敗は fail-soft で、
+ * 既に成功した投稿を失敗に転じさせない (try/catch で握り潰しログのみ)。
  */
 export async function postTutorialToUser(
-  _db: D1Database,
+  db: D1Database,
   env: Env,
-  action: { config: string | null },
+  action: { id: string; config: string | null },
   userId: string,
+  source: "auto" | "manual" = "auto",
 ): Promise<{ ok: boolean; error?: string }> {
   const config = parseTutorialConfig(action.config);
   if (!config.workspaceId) {
@@ -181,6 +186,28 @@ export async function postTutorialToUser(
     if (!res.ok) {
       return { ok: false, error: res.error ?? "slack_error" };
     }
+
+    // 送信記録 (UPSERT)。記録失敗は fail-soft: 投稿は既に成功しているので
+    // ここで例外が出ても {ok:true} を返す (記録漏れ < 投稿の二重失敗扱い回避)。
+    try {
+      const nowIso = new Date().toISOString();
+      await drizzle(db)
+        .insert(tutorialSends)
+        .values({
+          id: crypto.randomUUID(),
+          eventActionId: action.id,
+          slackUserId: userId,
+          source,
+          sentAt: nowIso,
+        })
+        .onConflictDoUpdate({
+          target: [tutorialSends.eventActionId, tutorialSends.slackUserId],
+          set: { sentAt: nowIso, source },
+        });
+    } catch (e) {
+      console.error("tutorial recordSend error:", e);
+    }
+
     return { ok: true };
   } catch (e) {
     console.error("tutorial postTutorialToUser error:", e);
