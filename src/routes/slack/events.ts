@@ -5,6 +5,7 @@ import {
   maybeTriggerStickyRepost,
 } from "../../services/auto-respond";
 import { handleMemberJoinedChannel } from "../../services/member-welcome";
+import { handleTutorialMemberJoined } from "../../services/tutorial";
 import {
   handleKejimeChannelMessage,
   handleKejimeReactionAdded,
@@ -61,6 +62,13 @@ eventsRouter.post("/events", async (c) => {
       handleMemberJoinedChannel(c.env, body.event).catch((e) => {
         console.error("Failed to handle member_joined_channel:", e);
       }),
+    );
+    // 宗教イベント PR1: tutorial アクションの参加時オンボーディング投稿。
+    // member-welcome とは独立に走らせる (どちらかの失敗が他へ波及しない)。
+    c.executionCtx.waitUntil(
+      handleTutorialMemberJoined(c.env, body.event).catch((e) =>
+        console.error("tutorial member_joined error:", e),
+      ),
     );
   }
 

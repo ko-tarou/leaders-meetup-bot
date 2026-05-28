@@ -24,7 +24,9 @@ export type EventActionType =
   // 宗教イベント PR1 (UI は後続 PR)
   | "whitelist"
   // 宗教イベント goal_reminder PR1 (UI は PR2)
-  | "goal_reminder";
+  | "goal_reminder"
+  // 宗教イベント tutorial PR1 (UI は PR2)
+  | "tutorial";
 
 export type EventAction = {
   id: string;

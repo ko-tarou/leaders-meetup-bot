@@ -84,6 +84,11 @@ export const ACTION_META: Record<
     description: "チームの目標を毎朝・毎夜に Slack チャンネルへ自動投稿します",
     icon: "🎯",
   },
+  tutorial: {
+    label: "チュートリアル",
+    description: "参加した新メンバーへオンボーディング案内を自動投稿します",
+    icon: "📚",
+  },
 };
 
 // 共通タブ (イベント直下)
