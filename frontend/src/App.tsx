@@ -41,6 +41,7 @@ import { InterviewerFormPage } from "./pages/InterviewerFormPage";
 import { ParticipationFormPage } from "./pages/ParticipationFormPage";
 import { PublicEntryPage } from "./pages/PublicEntryPage";
 import { PublicManagementPage } from "./pages/PublicManagementPage";
+import { WhitelistFormPage } from "./pages/WhitelistFormPage";
 import { WorkspacesPage } from "./pages/WorkspacesPage";
 import { colors } from "./styles/tokens";
 
@@ -56,6 +57,8 @@ export function App() {
     pathname.startsWith("/apply") ||
     pathname.startsWith("/interviewer-form") ||
     pathname.startsWith("/participation") ||
+    // 宗教イベント PR5: whitelist メンバー向け非公開フォーム (token 認可)。
+    pathname.startsWith("/whitelist/") ||
     pathname.startsWith("/public/")
   ) {
     return (
@@ -74,6 +77,10 @@ export function App() {
             <Route
               path="/participation/:eventId"
               element={<ParticipationFormPage />}
+            />
+            <Route
+              path="/whitelist/:token"
+              element={<WhitelistFormPage />}
             />
             <Route path="/public/:token" element={<PublicEntryPage />} />
           </Routes>
