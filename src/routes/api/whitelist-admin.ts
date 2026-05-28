@@ -8,10 +8,15 @@
  *
  * セキュリティ方針: members 系のレスポンスは **ステータスのみ** を返し、
  * 各メンバーが登録した名前 (whitelist_entries) や件数は一切露出しない。
+ * さらに token (本人専用フォーム URL の鍵) も **一切露出しない**。管理者が
+ * 全員のリンクを手に入れて他人のフォームに入れてしまうプライバシーの穴を
+ * 塞ぐため、リンクは画面に出さず Bot DM で本人にのみ届ける。
  *
  * Endpoint 一覧 (すべて api.ts の adminAuth で保護される):
  *   POST   /orgs/:eventId/actions/:actionId/whitelist/members/sync
  *   GET    /orgs/:eventId/actions/:actionId/whitelist/members
+ *   POST   /orgs/:eventId/actions/:actionId/whitelist/distribute
+ *   POST   /orgs/:eventId/actions/:actionId/whitelist/members/:memberId/send
  *   POST   /orgs/:eventId/actions/:actionId/whitelist/members/:memberId/rotate-token
  *   GET    /orgs/:eventId/actions/:actionId/whitelist/results
  */
@@ -182,15 +187,140 @@ async function listMembers(db: ReturnType<typeof drizzle>, actionId: string) {
     displayName: r.displayName,
     submitted: !!r.submittedAt,
     submittedAt: r.submittedAt,
-    token: r.token,
   }));
 }
+
+/**
+ * 本人専用フォーム URL を組み立てる。
+ * API とフォームは同一 Worker・同一オリジンなので request URL の origin を使う
+ * (新規 env 変数不要)。
+ */
+function buildFormUrl(reqUrl: string, token: string): string {
+  return `${new URL(reqUrl).origin}/whitelist/${token}`;
+}
+
+/** メンバーへ送る DM の文面を組み立てる。 */
+function buildDmText(formUrl: string): string {
+  return [
+    "こんにちは！「一緒に開発したい人」のホワイトリスト登録のお願いです 🙋",
+    "",
+    "一緒に開発したい人のフルネームを、あなた専用のフォームから登録してください。",
+    "全員の希望が一致した人がいれば、その人をお誘いします。",
+    "",
+    `▼ あなた専用のリンク（他の人とは共有しないでください）\n${formUrl}`,
+    "",
+    "🔒 入力した内容は本人以外（管理者・開発者を含む）には一切見えません。安心してご記入ください。",
+  ].join("\n");
+}
+
+/**
+ * 単一メンバーへ本人専用リンクを DM 送信する (distribute / send で共有)。
+ * slackUserId を channel に渡すと Slack が自動で DM を開く (tutorial 等と同流儀)。
+ * 失敗は呼び出し側に throw して fail-soft 判定を委ねる。
+ */
+async function sendLinkDm(
+  slack: NonNullable<Awaited<ReturnType<typeof createSlackClientForWorkspace>>>,
+  reqUrl: string,
+  member: { slackUserId: string; token: string },
+): Promise<void> {
+  const url = buildFormUrl(reqUrl, member.token);
+  await slack.postMessage(member.slackUserId, buildDmText(url));
+}
+
+// ----------------------------------------------------------------------------
+// POST .../distribute
+// ----------------------------------------------------------------------------
+//
+// role の全メンバーに本人専用リンクを Bot DM で配布する。
+// fail-soft: 1 人失敗しても他は続行 (try/catch + warn)。
+// workspaceId 未設定 / メンバー 0 なら { sent:0, failed:0, total:0 }。
+whitelistAdminRouter.post(`${BASE}/distribute`, async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const actionId = c.req.param("actionId");
+
+  const found = await findWhitelistAction(db, eventId, actionId);
+  if ("error" in found) return c.json({ error: found.error }, found.status);
+
+  const members = await db
+    .select()
+    .from(whitelistMembers)
+    .where(eq(whitelistMembers.eventActionId, actionId))
+    .all();
+
+  const slack = found.config.workspaceId
+    ? await createSlackClientForWorkspace(c.env, found.config.workspaceId)
+    : null;
+  if (!slack || members.length === 0) {
+    return c.json({ sent: 0, failed: 0, total: members.length });
+  }
+
+  let sent = 0;
+  let failed = 0;
+  for (const m of members) {
+    try {
+      await sendLinkDm(slack, c.req.url, m);
+      sent += 1;
+    } catch (e) {
+      failed += 1;
+      console.warn(
+        `whitelist_distribute: DM failed (action=${actionId}, user=${m.slackUserId}):`,
+        e,
+      );
+    }
+  }
+  return c.json({ sent, failed, total: members.length });
+});
+
+// ----------------------------------------------------------------------------
+// POST .../members/:memberId/send
+// ----------------------------------------------------------------------------
+//
+// 単一メンバーへ本人専用リンクを DM 再送する。
+whitelistAdminRouter.post(`${BASE}/members/:memberId/send`, async (c) => {
+  const db = drizzle(c.env.DB);
+  const eventId = c.req.param("eventId");
+  const actionId = c.req.param("actionId");
+  const memberId = c.req.param("memberId");
+
+  const found = await findWhitelistAction(db, eventId, actionId);
+  if ("error" in found) return c.json({ error: found.error }, found.status);
+
+  const member = await db
+    .select()
+    .from(whitelistMembers)
+    .where(
+      and(
+        eq(whitelistMembers.id, memberId),
+        eq(whitelistMembers.eventActionId, actionId),
+      ),
+    )
+    .get();
+  if (!member) return c.json({ error: "member not found" }, 404);
+
+  const slack = found.config.workspaceId
+    ? await createSlackClientForWorkspace(c.env, found.config.workspaceId)
+    : null;
+  if (!slack) return c.json({ sent: 0, failed: 1, total: 1 });
+
+  try {
+    await sendLinkDm(slack, c.req.url, member);
+    return c.json({ sent: 1, failed: 0, total: 1 });
+  } catch (e) {
+    console.warn(
+      `whitelist_send: DM failed (action=${actionId}, user=${member.slackUserId}):`,
+      e,
+    );
+    return c.json({ sent: 0, failed: 1, total: 1 });
+  }
+});
 
 // ----------------------------------------------------------------------------
 // POST .../members/:memberId/rotate-token
 // ----------------------------------------------------------------------------
 //
 // メンバーのトークンを再生成する (旧フォーム URL を失効させる用途)。
+// token は返さない (管理者はトークンを一切見ない)。再配布は DM 送信で行う。
 whitelistAdminRouter.post(
   `${BASE}/members/:memberId/rotate-token`,
   async (c) => {
@@ -219,7 +349,7 @@ whitelistAdminRouter.post(
       .update(whitelistMembers)
       .set({ token, updatedAt: new Date().toISOString() })
       .where(eq(whitelistMembers.id, memberId));
-    return c.json({ token });
+    return c.json({ ok: true });
   },
 );
 
