@@ -20,6 +20,7 @@ import { rosterRouter } from "./api/roster";
 import { rosterExtrasRouter } from "./api/roster-extras";
 import { kejimeRouter } from "./api/kejime";
 import { morningAttendanceRouter } from "./api/morning-attendance";
+import { whitelistAdminRouter } from "./api/whitelist-admin";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -113,5 +114,8 @@ api.route("/", kejimeRouter);
 // 003 朝勉強会けじめ制度 PR10: 出席ダッシュボード + 手動 attend/取消 API。
 // /api/orgs/:eventId/actions/:actionId/morning-attendance/* で adminAuth に保護される。
 api.route("/", morningAttendanceRouter);
+// 宗教イベント PR3: whitelist admin API (メンバー同期 / リンク管理 / 結果)。
+// /api/orgs/:eventId/actions/:actionId/whitelist/* で adminAuth に保護される。
+api.route("/", whitelistAdminRouter);
 
 export { api };
