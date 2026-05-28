@@ -149,6 +149,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "kejime_tracker",
     // 宗教イベント PR1: whitelist アクション登録のみ対応。ビジネスロジック / UI は後続 PR。
     "whitelist",
+    // 宗教イベント PR1: goal_reminder。毎朝/毎夜に目標を投稿 (cron + 手動送信)。UI は PR2。
+    "goal_reminder",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -206,6 +208,21 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
       kejimeChannelId: null,
       roleId: null,
       minArticleLength: 500,
+    }),
+    // 宗教イベント PR1: goal_reminder。朝夜の目標アファメーション投稿。
+    // 詳細は PR2 の設定 UI で編集可能。
+    goal_reminder: JSON.stringify({
+      schemaVersion: 1,
+      workspaceId: null,
+      channelId: null,
+      morningTime: "08:00",
+      nightTime: "22:00",
+      frequency: "daily",
+      mention: "none",
+      goalText: "次世代の宗教を作る",
+      morningTemplate:
+        "🔥 私たちの目標は『{goal}』です。これに向けて全力で、死に物狂いで頑張りましょう。",
+      nightTemplate: "🌙 『{goal}』に向けて、今日も一日お疲れ様でした。",
     }),
   };
   const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";

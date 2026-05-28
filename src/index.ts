@@ -9,6 +9,7 @@ import { processWeeklyReminders } from "./services/weekly-reminder";
 import { processMorningStandup } from "./services/morning-standup";
 import { processLateJudgment } from "./services/kejime-late-judge";
 import { processKejimeStatusPost } from "./services/kejime-status-post";
+import { processGoalReminders } from "./services/goal-reminder";
 import { processAttendanceCheck } from "./services/attendance-check";
 import { processGmailWatchers } from "./services/gmail-watcher";
 import { processSlackInviteMonitors } from "./services/slack-invite-monitor";
@@ -60,6 +61,7 @@ export default {
       "morningStandup",
       "kejimeLateJudge",
       "kejimeStatusPost",
+      "goalReminders",
     ];
     const tasks: Array<Promise<unknown>> = [
       processScheduledJobs(env.DB, client),
@@ -85,6 +87,10 @@ export default {
       // 「現在のステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
       // 内部で 8:05-8:09 / 平日 window 判定して no-op に落とす。
       processKejimeStatusPost(env.DB, client),
+      // 宗教イベント PR1: goal_reminder。毎朝 (morningTime) / 毎夜 (nightTime) JST に
+      // 目標アファメーションを投稿。workspaceId ごとに SlackClient を取るため env 受け取り。
+      // 内部で 5 分窓 + dedup 判定し、窓外 / 未設定 / 土日(weekday) は no-op に落とす。
+      processGoalReminders(env.DB, env),
     ];
     if (isDailyRosterSyncWindow) {
       // 名簿 Slack 連携強化 PR4: 0:00-0:04 JST のみ実行。全 member_roster
