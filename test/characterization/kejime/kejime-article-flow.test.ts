@@ -6,8 +6,8 @@
  * - Qiita 500 未満 → rejected_short
  * - Qiita 500 以上 → pending
  * - Qiita API 404/5xx → rejected_fetch_error
- * - reaction: 勉強会チームロール所属 → 承認 (-1pt + ramen)
- * - reaction: 非ロール / 自己 / 既 approved → skip
+ * - reaction: 誰でも（自分含む）👍 が 3 つ以上 → 承認 (-1pt + ramen)
+ * - reaction: 3未満 / 既 approved / 非対象絵文字 → skip
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
@@ -159,7 +159,8 @@ describe("handleKejimeReactionAdded", () => {
   async function seedPending(opts: {
     authorUser: string; messageTs: string; currentPoints?: number;
   }) {
-    const { tracker } = await setupTracker({ roleMembers: ["U-REVIEWER"] });
+    // ロールメンバーはリアクション承認に不要になったが、tracker のパース設定は残す。
+    const { tracker } = await setupTracker();
     const db = testDb();
     const memberId = "km-1";
     await db.insert(kejimeMembers).values({
@@ -178,20 +179,29 @@ describe("handleKejimeReactionAdded", () => {
     return { tracker, memberId };
   }
 
-  it("勉強会チーム member の reaction → approved + -1pt", async () => {
+  /** reactions.get が指定カウントの +1 を返すよう MockSlackClient を設定する。 */
+  function mockReactionsGet(slack: MockSlackClient, count: number) {
+    slack.setResponse("callApi:reactions.get", {
+      ok: true,
+      message: { reactions: count > 0 ? [{ name: "+1", count }] : [] },
+    });
+  }
+
+  it("3リアクションで承認 → approved + -1pt", async () => {
     const { memberId } = await seedPending({
       authorUser: "U-AUTHOR", messageTs: "1.0", currentPoints: 1,
     });
     const slack = new MockSlackClient();
+    mockReactionsGet(slack, 3);
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "+1", user: "U-REVIEWER",
+      type: "reaction_added", reaction: "+1", user: "U-ANYONE",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
     const db = testDb();
     const req = await db.select().from(kejimeArticleRequests)
       .where(eq(kejimeArticleRequests.id, "req-1")).get();
     expect(req?.status).toBe("approved");
-    expect(req?.decidedBy).toBe("U-REVIEWER");
+    expect(req?.decidedBy).toBe("U-ANYONE");
     const member = await db.select().from(kejimeMembers)
       .where(eq(kejimeMembers.id, memberId)).get();
     expect(member?.currentPoints).toBe(0);
@@ -212,8 +222,10 @@ describe("handleKejimeReactionAdded", () => {
     });
     await testDb().update(kejimeMembers).set({ ramenCount: 1 })
       .where(eq(kejimeMembers.id, memberId));
-    await handleKejimeReactionAdded(testD1(), new MockSlackClient(), {
-      type: "reaction_added", reaction: "thumbsup", user: "U-REVIEWER",
+    const slack = new MockSlackClient();
+    mockReactionsGet(slack, 3);
+    await handleKejimeReactionAdded(testD1(), slack, {
+      type: "reaction_added", reaction: "thumbsup", user: "U-ANYONE",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
     const m = await testDb().select().from(kejimeMembers)
@@ -222,35 +234,43 @@ describe("handleKejimeReactionAdded", () => {
     expect(m?.ramenCount).toBe(0);
   });
 
-  it("非ロール user の reaction → skip", async () => {
+  it("2リアクションでは承認しない (3未満)", async () => {
     await seedPending({ authorUser: "U-AUTHOR", messageTs: "1.0", currentPoints: 1 });
     const slack = new MockSlackClient();
+    mockReactionsGet(slack, 2);
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "+1", user: "U-RANDOM",
+      type: "reaction_added", reaction: "+1", user: "U-ANYONE",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
     const req = await testDb().select().from(kejimeArticleRequests).get();
     expect(req?.status).toBe("pending");
-    expect(slack.calls).toHaveLength(0);
+    // callApi:reactions.get は呼ばれるが postMessage は呼ばれない
+    expect(slack.callsOf("postMessage")).toHaveLength(0);
   });
 
-  it("自己リアクション (author = reviewer) → skip", async () => {
-    await seedPending({ authorUser: "U-REVIEWER", messageTs: "1.0", currentPoints: 1 });
+  it("自己リアクション (author = reactor) + 3以上 → 承認（自己除外なし）", async () => {
+    const { memberId } = await seedPending({
+      authorUser: "U-AUTHOR", messageTs: "1.0", currentPoints: 1,
+    });
     const slack = new MockSlackClient();
+    mockReactionsGet(slack, 3);
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "+1", user: "U-REVIEWER",
+      type: "reaction_added", reaction: "+1", user: "U-AUTHOR",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
-    const req = await testDb().select().from(kejimeArticleRequests).get();
-    expect(req?.status).toBe("pending");
-    expect(slack.calls).toHaveLength(0);
+    const req = await testDb().select().from(kejimeArticleRequests)
+      .where(eq(kejimeArticleRequests.id, "req-1")).get();
+    expect(req?.status).toBe("approved");
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.id, memberId)).get();
+    expect(m?.currentPoints).toBe(0); // -1pt 適用済み
   });
 
-  it("非対象 reaction → skip", async () => {
+  it("非対象 reaction → skip（reactions.get も呼ばれない）", async () => {
     await seedPending({ authorUser: "U-AUTHOR", messageTs: "1.0", currentPoints: 1 });
     const slack = new MockSlackClient();
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "smile", user: "U-REVIEWER",
+      type: "reaction_added", reaction: "smile", user: "U-ANYONE",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
     expect(slack.calls).toHaveLength(0);
@@ -264,20 +284,20 @@ describe("handleKejimeReactionAdded", () => {
       .where(eq(kejimeArticleRequests.id, "req-1"));
     const slack = new MockSlackClient();
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "+1", user: "U-REVIEWER",
+      type: "reaction_added", reaction: "+1", user: "U-ANYONE",
       item: { type: "message", channel: KEJIME_CH, ts: "1.0" },
     });
     const m = await testDb().select().from(kejimeMembers)
       .where(eq(kejimeMembers.id, memberId)).get();
     expect(m?.currentPoints).toBe(1); // 変化なし
-    expect(slack.calls).toHaveLength(0);
+    expect(slack.callsOf("postMessage")).toHaveLength(0);
   });
 
   it("非 kejime channel reaction → skip", async () => {
     await seedPending({ authorUser: "U-AUTHOR", messageTs: "1.0", currentPoints: 1 });
     const slack = new MockSlackClient();
     await handleKejimeReactionAdded(testD1(), slack, {
-      type: "reaction_added", reaction: "+1", user: "U-REVIEWER",
+      type: "reaction_added", reaction: "+1", user: "U-ANYONE",
       item: { type: "message", channel: "C-OTHER", ts: "1.0" },
     });
     const req = await testDb().select().from(kejimeArticleRequests).get();

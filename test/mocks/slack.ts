@@ -158,6 +158,14 @@ export class MockSlackClient {
   async authTest(): Promise<SlackResponse> {
     return this.record("authTest", []);
   }
+
+  /** reactions.get など SlackClient の private callApi を経由する呼び出しをモック。 */
+  async callApi(
+    method: string,
+    body: Record<string, unknown>,
+  ): Promise<SlackResponse> {
+    return this.record(`callApi:${method}`, [body]);
+  }
 }
 
 /** 新しい MockSlackClient を生成するファクトリ。 */
