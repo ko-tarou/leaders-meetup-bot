@@ -3,8 +3,8 @@
  *
  * - cc <!channel> mention (late > 0 のときのみ末尾に付く)
  * - レコード無し → chat.postMessage + INSERT (初回 post 経路)
- * - レコード有り → chat.update で in-place 更新
- * - update 失敗 (ok=false) → fallback で postMessage + ts 上書き
+ * - レコード有り → chat.delete + chat.postMessage で削除→新規投稿
+ * - deleteMessage 失敗は fail-soft (postMessage は続行)
  * - tracker 不在 / channelId 未設定 → noop (fail-soft)
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -129,7 +129,7 @@ describe("postOrUpdateKejimeStatus: 初回 (レコード無し)", () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-describe("postOrUpdateKejimeStatus: 既存レコード → chat.update 経路", () => {
+describe("postOrUpdateKejimeStatus: 既存レコード → deleteMessage + postMessage 経路", () => {
   async function seedExisting(actionId: string, ts: string) {
     await testDb().insert(kejimeStatusPosts).values({
       id: "ksp-1", eventActionId: actionId, date: TODAY,
@@ -137,54 +137,58 @@ describe("postOrUpdateKejimeStatus: 既存レコード → chat.update 経路", 
     });
   }
 
-  it("レコード有 → chat.update を 1 回叩き、postMessage は呼ばれない", async () => {
+  it("レコード有 → deleteMessage を 1 回叩いてから postMessage を 1 回叩く", async () => {
     const { tracker } = await setup();
     await seedExisting(tracker.id, "1700000000.000200");
     const slack = new MockSlackClient();
+    slack.setResponse("postMessage", { ok: true, ts: "1700000000.000300" });
     await postOrUpdateKejimeStatus(
       testD1(), slack as unknown as SlackClientType, tracker.id, TODAY,
     );
-    expect(slack.callsOf("updateMessage")).toHaveLength(1);
-    expect(slack.callsOf("postMessage")).toHaveLength(0);
-    const [channel, ts] = slack.callsOf("updateMessage")[0].args as [string, string];
-    expect(channel).toBe(KEJIME_CH);
-    expect(ts).toBe("1700000000.000200");
-    // 既存 row は維持される
+    expect(slack.callsOf("updateMessage")).toHaveLength(0);
+    expect(slack.callsOf("deleteMessage")).toHaveLength(1);
+    expect(slack.callsOf("postMessage")).toHaveLength(1);
+    const [delChannel, delTs] = slack.callsOf("deleteMessage")[0].args as [string, string];
+    expect(delChannel).toBe(KEJIME_CH);
+    expect(delTs).toBe("1700000000.000200");
+    // 新しい ts で row が更新される
     const rows = await testDb().select().from(kejimeStatusPosts).all();
     expect(rows).toHaveLength(1);
-    expect(rows[0].messageTs).toBe("1700000000.000200");
+    expect(rows[0].messageTs).toBe("1700000000.000300");
     // updated_at は進む
     expect(rows[0].updatedAt).not.toBe(NOW);
   });
 
-  it("update ok=false → fallback で postMessage 再投稿し ts 上書き", async () => {
+  it("postMessage が ts 未返却 → updated_at のみ更新 (旧 ts は残る)", async () => {
     const { tracker } = await setup();
     await seedExisting(tracker.id, "OLD_TS");
-    const slack = new MockSlackClient();
-    slack.setResponse("updateMessage", { ok: false, error: "message_not_found" });
-    slack.setResponse("postMessage", { ok: true, ts: "NEW_TS" });
+    const slack = new MockSlackClient(); // default { ok: true } で ts なし
     await postOrUpdateKejimeStatus(
       testD1(), slack as unknown as SlackClientType, tracker.id, TODAY,
     );
-    expect(slack.callsOf("updateMessage")).toHaveLength(1);
+    expect(slack.callsOf("deleteMessage")).toHaveLength(1);
     expect(slack.callsOf("postMessage")).toHaveLength(1);
     const rows = await testDb().select().from(kejimeStatusPosts).all();
-    expect(rows[0].messageTs).toBe("NEW_TS");
+    // ts は更新できないが行は残る
+    expect(rows).toHaveLength(1);
+    expect(rows[0].messageTs).toBe("OLD_TS");
+    expect(rows[0].updatedAt).not.toBe(NOW);
   });
 
-  it("update が throw → fallback で postMessage 再投稿し ts 上書き", async () => {
+  it("deleteMessage が throw → warn して postMessage は続行し ts 上書き", async () => {
     const { tracker } = await setup();
     await seedExisting(tracker.id, "OLD_TS");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const slack = new MockSlackClient();
-    slack.setFailure("updateMessage", new Error("boom"));
-    slack.setResponse("postMessage", { ok: true, ts: "FALLBACK_TS" });
+    slack.setFailure("deleteMessage", new Error("not_found"));
+    slack.setResponse("postMessage", { ok: true, ts: "NEW_TS" });
     await postOrUpdateKejimeStatus(
       testD1(), slack as unknown as SlackClientType, tracker.id, TODAY,
     );
+    // deleteMessage は失敗してもpostMessage は実行される
     expect(slack.callsOf("postMessage")).toHaveLength(1);
     const rows = await testDb().select().from(kejimeStatusPosts).all();
-    expect(rows[0].messageTs).toBe("FALLBACK_TS");
+    expect(rows[0].messageTs).toBe("NEW_TS");
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -265,10 +269,10 @@ describe("postOrUpdateKejimeStatus: 当日 late を反映", () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
-// PR16: cron (processKejimeStatusPost) も既存レコードがあれば update 経路。
-// 初回は postMessage + INSERT して、2 回目以降は chat.update で in-place 反映。
-describe("processKejimeStatusPost: cron も update 経路を尊重 (PR16)", () => {
-  it("初回は postMessage + INSERT、2 回目 (別 HHMM) は update 経路", async () => {
+// cron (processKejimeStatusPost) も既存レコードがあれば delete + post 経路。
+// 初回は postMessage + INSERT して、2 回目以降は deleteMessage + postMessage で再投稿。
+describe("processKejimeStatusPost: cron も delete+post 経路を尊重", () => {
+  it("初回は postMessage + INSERT、2 回目 (別 HHMM) は delete+post 経路", async () => {
     // require lazy because processKejimeStatusPost has its own dedup
     const { processKejimeStatusPost } = await import(
       "../../../src/services/kejime-status-post"
@@ -292,12 +296,13 @@ describe("processKejimeStatusPost: cron も update 経路を尊重 (PR16)", () =
       );
       expect(slack.callsOf("postMessage")).toHaveLength(1);
       expect(slack.callsOf("updateMessage")).toHaveLength(0);
+      expect(slack.callsOf("deleteMessage")).toHaveLength(0);
       const rows = await testDb().select().from(kejimeStatusPosts).all();
       expect(rows).toHaveLength(1);
 
-      // closeTime を変えて別 HHMM (= 別 dedup) で再実行 → update 経路
+      // closeTime を変えて別 HHMM (= 別 dedup) で再実行 → delete + post 経路
       slack.reset();
-      slack.setResponse("postMessage", { ok: true, ts: "ignored" });
+      slack.setResponse("postMessage", { ok: true, ts: "1700000000.000400" });
       await testDb().update(eventActions)
         .set({
           config: JSON.stringify({
@@ -310,9 +315,13 @@ describe("processKejimeStatusPost: cron も update 経路を尊重 (PR16)", () =
       await processKejimeStatusPost(
         testD1(), slack as unknown as SlackClientType,
       );
-      // 既存レコード有り → update 経路
-      expect(slack.callsOf("updateMessage")).toHaveLength(1);
-      expect(slack.callsOf("postMessage")).toHaveLength(0);
+      // 既存レコード有り → delete + post 経路
+      expect(slack.callsOf("updateMessage")).toHaveLength(0);
+      expect(slack.callsOf("deleteMessage")).toHaveLength(1);
+      expect(slack.callsOf("postMessage")).toHaveLength(1);
+      // ts が新しいものに更新される
+      const updatedRows = await testDb().select().from(kejimeStatusPosts).all();
+      expect(updatedRows[0].messageTs).toBe("1700000000.000400");
     } finally { vi.useRealTimers(); }
   });
 });

@@ -285,13 +285,13 @@ async function buildLatestStatusBlocks(
 }
 
 /**
- * PR16: けじめポイント / 申請 / 承認 等が変動したら呼ぶ外部 API。
+ * けじめポイント / 申請 / 承認 等が変動したら呼ぶ外部 API。
  *
  * - 当日の kejime_status_posts レコードを引く
  * - 無ければ chat.postMessage → INSERT (初回 post も担当)
- * - 有れば chat.update で in-place 更新 (新規メッセージは作らない)
- * - update 失敗 (`message_not_found` 等 = 手動削除済) は fallback で再 post し
- *   message_ts を上書きする (履歴の一貫性を保つ)
+ * - 有れば chat.delete で古いメッセージを削除し chat.postMessage で再投稿する
+ *   (削除→新規投稿によりチャンネル最下部に表示され変更が目立つ)
+ *   削除が失敗しても postMessage は続行する (fail-soft)
  *
  * fail-soft: 全工程を try/catch で囲み、失敗は console.warn のみ。
  * mutation メイン処理 (ポイント加算等) は本関数の失敗で巻き戻さない。
@@ -323,14 +323,21 @@ export async function postOrUpdateKejimeStatus(
     const nowIso = new Date().toISOString();
 
     if (existing) {
-      try {
-        const res = await slackClient.updateMessage(
-          channelId, existing.messageTs, text, blocks,
+      // 古いメッセージを削除（失敗しても続行 fail-soft）
+      await slackClient.deleteMessage(channelId, existing.messageTs).catch((e) => {
+        console.warn(
+          `postOrUpdateKejimeStatus: deleteMessage failed (action=${trackerActionId}):`, e,
         );
-        if (res && res.ok === false) {
-          await fallbackRepost(
-            d1, slackClient, channelId, text, blocks, existing.id, nowIso,
-          );
+      });
+      // 新規投稿
+      try {
+        const res = await slackClient.postMessage(channelId, text, blocks);
+        const newTs = typeof (res as { ts?: unknown }).ts === "string"
+          ? (res as unknown as { ts: string }).ts : null;
+        if (newTs) {
+          await d1.update(kejimeStatusPosts)
+            .set({ messageTs: newTs, channelId, updatedAt: nowIso })
+            .where(eq(kejimeStatusPosts.id, existing.id));
         } else {
           await d1.update(kejimeStatusPosts)
             .set({ updatedAt: nowIso })
@@ -338,13 +345,8 @@ export async function postOrUpdateKejimeStatus(
         }
       } catch (e) {
         console.warn(
-          `postOrUpdateKejimeStatus: chat.update threw (action=${trackerActionId}):`, e,
+          `postOrUpdateKejimeStatus: postMessage failed (action=${trackerActionId}):`, e,
         );
-        await fallbackRepost(
-          d1, slackClient, channelId, text, blocks, existing.id, nowIso,
-        ).catch((e2) => console.warn(
-          `postOrUpdateKejimeStatus: fallback failed (action=${trackerActionId}):`, e2,
-        ));
       }
     } else {
       // 初回 post (cron 前に hook 経由で先行投稿するケース)。
@@ -368,25 +370,6 @@ export async function postOrUpdateKejimeStatus(
     console.warn(
       `postOrUpdateKejimeStatus: unexpected error (action=${trackerActionId}):`, e,
     );
-  }
-}
-
-async function fallbackRepost(
-  d1: D1, slackClient: SlackClient,
-  channelId: string, text: string, blocks: Block[],
-  existingRowId: string, nowIso: string,
-): Promise<void> {
-  const res = await slackClient.postMessage(channelId, text, blocks);
-  const ts = typeof (res as { ts?: unknown }).ts === "string"
-    ? (res as unknown as { ts: string }).ts : null;
-  if (ts) {
-    await d1.update(kejimeStatusPosts).set({
-      messageTs: ts, channelId, postedAt: nowIso, updatedAt: nowIso,
-    }).where(eq(kejimeStatusPosts.id, existingRowId));
-  } else {
-    // ts が無い (mock 等) 場合は updated_at のみ進めて整合性を保つ。
-    await d1.update(kejimeStatusPosts).set({ updatedAt: nowIso })
-      .where(eq(kejimeStatusPosts.id, existingRowId));
   }
 }
 
@@ -432,20 +415,25 @@ async function postOnce(
   );
   const nowIso = new Date().toISOString();
   try {
-    // PR16: 既に kejime_status_posts に当日レコードがあれば update 経路。
-    // cron 前に hook が走って INSERT 済みなら update で in-place 反映する。
+    // 既に kejime_status_posts に当日レコードがあれば削除→新規投稿経路。
+    // cron 前に hook が走って INSERT 済みなら古いメッセージを削除して再投稿する。
     const existing = await d1.select().from(kejimeStatusPosts).where(and(
       eq(kejimeStatusPosts.eventActionId, actionId),
       eq(kejimeStatusPosts.date, ymd),
     )).get();
     if (existing) {
-      const res = await slackClient.updateMessage(
-        channelId, existing.messageTs, text, blocks,
-      );
-      if (res && res.ok === false) {
-        await fallbackRepost(
-          d1, slackClient, channelId, text, blocks, existing.id, nowIso,
-        );
+      // 古いメッセージを削除（失敗しても続行 fail-soft）
+      await slackClient.deleteMessage(channelId, existing.messageTs).catch((e) => {
+        console.warn(`postOnce: deleteMessage failed (action=${actionId}):`, e);
+      });
+      // 新規投稿
+      const res = await slackClient.postMessage(channelId, text, blocks);
+      const newTs = typeof (res as { ts?: unknown }).ts === "string"
+        ? (res as unknown as { ts: string }).ts : null;
+      if (newTs) {
+        await d1.update(kejimeStatusPosts)
+          .set({ messageTs: newTs, channelId, updatedAt: nowIso })
+          .where(eq(kejimeStatusPosts.id, existing.id));
       } else {
         await d1.update(kejimeStatusPosts).set({ updatedAt: nowIso })
           .where(eq(kejimeStatusPosts.id, existing.id));
