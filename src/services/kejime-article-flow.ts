@@ -6,7 +6,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
   eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
-  slackRoleMembers,
 } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
@@ -292,13 +291,21 @@ export async function handleKejimeReactionAdded(
     eq(kejimeArticleRequests.status, "pending"),
   )).get();
   if (!req) return;
-  const role = await d1.select().from(slackRoleMembers).where(and(
-    eq(slackRoleMembers.roleId, tr.roleId), eq(slackRoleMembers.slackUserId, event.user),
-  )).get();
-  if (!role) return;
+  // 3リアクション以上で承認（ロール制限・自己除外なし）。
+  // Slack reactions.get で現在のカウントを取得し、3未満ならまだ足りないのでスキップ。
+  const reactionsRes = await (slack as unknown as { callApi: (m: string, b: Record<string, unknown>) => Promise<unknown> })
+    .callApi("reactions.get", {
+      channel: event.item.channel,
+      timestamp: event.item.ts,
+      full: true,
+    }).catch(() => null) as { message?: { reactions?: { name: string; count: number }[] } } | null;
+  const total = (reactionsRes?.message?.reactions ?? [])
+    .filter((r) => ARTICLE_REACTIONS.has(r.name))
+    .reduce((sum, r) => sum + r.count, 0);
+  if (total < 3) return;
   const author = await d1.select().from(kejimeMembers)
     .where(eq(kejimeMembers.id, req.memberId)).get();
-  if (!author || author.slackUserId === event.user) return;
+  if (!author) return;
 
   const { internalAfter, ramenBumped } = bumpPointsAndRamen(author.currentPoints, -1);
   const now = new Date().toISOString();
