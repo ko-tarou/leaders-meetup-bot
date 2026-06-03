@@ -77,6 +77,7 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
   const [articles, setArticles] = useState<Article[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -102,6 +103,17 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
     } finally { setBusy(null); }
   }
 
+  async function syncSlack() {
+    setBusy("sync-slack");
+    setNotice(null);
+    try {
+      await request(`${base}/sync-slack`, { method: "POST", body: JSON.stringify({}) });
+      setNotice("Slackメッセージを更新しました");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "sync failed");
+    } finally { setBusy(null); }
+  }
+
   if (members === null || events === null || articles === null) {
     return <div style={s.hint}>読み込み中...</div>;
   }
@@ -111,6 +123,7 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
   return (
     <div style={{ display: "grid", gap: "1.5rem" }}>
       {error && <div style={s.error}>エラー: {error}</div>}
+      {notice && <div style={s.notice}>{notice}</div>}
 
       <Section title="🌶 激辛ランキング" empty="該当者なし" isEmpty={ranking.length === 0}>
         {ranking.map((m) => (
@@ -172,6 +185,19 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
         ))}
       </Section>
 
+      <section>
+        <h3 style={s.h}>管理操作</h3>
+        <div style={s.list}>
+          <div style={s.row}>
+            <span style={{ flex: 1 }}>朝活けじめステータスを削除 → 最新内容で再投稿します</span>
+            <button className="btn btn-ghost btn-sm" disabled={busy === "sync-slack"}
+              onClick={syncSlack}>
+              {busy === "sync-slack" ? "更新中..." : "Slackを最新の状態にする"}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <Section title="🕘 履歴 (直近20件)" empty="履歴なし" isEmpty={events.length === 0}>
         {events.map((e) => (
           <div key={e.id} style={s.row}>
@@ -201,6 +227,8 @@ const s: Record<string, CSSProperties> = {
     fontSize: "0.875rem" },
   hint: { padding: "1rem", color: colors.textSecondary, textAlign: "center" },
   error: { padding: "0.75rem", color: colors.danger, background: colors.dangerSubtle,
+    borderRadius: "0.25rem", fontSize: "0.875rem" },
+  notice: { padding: "0.75rem", color: colors.primaryHover, background: colors.primarySubtle,
     borderRadius: "0.25rem", fontSize: "0.875rem" },
   badge: { padding: "0.125rem 0.375rem", background: colors.primarySubtle,
     color: colors.primaryHover, borderRadius: "0.25rem",

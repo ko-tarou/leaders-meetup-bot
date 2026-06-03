@@ -238,6 +238,17 @@ kejimeRouter.post(`${BASE}/article-manual-approve`, async (c: C) => {
   } }, 201);
 });
 
+// PR17: Slack ステータスメッセージを削除 → 最新内容で再投稿する同期エンドポイント。
+// triggerStatusUpdate は fail-soft なので、ここでは成功を楽観的に返す。
+kejimeRouter.post(`${BASE}/sync-slack`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const actionId = c.req.param("actionId") as string;
+  const found = await findAction(db, actionId);
+  if ("error" in found) return c.json({ error: found.error }, found.status);
+  await triggerStatusUpdate(c.env, actionId);
+  return c.json({ ok: true });
+});
+
 // PR15: admin による current_points 直接編集。0 以上の整数で set し、
 // bumpPointsAndRamen で ramen を同期 (delta = new - current で再計算)。
 // 履歴は type='manual_edit' で kejime_events に 1 行残す (削除しない方針)。
