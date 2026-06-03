@@ -21,7 +21,7 @@ import {
   slackRoleMembers, slackRoles,
 } from "../../../src/db/schema";
 import { makeEvent, makeEventAction } from "../../helpers/factory";
-import { MockSlackClient } from "../../mocks/slack";
+import { MockSlackClient, MOCK_POST_TS } from "../../mocks/slack";
 
 const KEJIME_CH = "C-KEJIME";
 const VALID_ID = "0123456789abcdef0123";
@@ -165,6 +165,49 @@ describe("processQiitaArticleSubmission: notice 形式", () => {
     expect(text).toContain("Qiita 記事受領");
     const req = await testDb().select().from(kejimeArticleRequests).get();
     expect(req?.threadTs).toBe("1.5");
+  });
+});
+
+describe("processQiitaArticleSubmission: notice_ts 保存", () => {
+  it("modal 経路 (threadTs 無し) → notice_ts に postMessage 戻り値 ts が保存される", async () => {
+    const { tracker } = await setupTracker();
+    const slack = new MockSlackClient();
+    // postMessage が ts 付きレスポンスを返すよう設定
+    slack.setResponse("postMessage", { ok: true, ts: MOCK_POST_TS });
+    await processQiitaArticleSubmission(
+      testD1(), slack, fetchOk(800),
+      { actionId: tracker.id, slackUserId: "U-MODAL", url: QIITA_URL },
+    );
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.noticeTs).toBe(MOCK_POST_TS);
+    expect(req?.threadTs).toBeNull();
+  });
+
+  it("channel 経路 (threadTs 有り) → notice_ts と threadTs 両方に値が入る", async () => {
+    const { tracker } = await setupTracker();
+    const slack = new MockSlackClient();
+    slack.setResponse("postMessage", { ok: true, ts: MOCK_POST_TS });
+    await processQiitaArticleSubmission(
+      testD1(), slack, fetchOk(800),
+      {
+        actionId: tracker.id, slackUserId: "U-CH",
+        url: QIITA_URL, threadTs: "1.5", channelId: KEJIME_CH,
+      },
+    );
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.threadTs).toBe("1.5");
+    expect(req?.noticeTs).toBe(MOCK_POST_TS);
+  });
+
+  it("postMessage が ts を返さない場合 → notice_ts は null (fail-soft)", async () => {
+    const { tracker } = await setupTracker();
+    const slack = new MockSlackClient(); // デフォルト { ok: true }、ts なし
+    await processQiitaArticleSubmission(
+      testD1(), slack, fetchOk(800),
+      { actionId: tracker.id, slackUserId: "U-NO-TS", url: QIITA_URL },
+    );
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.noticeTs).toBeNull();
   });
 });
 

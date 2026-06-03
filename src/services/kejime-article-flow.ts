@@ -6,7 +6,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
   eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
-  slackRoleMembers,
 } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
@@ -255,14 +254,17 @@ async function processQiitaSubmissionInner(
       );
     }
   }
+  // postMessage の戻り値から Bot 受領メッセージの ts を取得し notice_ts として保存。
+  // notice_ts はリアクション承認照合に使う。fail-soft: ts が取れなくても INSERT する。
+  const posted = await slack.postMessage(channelId,
+    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`) as { ts?: string } | null;
+  const noticeTs = posted?.ts ?? null;
   await d1.insert(kejimeArticleRequests).values({
     id: crypto.randomUUID(), eventActionId: tr.actionId, memberId,
     qiitaUrl: args.url, bodyLength: length, status,
-    threadTs: args.threadTs ?? null, channelId,
+    threadTs: args.threadTs ?? null, noticeTs, channelId,
     createdAt: new Date().toISOString(),
   });
-  await slack.postMessage(channelId,
-    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`);
   // PR16: 申請が pending (= 申請待ち section が増える) の場合のみ status post を
   // 更新する。rejected_* は申請待ちセクションに出ないので update する意味が薄く、
   // 不要な Slack API call を増やさない。fail-soft: 失敗してもメイン処理は成功扱い。
@@ -281,19 +283,29 @@ export async function handleKejimeReactionAdded(
   if (!event.user || !event.item?.channel || !event.item?.ts) return;
   const d1 = drizzle(db);
   const tr = await findTrackerByChannel(d1, event.item.channel); if (!tr) return;
+  // notice_ts で照合する。チャンネル経由・モーダル経由の両方で Bot 受領メッセージ ts
+  // が保存されるため、モーダル申請 (threadTs=null) でも正しくマッチする。
   const req = await d1.select().from(kejimeArticleRequests).where(and(
     eq(kejimeArticleRequests.eventActionId, tr.actionId),
-    eq(kejimeArticleRequests.threadTs, event.item.ts),
+    eq(kejimeArticleRequests.noticeTs, event.item.ts),
     eq(kejimeArticleRequests.status, "pending"),
   )).get();
   if (!req) return;
-  const role = await d1.select().from(slackRoleMembers).where(and(
-    eq(slackRoleMembers.roleId, tr.roleId), eq(slackRoleMembers.slackUserId, event.user),
-  )).get();
-  if (!role) return;
+  // 3リアクション以上で承認（ロール制限・自己除外なし）。
+  // Slack reactions.get で現在のカウントを取得し、3未満ならまだ足りないのでスキップ。
+  const reactionsRes = await (slack as unknown as { callApi: (m: string, b: Record<string, unknown>) => Promise<unknown> })
+    .callApi("reactions.get", {
+      channel: event.item.channel,
+      timestamp: event.item.ts,
+      full: true,
+    }).catch(() => null) as { message?: { reactions?: { name: string; count: number }[] } } | null;
+  const total = (reactionsRes?.message?.reactions ?? [])
+    .filter((r) => ARTICLE_REACTIONS.has(r.name))
+    .reduce((sum, r) => sum + r.count, 0);
+  if (total < 3) return;
   const author = await d1.select().from(kejimeMembers)
     .where(eq(kejimeMembers.id, req.memberId)).get();
-  if (!author || author.slackUserId === event.user) return;
+  if (!author) return;
 
   const { internalAfter, ramenBumped } = bumpPointsAndRamen(author.currentPoints, -1);
   const now = new Date().toISOString();

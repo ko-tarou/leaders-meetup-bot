@@ -21,11 +21,11 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は 宗教イベント PR3 で追加された 0062_create_tutorial_sends
-    // (tutorial アクションの送信記録テーブル)。
+    // 末尾は kejime_article_requests に notice_ts カラムを追加した
+    // 0063_add_notice_ts_to_article_requests。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0062_create_tutorial_sends");
+    expect(names[names.length - 1]).toBe("0063_add_notice_ts_to_article_requests");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);
