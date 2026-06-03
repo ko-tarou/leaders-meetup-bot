@@ -255,14 +255,17 @@ async function processQiitaSubmissionInner(
       );
     }
   }
+  // postMessage の戻り値から Bot 受領メッセージの ts を取得し notice_ts として保存。
+  // notice_ts はリアクション承認照合に使う。fail-soft: ts が取れなくても INSERT する。
+  const posted = await slack.postMessage(channelId,
+    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`) as { ts?: string } | null;
+  const noticeTs = posted?.ts ?? null;
   await d1.insert(kejimeArticleRequests).values({
     id: crypto.randomUUID(), eventActionId: tr.actionId, memberId,
     qiitaUrl: args.url, bodyLength: length, status,
-    threadTs: args.threadTs ?? null, channelId,
+    threadTs: args.threadTs ?? null, noticeTs, channelId,
     createdAt: new Date().toISOString(),
   });
-  await slack.postMessage(channelId,
-    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`);
   // PR16: 申請が pending (= 申請待ち section が増える) の場合のみ status post を
   // 更新する。rejected_* は申請待ちセクションに出ないので update する意味が薄く、
   // 不要な Slack API call を増やさない。fail-soft: 失敗してもメイン処理は成功扱い。
@@ -281,9 +284,11 @@ export async function handleKejimeReactionAdded(
   if (!event.user || !event.item?.channel || !event.item?.ts) return;
   const d1 = drizzle(db);
   const tr = await findTrackerByChannel(d1, event.item.channel); if (!tr) return;
+  // notice_ts で照合する。チャンネル経由・モーダル経由の両方で Bot 受領メッセージ ts
+  // が保存されるため、モーダル申請 (threadTs=null) でも正しくマッチする。
   const req = await d1.select().from(kejimeArticleRequests).where(and(
     eq(kejimeArticleRequests.eventActionId, tr.actionId),
-    eq(kejimeArticleRequests.threadTs, event.item.ts),
+    eq(kejimeArticleRequests.noticeTs, event.item.ts),
     eq(kejimeArticleRequests.status, "pending"),
   )).get();
   if (!req) return;
