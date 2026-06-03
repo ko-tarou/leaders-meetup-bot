@@ -23,7 +23,7 @@ import {
 import {
   makeEvent, makeEventAction, makeSlackRole, makeSlackRoleMember,
 } from "../../helpers/factory";
-import { MockSlackClient } from "../../mocks/slack";
+import { MockSlackClient, MOCK_POST_TS } from "../../mocks/slack";
 
 const KEJIME_CH = "C-KEJIME";
 const VALID_ID = "0123456789abcdef0123";
@@ -167,10 +167,13 @@ describe("handleKejimeReactionAdded", () => {
       displayName: opts.authorUser, currentPoints: opts.currentPoints ?? 0,
       ramenCount: 0, createdAt: NOW, updatedAt: NOW,
     });
+    // notice_ts でリアクション照合するため、noticeTs に messageTs をセットする。
+    // threadTs は既存データ互換のため残す (実際は Bot 受領メッセージの ts が入る)。
     await db.insert(kejimeArticleRequests).values({
       id: "req-1", eventActionId: tracker.id, memberId,
       qiitaUrl: QIITA_URL, bodyLength: 600, status: "pending",
-      threadTs: opts.messageTs, channelId: KEJIME_CH, createdAt: NOW,
+      threadTs: opts.messageTs, noticeTs: opts.messageTs,
+      channelId: KEJIME_CH, createdAt: NOW,
     });
     return { tracker, memberId };
   }

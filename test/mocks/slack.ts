@@ -16,6 +16,9 @@ export type SlackCall = { method: string; args: unknown[] };
 
 const OK: SlackResponse = { ok: true };
 
+/** postMessage に ts 付きレスポンスを設定するときに使う定数。notice_ts 保存テスト用。 */
+export const MOCK_POST_TS = "mock-notice-ts-1.0";
+
 export class MockSlackClient {
   /** 全呼び出しの記録 (method 名 + 引数)。アサーション用。 */
   public calls: SlackCall[] = [];
