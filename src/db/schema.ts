@@ -874,6 +874,11 @@ export const kejimeArticleRequests = sqliteTable(
     bodyLength: integer("body_length"),
     status: text("status").notNull(),
     threadTs: text("thread_ts"),
+    // migration 0063: Bot の受領メッセージ (notice) の ts。
+    // リアクション承認はこの ts で照合する。
+    // チャンネル経由申請では threadTs と noticeTs の両方に値が入る。
+    // モーダル経由申請では threadTs=null、noticeTs=Bot投稿のts。
+    noticeTs: text("notice_ts"),
     channelId: text("channel_id"),
     decidedBy: text("decided_by"),
     decidedAt: text("decided_at"),
@@ -882,6 +887,7 @@ export const kejimeArticleRequests = sqliteTable(
   (t) => [
     index("idx_kejime_article_requests_event_action_id").on(t.eventActionId),
     index("idx_kejime_article_requests_status").on(t.status),
+    index("kejime_article_requests_notice_ts_idx").on(t.noticeTs),
   ],
 );
 
