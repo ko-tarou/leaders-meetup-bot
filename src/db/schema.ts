@@ -58,6 +58,7 @@ export const eventActions = sqliteTable(
       .references(() => events.id),
     // 'schedule_polling' | 'task_management' | 'member_welcome' | 'pr_review_list'
     // | 'member_application' | 'weekly_reminder' | 'attendance_check' | 'role_management'
+    // | 'stale_pr_nudge' (GitHub open PR の stale 催促)
     actionType: text("action_type").notNull(),
     // アクション固有設定（JSON 文字列）
     config: text("config").notNull().default("{}"),

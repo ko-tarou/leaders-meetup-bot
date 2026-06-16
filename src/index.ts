@@ -10,6 +10,7 @@ import { processMorningStandup } from "./services/morning-standup";
 import { processLateJudgment } from "./services/kejime-late-judge";
 import { processKejimeStatusPost } from "./services/kejime-status-post";
 import { processGoalReminders } from "./services/goal-reminder";
+import { processStalePrNudges } from "./services/stale-pr-nudge";
 import { processAttendanceCheck } from "./services/attendance-check";
 import { processGmailWatchers } from "./services/gmail-watcher";
 import { processSlackInviteMonitors } from "./services/slack-invite-monitor";
@@ -62,6 +63,7 @@ export default {
       "kejimeLateJudge",
       "kejimeStatusPost",
       "goalReminders",
+      "stalePrNudges",
     ];
     const tasks: Array<Promise<unknown>> = [
       processScheduledJobs(env.DB, client),
@@ -91,6 +93,10 @@ export default {
       // 目標アファメーションを投稿。workspaceId ごとに SlackClient を取るため env 受け取り。
       // 内部で 5 分窓 + dedup 判定し、窓外 / 未設定 / 土日(weekday) は no-op に落とす。
       processGoalReminders(env.DB, env),
+      // stale-pr-nudge: 設定済み GitHub repo の open PR を取得し、stale (updated_at が
+      // staleHours 以上前) な PR の依頼中レビュアーを共有チャンネルへ @メンションで
+      // 名指し催促する。内部で平日 + nudgeTime 5 分窓 + dedup 判定し、窓外/未設定は no-op。
+      processStalePrNudges(env.DB, env),
     ];
     if (isDailyRosterSyncWindow) {
       // 名簿 Slack 連携強化 PR4: 0:00-0:04 JST のみ実行。全 member_roster
