@@ -41,4 +41,12 @@ export type Env = {
   // 未設定の場合、/api/feedback/ai-chat は 500 を返す。
   // `npx wrangler secret put GEMINI_API_KEY` で設定済。
   GEMINI_API_KEY: string;
+
+  // stale-pr-nudge: GitHub API トークン (任意)。
+  // public repo のみを対象にするなら未設定で動く (未認証 60 req/hour)。
+  // private repo を対象にする / rate limit (5000 req/hour) を上げる場合は
+  // fine-grained PAT (`pull_requests:read` のみで十分) を
+  // `npx wrangler secret put GITHUB_TOKEN` で設定する。
+  // 未設定なら未認証で fetch する (Authorization ヘッダを付けない)。
+  GITHUB_TOKEN?: string;
 };
