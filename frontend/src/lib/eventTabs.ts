@@ -95,6 +95,11 @@ export const ACTION_META: Record<
       "公開フォームから個人・企業スポンサーを受付け、メール確認を経て合否を判定",
     icon: "🤝",
   },
+  stale_pr_nudge: {
+    label: "停滞 PR リマインド",
+    description: "停滞している GitHub の open PR をレビュアー名指しで共有チャンネルに催促します",
+    icon: "📣",
+  },
 };
 
 // 共通タブ (イベント直下)

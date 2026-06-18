@@ -18,6 +18,9 @@ export type EventActionType =
   | "attendance_check"
   | "role_management"
   | "member_roster"
+  // stale-pr-nudge: GitHub の停滞 open PR をレビュアー名指しで共有チャンネルに催促
+  // (BE PR#307/#308)。(event_id, action_type) UNIQUE のため 1 event に最大 1 つ。
+  | "stale_pr_nudge"
   // 朝勉強会けじめ制度 PR1 (UI は PR2 以降)
   | "morning_standup"
   | "kejime_tracker"
