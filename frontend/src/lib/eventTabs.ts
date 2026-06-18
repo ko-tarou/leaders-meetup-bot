@@ -89,6 +89,12 @@ export const ACTION_META: Record<
     description: "参加した新メンバーへオンボーディング案内を自動投稿します",
     icon: "📚",
   },
+  sponsor_application: {
+    label: "スポンサー募集",
+    description:
+      "公開フォームから個人・企業スポンサーを受付け、メール確認を経て合否を判定",
+    icon: "🤝",
+  },
 };
 
 // 共通タブ (イベント直下)
