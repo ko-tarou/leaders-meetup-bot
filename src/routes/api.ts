@@ -24,6 +24,7 @@ import { morningAttendanceRouter } from "./api/morning-attendance";
 import { whitelistAdminRouter } from "./api/whitelist-admin";
 import { goalReminderRouter } from "./api/goal-reminder";
 import { tutorialRouter } from "./api/tutorial";
+import { sponsorRouter } from "./api/sponsor";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -68,6 +69,11 @@ api.use("/*", async (c, next) => {
   if (
     sub === "/health" ||
     sub.startsWith("/apply/") ||
+    // sponsor_application 公開フォーム: event 情報取得 / 申込 POST /
+    // メール確認 (/sponsor/:eventId, /sponsor/:eventId/event,
+    // /sponsor/:eventId/confirm)。/orgs/:eventId/sponsor-applications は
+    // この prefix に該当しないため admin auth が維持される。
+    sub.startsWith("/sponsor/") ||
     // participation-form Phase1 PR2: 参加届の公開フォーム
     // (prefill / event / submit)。/orgs/:eventId/participation-forms は
     // この prefix に該当しないため admin auth が維持される。
@@ -130,5 +136,9 @@ api.route("/", goalReminderRouter);
 // 宗教イベント PR1: tutorial 手動送信 API (オンボーディング送信テスト / 再送)。
 // /api/orgs/:eventId/actions/:actionId/tutorial/send で adminAuth に保護される。
 api.route("/", tutorialRouter);
+// sponsor_application: HackIT スポンサー募集。公開フォーム (/sponsor/*) は
+// adminAuth bypass 済み。admin 一覧 (/orgs/:eventId/sponsor-applications) と
+// CRUD (/sponsor-applications/:id) は adminAuth で保護される。
+api.route("/", sponsorRouter);
 
 export { api };
