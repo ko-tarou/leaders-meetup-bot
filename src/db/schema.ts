@@ -920,6 +920,10 @@ export const kejimeArticleRequests = sqliteTable(
     qiitaUrl: text("qiita_url").notNull(),
     bodyLength: integer("body_length"),
     status: text("status").notNull(),
+    // migration 0065: 申請時点で「この記事 1 本が何 pt 分のペナルティを消すか」を固定。
+    // 承認時はこの値だけポイントを減算する (1pt=500字 / 2pt=1000字 / 3pt=1500字 を
+    // 申請時の保有ポイントで決め、承認までの間にポイントが動いても矛盾しないようにする)。
+    pointsToClear: integer("points_to_clear"),
     threadTs: text("thread_ts"),
     // migration 0063: Bot の受領メッセージ (notice) の ts。
     // リアクション承認はこの ts で照合する。
