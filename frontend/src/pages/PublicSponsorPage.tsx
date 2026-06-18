@@ -1,0 +1,339 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api } from "../api";
+import { useIsMobile } from "../hooks/useIsMobile";
+import { colors } from "../styles/tokens";
+
+// sponsor_application 公開フォーム。PublicApplyPage を複製し、面談日時/学籍番号等の
+// メンバー固有項目を、会社名/担当者/金額/期間/用途 のスポンサー項目に置き換えた。
+// 認証不要。event 情報は公開エンドポイント /api/sponsor/:eventId/event で取得する。
+
+type PublicSponsorEvent = {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+};
+
+export function PublicSponsorPage() {
+  const { eventId } = useParams<{ eventId: string }>();
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const [event, setEvent] = useState<PublicSponsorEvent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [companyName, setCompanyName] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [email, setEmail] = useState("");
+  const [amount, setAmount] = useState("");
+  const [period, setPeriod] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!eventId) {
+      setLoading(false);
+      return;
+    }
+    api.sponsor
+      .getEvent(eventId)
+      .then((e) => {
+        setEvent(e);
+        setLoading(false);
+      })
+      .catch(() => {
+        setEvent(null);
+        setLoading(false);
+      });
+  }, [eventId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!companyName.trim()) {
+      setError("会社名・団体名を入力してください");
+      return;
+    }
+    if (!contactName.trim()) {
+      setError("担当者名を入力してください");
+      return;
+    }
+    if (!email.trim()) {
+      setError("メールアドレスを入力してください");
+      return;
+    }
+    const amountNum = Number(amount);
+    if (!Number.isInteger(amountNum) || amountNum < 1) {
+      setError("ご協賛金額は 1 以上の整数で入力してください");
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      await api.sponsor.apply(eventId!, {
+        companyName: companyName.trim(),
+        contactName: contactName.trim(),
+        email: email.trim(),
+        amount: amountNum,
+        period: period.trim() || undefined,
+        purpose: purpose.trim() || undefined,
+      });
+      navigate(`/sponsor/${eventId}/thanks`);
+    } catch (err) {
+      // BE は重複連投を 429 (too_many_requests) で返す。
+      const msg = err instanceof Error ? err.message : "送信に失敗しました";
+      setError(
+        msg.includes("429") || msg.includes("too_many_requests")
+          ? "短時間に複数回送信されました。しばらくしてから再度お試しください。"
+          : "送信に失敗しました。入力内容をご確認ください。",
+      );
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <Layout>
+        <div style={{ color: colors.textSecondary }}>読み込み中...</div>
+      </Layout>
+    );
+  }
+  if (!event) {
+    return (
+      <Layout>
+        <div
+          style={{ padding: "2rem", textAlign: "center", color: colors.danger }}
+        >
+          イベントが見つかりません
+        </div>
+      </Layout>
+    );
+  }
+  if (!event.enabled) {
+    return (
+      <Layout>
+        <h1
+          style={{
+            margin: "0 0 0.5rem",
+            fontSize: isMobile ? "1.25rem" : "1.5rem",
+          }}
+        >
+          {event.name} スポンサー募集
+        </h1>
+        <NoticeBox>現在スポンサーの募集は受付停止中です。</NoticeBox>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.5rem" }}>
+        {event.name} スポンサー募集
+      </h1>
+      <p style={{ color: colors.textSecondary, marginBottom: "1.5rem" }}>
+        個人・企業スポンサーを募集しています。以下のフォームにご記入ください。送信後、ご記入のメールアドレス宛に確認メールをお送りします。メール内のリンクをクリックして申込を確定してください。
+      </p>
+
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: "0.75rem",
+            background: colors.dangerSubtle,
+            color: colors.danger,
+            borderRadius: "0.375rem",
+            marginBottom: "1rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        <Field label="会社名・団体名 *">
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            required
+            maxLength={200}
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="ご担当者名 *">
+          <input
+            type="text"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            required
+            maxLength={100}
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="メールアドレス *" hint="確認メール・連絡用にご記入ください">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            maxLength={200}
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="ご協賛金額（円） *" hint="半角数字でご記入ください">
+          <input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+            min={1}
+            step={1}
+            style={inputStyle}
+          />
+        </Field>
+        <Field
+          label="協賛期間（任意）"
+          hint="例: 2026年4月〜2027年3月 / 単発"
+        >
+          <input
+            type="text"
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            maxLength={100}
+            style={inputStyle}
+          />
+        </Field>
+        <Field
+          label="ご協賛の用途・ご要望（任意）"
+          hint="協賛の意図やご要望があればご記入ください"
+        >
+          <textarea
+            value={purpose}
+            onChange={(e) => setPurpose(e.target.value)}
+            maxLength={1000}
+            rows={4}
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        </Field>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          style={{
+            background: submitting ? colors.primarySubtle : colors.primary,
+            color: colors.textInverse,
+            padding: isMobile ? "0.875rem 1rem" : "0.75rem 2rem",
+            width: isMobile ? "100%" : undefined,
+            border: "none",
+            borderRadius: "0.375rem",
+            fontSize: "1rem",
+            cursor: submitting ? "not-allowed" : "pointer",
+            fontWeight: "bold",
+            minHeight: 44,
+          }}
+        >
+          {submitting ? "送信中..." : "申込を送信"}
+        </button>
+      </form>
+    </Layout>
+  );
+}
+
+export function PublicSponsorThanksPage() {
+  return (
+    <Layout>
+      <div style={{ textAlign: "center", padding: "3rem 1rem" }}>
+        <h1 style={{ marginTop: 0, fontSize: "1.5rem" }}>
+          申込ありがとうございました
+        </h1>
+        <p style={{ color: colors.textSecondary }}>
+          ご記入のメールアドレス宛に確認メールをお送りしました。メール内のリンクをクリックして申込を確定してください。
+        </p>
+      </div>
+    </Layout>
+  );
+}
+
+function Layout({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile();
+  return (
+    <div
+      style={{
+        maxWidth: 720,
+        margin: "0 auto",
+        padding: isMobile ? "1.25rem 0.875rem" : "2rem 1rem",
+        fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+        color: colors.text,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function NoticeBox({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      role="status"
+      style={{
+        padding: "1.5rem 1rem",
+        background: colors.surface,
+        border: `1px solid ${colors.border}`,
+        borderRadius: "0.5rem",
+        color: colors.text,
+        fontSize: "0.95rem",
+        textAlign: "center",
+        lineHeight: 1.6,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <label
+        style={{
+          display: "block",
+          marginBottom: "0.25rem",
+          fontWeight: "bold",
+          fontSize: "0.875rem",
+        }}
+      >
+        {label}
+      </label>
+      {hint && (
+        <p
+          style={{
+            fontSize: "0.8rem",
+            color: colors.textSecondary,
+            margin: "0 0 0.375rem",
+          }}
+        >
+          {hint}
+        </p>
+      )}
+      {children}
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "0.5rem",
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: "0.375rem",
+  fontSize: "1rem",
+  fontFamily: "inherit",
+  boxSizing: "border-box",
+};

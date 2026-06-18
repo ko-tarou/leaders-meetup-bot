@@ -37,6 +37,10 @@ import {
   PublicApplyPage,
   PublicThanksPage,
 } from "./pages/PublicApplyPage";
+import {
+  PublicSponsorPage,
+  PublicSponsorThanksPage,
+} from "./pages/PublicSponsorPage";
 import { InterviewerFormPage } from "./pages/InterviewerFormPage";
 import { ParticipationFormPage } from "./pages/ParticipationFormPage";
 import { PublicEntryPage } from "./pages/PublicEntryPage";
@@ -55,6 +59,7 @@ export function App() {
   const { pathname } = useLocation();
   if (
     pathname.startsWith("/apply") ||
+    pathname.startsWith("/sponsor") ||
     pathname.startsWith("/interviewer-form") ||
     pathname.startsWith("/participation") ||
     // 宗教イベント PR5: whitelist メンバー向け非公開フォーム (token 認可)。
@@ -69,6 +74,14 @@ export function App() {
             <Route
               path="/apply/:eventId/thanks"
               element={<PublicThanksPage />}
+            />
+            <Route
+              path="/sponsor/:eventId"
+              element={<PublicSponsorPage />}
+            />
+            <Route
+              path="/sponsor/:eventId/thanks"
+              element={<PublicSponsorThanksPage />}
             />
             <Route
               path="/interviewer-form/:token"
