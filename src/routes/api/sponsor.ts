@@ -161,7 +161,9 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
   try {
     const action = await findSponsorAction(db, eventId);
     if (action) {
-      const confirmUrl = `${new URL(c.req.url).origin}/sponsor/${eventId}/confirm?t=${confirmToken}`;
+      // confirm エンドポイントは router が /api 配下にマウントされているため
+      // /api を必ず含める (含めないと SPA fallback に吸われ confirm が動かない)。
+      const confirmUrl = `${new URL(c.req.url).origin}/api/sponsor/${eventId}/confirm?t=${confirmToken}`;
       const appLike = {
         companyName,
         contactName,

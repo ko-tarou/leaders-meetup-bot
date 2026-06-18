@@ -196,6 +196,8 @@ describe("POST /sponsor/:eventId", () => {
     // 確認メール 1 件 (confirmUrl が body に埋まる)
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0].to).toBe("sponsor@example.com");
+    // confirm リンクは /api 配下 (SPA fallback に吸われないため必須)。
+    expect(sentEmails[0].body).toContain("/api/sponsor/");
     expect(sentEmails[0].body).toContain("/confirm?t=");
   });
 });
