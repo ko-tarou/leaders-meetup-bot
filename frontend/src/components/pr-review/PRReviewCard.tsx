@@ -62,12 +62,24 @@ const styles = {
     fontSize: "0.75rem", padding: "0.125rem 0.375rem", borderRadius: "0.25rem",
     background: colors.warningSubtle, color: colors.warning, fontWeight: 600,
   } as CSSProperties,
-  actionsRow: { marginTop: "0.5rem", display: "flex", justifyContent: "flex-end" } as CSSProperties,
+  actionsRow: { marginTop: "0.5rem", display: "flex", justifyContent: "flex-end", gap: "0.5rem" } as CSSProperties,
   rerequestBtn: {
     background: colors.warning, color: colors.textInverse, border: "none",
     padding: "0.25rem 0.75rem", borderRadius: "0.25rem", fontSize: "0.75rem", cursor: "pointer",
   } as CSSProperties,
+  // 再レビュー依頼 (オレンジ) と区別するため緑 (primary 系)。停滞 PR の即催促。
+  nudgeBtn: {
+    background: colors.primary, color: colors.textInverse, border: "none",
+    padding: "0.25rem 0.75rem", borderRadius: "0.25rem", fontSize: "0.75rem", cursor: "pointer",
+  } as CSSProperties,
 };
+
+// PRReviewListTab で解決した stale-pr-nudge 送信先 action。
+// 詳細は PRReviewListTab の resolveStaleNudgeTarget 参照。
+export type StaleNudgeTarget =
+  | { kind: "none" }
+  | { kind: "single"; actionId: string }
+  | { kind: "ambiguous"; count: number };
 
 export type PRReviewWithLgtm = PRReview & {
   lgtmCount: number;
@@ -84,6 +96,9 @@ type PRReviewCardProps = {
   onSelect: () => void;
   // 005-pr-rereview: 再レビュー依頼用。eventId 未指定ならボタン非表示。
   eventId?: string;
+  // stale-pr-nudge 手動発火の送信先解決結果。none ならボタン非表示。
+  // 未指定なら none 扱い (後方互換: 既存呼び出し元を壊さない)。
+  nudgeTarget?: StaleNudgeTarget;
   onChanged?: () => void;
 };
 
@@ -92,12 +107,14 @@ export function PRReviewCard({
   lgtmThreshold,
   onSelect,
   eventId,
+  nudgeTarget = { kind: "none" },
   onChanged,
 }: PRReviewCardProps) {
   const { confirm } = useConfirm();
   const toast = useToast();
   const isReadOnly = useIsReadOnly();
   const [reRequesting, setReRequesting] = useState(false);
+  const [nudging, setNudging] = useState(false);
   // 005-16: 親（PRReviewListTab）が GET /api/orgs/:eventId/pr-reviews のレスポンス
   // から reviewers を埋め込んで渡す。旧実装はマウントごとに個別 fetch していた（N+1）。
   // 親が渡してこなかった場合のみ fallback fetch（後方互換）。
@@ -158,6 +175,35 @@ export function PRReviewCard({
   };
   const canReRequest = !!eventId && !isReadOnly;
 
+  // stale-pr-nudge 手動発火: 停滞している GitHub open PR をレビュアー名指しで
+  // 共有チャンネルに即催促する (再レビュー依頼とは別機能・GitHub の PR が対象)。
+  // 個別 PRReview レコードには触れないため confirm は出さず即送信する。
+  const handleNudge = async (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    if (!eventId || nudgeTarget.kind !== "single") return;
+    setNudging(true);
+    try {
+      const res = await api.prReviews.sendStalePrNudge(eventId, nudgeTarget.actionId);
+      if (res.nudged > 0) {
+        toast.success(`停滞 PR ${res.nudged} 件にリマインドを送信しました`);
+      } else {
+        toast.info("催促対象の停滞 PR はありませんでした (送信済み / stale なし)");
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `リマインド送信に失敗しました: ${err.message}`
+          : "リマインド送信に失敗しました",
+      );
+    } finally {
+      setNudging(false);
+    }
+  };
+  // none → 非表示。single → 有効。ambiguous → 無効化して理由を tooltip 表示。
+  const showNudge = !!eventId && !isReadOnly && nudgeTarget.kind !== "none";
+  const nudgeAmbiguous = nudgeTarget.kind === "ambiguous";
+  const nudgeDisabled = nudging || nudgeAmbiguous;
+
   return (
     <div
       onClick={onSelect}
@@ -209,21 +255,42 @@ export function PRReviewCard({
         <span>依頼者: {r.requesterSlackId}</span>
         <span>{reviewerText}</span>
       </div>
-      {canReRequest && (
+      {(canReRequest || showNudge) && (
         <div style={styles.actionsRow}>
-          <button
-            type="button"
-            onClick={handleReRequest}
-            disabled={reRequesting}
-            style={{
-              ...styles.rerequestBtn,
-              opacity: reRequesting ? 0.6 : 1,
-              cursor: reRequesting ? "not-allowed" : "pointer",
-            }}
-            title="既存 LGTM をリセットして reviewers に通知"
-          >
-            {reRequesting ? "送信中..." : "🔄 再レビュー依頼"}
-          </button>
+          {showNudge && (
+            <button
+              type="button"
+              onClick={handleNudge}
+              disabled={nudgeDisabled}
+              style={{
+                ...styles.nudgeBtn,
+                opacity: nudgeDisabled ? 0.6 : 1,
+                cursor: nudgeDisabled ? "not-allowed" : "pointer",
+              }}
+              title={
+                nudgeAmbiguous
+                  ? "停滞 PR リマインドの設定が複数あるため、どれに送るか特定できません。設定を 1 つに整理してください。"
+                  : "停滞している GitHub の open PR をレビュアー名指しで共有チャンネルに即催促します"
+              }
+            >
+              {nudging ? "送信中..." : "📣 リマインド送信"}
+            </button>
+          )}
+          {canReRequest && (
+            <button
+              type="button"
+              onClick={handleReRequest}
+              disabled={reRequesting}
+              style={{
+                ...styles.rerequestBtn,
+                opacity: reRequesting ? 0.6 : 1,
+                cursor: reRequesting ? "not-allowed" : "pointer",
+              }}
+              title="既存 LGTM をリセットして reviewers に通知"
+            >
+              {reRequesting ? "送信中..." : "🔄 再レビュー依頼"}
+            </button>
+          )}
         </div>
       )}
     </div>

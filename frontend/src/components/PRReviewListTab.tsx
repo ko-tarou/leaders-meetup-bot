@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
-import type { PRReview } from "../types";
+import type { EventAction, PRReview } from "../types";
 import { api } from "../api";
-import { PRReviewCard, type PRReviewWithLgtm } from "./pr-review/PRReviewCard";
+import {
+  PRReviewCard,
+  type PRReviewWithLgtm,
+  type StaleNudgeTarget,
+} from "./pr-review/PRReviewCard";
 import { PRReviewForm } from "./pr-review/PRReviewForm";
 import { useIsReadOnly } from "../hooks/usePublicMode";
 import { colors } from "../styles/tokens";
@@ -39,6 +43,24 @@ const styles = {
   } as CSSProperties,
 };
 
+// stale-pr-nudge 手動発火ボタンの「送信先 action」解決結果。
+// stale_pr_nudge action は pr_review_list action とは別の event action なので、
+// このタブ (eventId しか持たない) が event 配下の action 一覧を 1 回 fetch して
+// 解決し、各カードへ渡す（カードごとの N+1 fetch を避ける）。
+//   - kind="none"      : 有効な stale_pr_nudge action が無い → ボタン非表示
+//   - kind="single"    : ちょうど 1 つ → その actionId へ自動送信
+//   - kind="ambiguous" : 複数 → 安全側で無効化し理由を tooltip 表示
+//     (どれに送るか UI 上で一意に決められないため。設定で 1 つに整理する想定)
+// 型 (StaleNudgeTarget) は PRReviewCard と共有 (定義はカード側)。
+function resolveStaleNudgeTarget(actions: EventAction[]): StaleNudgeTarget {
+  const candidates = actions.filter(
+    (a) => a.actionType === "stale_pr_nudge" && a.enabled === 1,
+  );
+  if (candidates.length === 0) return { kind: "none" };
+  if (candidates.length === 1) return { kind: "single", actionId: candidates[0].id };
+  return { kind: "ambiguous", count: candidates.length };
+}
+
 export function PRReviewListTab({
   eventId,
   lgtmThreshold,
@@ -54,7 +76,27 @@ export function PRReviewListTab({
   const [editing, setEditing] = useState<PRReview | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [showClosed, setShowClosed] = useState(false);
+  // stale-pr-nudge 送信先 action の解決結果。未取得時は none 扱い (ボタン非表示)。
+  const [nudgeTarget, setNudgeTarget] = useState<StaleNudgeTarget>({ kind: "none" });
   const isReadOnly = useIsReadOnly();
+
+  useEffect(() => {
+    let cancelled = false;
+    api.events.actions
+      .list(eventId)
+      .then((list) => {
+        if (cancelled) return;
+        setNudgeTarget(resolveStaleNudgeTarget(Array.isArray(list) ? list : []));
+      })
+      .catch(() => {
+        // action 一覧の取得に失敗してもタブ本体は壊さない（ボタンを出さないだけ）。
+        if (cancelled) return;
+        setNudgeTarget({ kind: "none" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +177,7 @@ export function PRReviewListTab({
           lgtmThreshold={lgtmThreshold}
           onSelect={() => setEditing(r)}
           eventId={eventId}
+          nudgeTarget={nudgeTarget}
           onChanged={() => setRefreshKey((k) => k + 1)}
         />
       ))}

@@ -50,6 +50,18 @@ export const prReviews = {
       `/orgs/${eventId}/pr-reviews/${id}/re-request`,
       { method: "POST" },
     ),
+  // stale-pr-nudge 手動発火 (BE PR#308)。停滞している GitHub open PR を
+  // レビュアー名指しで共有チャンネルに即催促する。再レビュー依頼 (reRequest) とは
+  // 別機能: こちらは GitHub の open PR を対象にした管理者向けの催促で、
+  // 個別の PRReview レコードや LGTM には触れない。actionId は対象 event 配下の
+  // stale_pr_nudge アクションの ID。戻り値 nudged は実際に投稿した PR 件数
+  // (全 PR が同日 dedup 済み / stale でなければ 0)。adminAuth 保護のため
+  // request<T>() が x-admin-token を自動注入する。
+  sendStalePrNudge: (eventId: string, actionId: string) =>
+    request<{ ok: boolean; nudged: number }>(
+      `/orgs/${eventId}/actions/${actionId}/stale-pr-nudge/send`,
+      { method: "POST" },
+    ),
   // LGTM 関連 (Sprint 17 PR1)
   lgtms: {
     list: (reviewId: string) =>
