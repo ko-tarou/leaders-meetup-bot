@@ -59,6 +59,7 @@ export const eventActions = sqliteTable(
     // 'schedule_polling' | 'task_management' | 'member_welcome' | 'pr_review_list'
     // | 'member_application' | 'weekly_reminder' | 'attendance_check' | 'role_management'
     // | 'stale_pr_nudge' (GitHub open PR の stale 催促)
+    // | 'sponsor_application' (HackIT 個人/企業スポンサー募集の公開フォーム)
     actionType: text("action_type").notNull(),
     // アクション固有設定（JSON 文字列）
     config: text("config").notNull().default("{}"),
@@ -166,6 +167,51 @@ export const applications = sqliteTable(
   (t) => [
     index("idx_applications_event_id").on(t.eventId),
     index("idx_applications_participation_token").on(t.participationToken),
+  ],
+);
+
+// sponsor_application: HackIT 個人スポンサー募集（migration 0064）
+// 公開フォームから企業/個人スポンサー希望者が申込む。member_application とは
+// 入力項目が大きく異なる（会社名/担当者/金額/期間/用途）ため applications には
+// 混在させず専用テーブルにする。通知 / 受付メールは member_application と同じ
+// event_actions.config.notifications / autoSendEmail 基盤を再利用する。
+//
+// スパム対策: confirmToken（メール確認用の不透明トークン）と confirmedAt を持つ。
+// 公開 POST 時点では status='unconfirmed' で作成し、確認リンク踏下で 'pending' へ昇格。
+// confirm 前のレコードは admin 一覧のデフォルト表示から除外する。
+export const sponsorApplications = sqliteTable(
+  "sponsor_applications",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    // 会社 / 団体名（個人スポンサーは個人名でも可）
+    companyName: text("company_name").notNull(),
+    // 担当者名
+    contactName: text("contact_name").notNull(),
+    email: text("email").notNull(),
+    // 希望スポンサー金額（円・整数）。0 以上の妥当な数値をアプリ層で検証。
+    amount: integer("amount").notNull(),
+    // 協賛期間（自由記述。例: "2026年4月〜2027年3月" / "単発"）
+    period: text("period"),
+    // 協賛の用途 / 意図の説明（任意）
+    purpose: text("purpose"),
+    // 'unconfirmed' | 'pending' | 'approved' | 'rejected'
+    // unconfirmed = メール確認待ち（公開 POST 直後）。confirm で pending へ昇格。
+    status: text("status").notNull().default("unconfirmed"),
+    // 合否 / 対応メモ（admin 用、申込者には送られない）
+    decisionNote: text("decision_note"),
+    // メール確認用の不透明トークン（32byte hex）。確認後も再利用防止のため残す。
+    confirmToken: text("confirm_token"),
+    // メール確認完了日時（UTC ISO）。null = 未確認。
+    confirmedAt: text("confirmed_at"),
+    appliedAt: text("applied_at").notNull(),
+    decidedAt: text("decided_at"),
+  },
+  (t) => [
+    index("idx_sponsor_applications_event_id").on(t.eventId),
+    index("idx_sponsor_applications_confirm_token").on(t.confirmToken),
   ],
 );
 
