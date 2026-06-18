@@ -25,6 +25,7 @@ import { whitelistAdminRouter } from "./api/whitelist-admin";
 import { goalReminderRouter } from "./api/goal-reminder";
 import { tutorialRouter } from "./api/tutorial";
 import { stalePrNudgeRouter } from "./api/stale-pr-nudge";
+import { sponsorRouter } from "./api/sponsor";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -69,6 +70,11 @@ api.use("/*", async (c, next) => {
   if (
     sub === "/health" ||
     sub.startsWith("/apply/") ||
+    // sponsor_application 公開フォーム: event 情報取得 / 申込 POST /
+    // メール確認 (/sponsor/:eventId, /sponsor/:eventId/event,
+    // /sponsor/:eventId/confirm)。/orgs/:eventId/sponsor-applications は
+    // この prefix に該当しないため admin auth が維持される。
+    sub.startsWith("/sponsor/") ||
     // participation-form Phase1 PR2: 参加届の公開フォーム
     // (prefill / event / submit)。/orgs/:eventId/participation-forms は
     // この prefix に該当しないため admin auth が維持される。
@@ -134,5 +140,9 @@ api.route("/", tutorialRouter);
 // stale-pr-nudge 手動発火 API: 自動 cron を待たず停滞 PR リマインドを即発火。
 // /api/orgs/:eventId/actions/:actionId/stale-pr-nudge/send で adminAuth に保護される。
 api.route("/", stalePrNudgeRouter);
+// sponsor_application: HackIT スポンサー募集。公開フォーム (/sponsor/*) は
+// adminAuth bypass 済み。admin 一覧 (/orgs/:eventId/sponsor-applications) と
+// CRUD (/sponsor-applications/:id) は adminAuth で保護される。
+api.route("/", sponsorRouter);
 
 export { api };
