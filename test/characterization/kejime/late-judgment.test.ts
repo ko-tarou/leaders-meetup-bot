@@ -60,8 +60,22 @@ async function setupTrio(opts: {
   return { ev, morning, tracker, role };
 }
 
+// 遅刻ガチャ: rollLatePoints は crypto.getRandomValues([0,1)) を引いて
+// drawLatePoints に渡す。デフォルト weights(70/25/5) 下で r を固定すると出目を固定できる。
+//   r<0.70 -> 1pt / 0.70<=r<0.95 -> 2pt / r>=0.95 -> 3pt
+// テストの決定性確保のため getRandomValues を r 固定にスタブする。
+function forceGachaR(r: number): void {
+  vi.spyOn(crypto, "getRandomValues").mockImplementation(((arr: ArrayBufferView) => {
+    const u = arr as unknown as Uint32Array;
+    u[0] = Math.floor(r * 2 ** 32);
+    return arr;
+  }) as typeof crypto.getRandomValues);
+}
+
 beforeEach(async () => {
   vi.useFakeTimers();
+  // default: 1pt が出るよう r=0.1 に固定 (既存の固定 +1pt 前提テストを維持)。
+  forceGachaR(0.1);
   const db = testDb();
   await db.delete(scheduledJobs);
   await db.delete(kejimeEvents);
@@ -72,7 +86,7 @@ beforeEach(async () => {
   await db.delete(eventActions);
 });
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("bumpPointsAndRamen (pure)", () => {
   it("0 → +1: internal=1, ramen=0", () => {
@@ -226,6 +240,56 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     const keys = jobs.map((j) => j.dedupKey).sort();
     expect(keys[0]).toMatch(/:20260518:0800$/);
     expect(keys[1]).toMatch(/:20260518:1000$/);
+  });
+});
+
+describe("processLateJudgment: 遅刻ガチャ (1〜3pt 抽選)", () => {
+  it("default weights / r=0.80 → 2pt が付与される", async () => {
+    forceGachaR(0.80); // 0.70<=r<0.95 → 2pt
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const db = testDb();
+    const m = await db.select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(2);
+    const ev = await db.select().from(kejimeEvents).all();
+    expect(ev).toHaveLength(1);
+    expect(ev[0].pointsDelta).toBe(2);
+    expect(ev[0].note).toContain("gacha 2pt");
+  });
+
+  it("default weights / r=0.99 → 3pt が付与される", async () => {
+    forceGachaR(0.99); // r>=0.95 → 3pt
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(3);
+  });
+
+  it("config の latePointWeights を尊重する (p1=0/p2=0/p3=100 なら必ず 3pt)", async () => {
+    forceGachaR(0.0); // どんな r でも 3pt のはず
+    freezeJst(MON, "08:00");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: JSON.stringify({ schemaVersion: 1, channelId: "C-X", themes: {} }),
+    });
+    const tracker = await makeEventAction(ev.id, {
+      actionType: "kejime_tracker",
+      config: JSON.stringify({
+        schemaVersion: 1, roleId: "role-w",
+        latePointWeights: { p1: 0, p2: 0, p3: 100 },
+      }),
+    });
+    const role = await makeSlackRole(tracker.id, { id: "role-w", name: "勉強会" });
+    await makeSlackRoleMember(role.id, "U1");
+    await processLateJudgment(testD1());
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(3);
   });
 });
 

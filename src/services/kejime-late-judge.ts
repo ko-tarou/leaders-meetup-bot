@@ -11,6 +11,9 @@ import {
   DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime, toHHMM,
 } from "./morning-standup";
 import { postOrUpdateKejimeStatus } from "./kejime-status-post";
+import {
+  parseLatePointWeights, rollLatePoints, type LatePointWeights,
+} from "./kejime-late-gacha";
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -34,6 +37,16 @@ function parseRoleId(raw: string | null | undefined): string | null {
     const o = JSON.parse(raw) as { roleId?: unknown };
     return typeof o.roleId === "string" && o.roleId.trim() ? o.roleId : null;
   } catch { return null; }
+}
+
+// 遅刻ガチャの確率を tracker.config.latePointWeights から取り出す。
+// 未設定 / 不正は DEFAULT (1pt=70/2pt=25/3pt=5) にフォールバック。
+function parseWeights(raw: string | null | undefined): LatePointWeights {
+  if (!raw) return parseLatePointWeights(undefined);
+  try {
+    const o = JSON.parse(raw) as { latePointWeights?: unknown };
+    return parseLatePointWeights(o.latePointWeights);
+  } catch { return parseLatePointWeights(undefined); }
 }
 
 // PR12: morning_standup の config.closeTime を取り出す。
@@ -97,6 +110,8 @@ async function judgeOne(
   if (!tracker) { console.warn(`kejime_late_judge: no tracker (event=${eventId})`); return 0; }
   const roleId = parseRoleId(tracker.config);
   if (!roleId) { console.warn(`kejime_late_judge: bad config (action=${tracker.id})`); return 0; }
+  // 遅刻ガチャ確率は tracker 単位で一度だけ解決し、当日の全 late 認定で共有する。
+  const weights = parseWeights(tracker.config);
 
   // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
   // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
@@ -126,7 +141,9 @@ async function judgeOne(
   for (const rm of roleMembers) {
     if (attendedSet.has(rm.slackUserId)) continue;
     try {
-      await recordLate(d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, slackClient);
+      await recordLate(
+        d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, weights, slackClient,
+      );
       lateCount++;
     } catch (e) { console.error(`recordLate failed (user=${rm.slackUserId}):`, e); }
   }
@@ -142,7 +159,7 @@ async function judgeOne(
 
 async function recordLate(
   d1: D1, db: D1Database, trackerActionId: string, morningActionId: string,
-  slackUserId: string, ymd: string, slackClient?: SlackClient,
+  slackUserId: string, ymd: string, weights: LatePointWeights, slackClient?: SlackClient,
 ): Promise<void> {
   const now = new Date().toISOString();
   try {
@@ -173,10 +190,13 @@ async function recordLate(
     });
     member = (await d1.select().from(kejimeMembers).where(eq(kejimeMembers.id, id)).get())!;
   }
-  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, 1);
+  // 遅刻ガチャ: サーバー側で 1〜3pt を抽選 (クライアント改ざん不可)。
+  const drawn = rollLatePoints(weights);
+  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, drawn);
   await d1.insert(kejimeEvents).values({
     id: crypto.randomUUID(), memberId: member.id, type: "late",
-    pointsDelta: 1, ramenDelta: ramenBumped, note: `auto: ${ymd}`, occurredAt: now,
+    pointsDelta: drawn, ramenDelta: ramenBumped,
+    note: `auto: ${ymd} (gacha ${drawn}pt)`, occurredAt: now,
   });
   await d1.update(kejimeMembers).set({
     currentPoints: internalAfter,
