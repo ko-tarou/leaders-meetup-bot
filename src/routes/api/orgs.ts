@@ -156,6 +156,10 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "tutorial",
     // HackIT スポンサー募集。公開フォーム + メール確認 + 管理一覧。
     "sponsor_application",
+    // stale-pr-nudge: 停滞している GitHub open PR をレビュアー名指しで共有チャンネルに催促。
+    // (event_id, action_type) UNIQUE のため 1 event に最大 1 つ。登録すると PR レビュー一覧の
+    // 「📣 リマインド送信」ボタンが出る (FE resolveStaleNudgeTarget が enabled=1 を検出)。
+    "stale_pr_nudge",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -238,6 +242,17 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
       deliveryMode: "dm",
       postChannelId: null,
       template: DEFAULT_TUTORIAL_TEMPLATE,
+    }),
+    // stale-pr-nudge: GitHub の停滞 open PR 催促。
+    // githubRepos / nudgeChannelId は必須だが未設定 (空 / null) でも行は作成できる
+    // (service 側 parseStalePrNudgeConfig が null=no-op で安全に skip)。
+    // ボタン表示自体は enabled=1 の行があれば出るので、まず登録 -> 後で設定タブで埋める運用。
+    stale_pr_nudge: JSON.stringify({
+      schemaVersion: 1,
+      githubRepos: [],
+      nudgeChannelId: null,
+      staleHours: 48,
+      nudgeTime: "09:00",
     }),
   };
   const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";
