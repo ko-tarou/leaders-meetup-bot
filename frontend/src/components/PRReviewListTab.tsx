@@ -127,6 +127,31 @@ export function PRReviewListTab({
     };
   }, [eventId, refreshKey]);
 
+  // 85さら地: 後で復元 ----------------------------------------------------
+  // デプロイ反映確認のため、PRレビュー一覧の本体描画を一時的に
+  // プレースホルダへ差し替える。マーカー DEPLOY-CHECK-20260619-HACKIT が
+  // 本番画面に表示されていれば、このビルドが正しく反映されている。
+  // 確認後、この early return ブロックを削除すれば元の一覧描画に戻る。
+  return (
+    <div style={{ ...styles.container, textAlign: "center", padding: "3rem 1rem" }}>
+      <h1 style={{ fontSize: "2rem", margin: 0 }}>🧪 さら地確認中</h1>
+      <p
+        style={{
+          marginTop: "1.5rem",
+          fontSize: "1.25rem",
+          fontWeight: "bold",
+          fontFamily: "monospace",
+          letterSpacing: "0.05em",
+        }}
+      >
+        DEPLOY-CHECK-20260619-HACKIT
+      </p>
+    </div>
+  );
+  // ここから下は 85さら地: 後で復元（元の PRレビュー一覧描画）---------------
+  // 確認フェーズが終わったら、下の block コメントを外し、上の early return
+  // プレースホルダを削除すれば元どおり PRレビュー一覧が描画される。
+  /*
   if (loading) return <div style={styles.container}>読み込み中...</div>;
   if (error)
     return <div style={{ ...styles.container, color: colors.danger }}>エラー: {error}</div>;
@@ -205,4 +230,5 @@ export function PRReviewListTab({
       )}
     </div>
   );
+  */
 }
