@@ -274,6 +274,59 @@ export async function processStalePrNudges(
   return { nudged };
 }
 
+/**
+ * 単一 stale_pr_nudge アクションを「今すぐ」発火する手動経路。
+ *
+ * cron 経路 (processStalePrNudges) が掛ける平日判定 + nudgeTime 窓判定を
+ * スキップし、明示操作としていつでも実行できる。一方で「同日二重催促しない」
+ * dedup ガード (scheduled_jobs.dedupKey UNIQUE) は cron と共有したまま残す:
+ *   - 手動の意図は「cron を待たず今催促する」であって「同じ PR を何度も催促」
+ *     ではないため、レビュアーへの spam を防ぐ。
+ *   - cron が既に今日催促済みの PR は手動でも二重投稿しない (整合)。
+ *   - 連打しても冪等 (同日 2 回目以降は skip)。
+ *   - post 失敗で failed になった job は (cron 同様) 次回 pending に戻して再挑戦可。
+ *
+ * 投稿先 / 文面 / mapping 解決 / fail-soft は cron と完全に同一
+ * (nudgeOneAction を共有するためロジック二重化なし)。
+ *
+ * 戻り値:
+ *   - ok=false: action 不在 / 別 actionType / config 不正 (= 設定未完了)。
+ *   - ok=true:  nudged = この実行で実際に投稿した PR 件数
+ *               (全 PR が dedup 済み / stale でなければ 0)。
+ */
+export async function nudgeActionById(
+  db: D1Database,
+  env: Env,
+  eventId: string,
+  actionId: string,
+): Promise<
+  | { ok: false; error: "action_not_found" | "not_stale_pr_nudge" | "invalid_config" }
+  | { ok: true; nudged: number }
+> {
+  const d1 = drizzle(db);
+  const action = await d1
+    .select()
+    .from(eventActions)
+    .where(eq(eventActions.id, actionId))
+    .get();
+  if (!action || action.eventId !== eventId) {
+    return { ok: false, error: "action_not_found" };
+  }
+  if (action.actionType !== "stale_pr_nudge") {
+    return { ok: false, error: "not_stale_pr_nudge" };
+  }
+  const config = parseStalePrNudgeConfig(action.config);
+  if (!config) {
+    return { ok: false, error: "invalid_config" };
+  }
+
+  // dedupKey の日付要素は cron と揃える (getJstNow ベースの JST 日付)。
+  // これにより手動 / cron がどちらが先でも同日同一 PR を二重投稿しない。
+  const ymdCompact = getJstNow().ymd.replace(/-/g, "");
+  const nudged = await nudgeOneAction(db, env, action.id, config, ymdCompact);
+  return { ok: true, nudged };
+}
+
 async function nudgeOneAction(
   db: D1Database,
   env: Env,
