@@ -9,6 +9,7 @@ import {
 } from "./pr-review/PRReviewCard";
 import { PRReviewForm } from "./pr-review/PRReviewForm";
 import { useIsReadOnly } from "../hooks/usePublicMode";
+import { useToast } from "./ui/Toast";
 import { colors } from "../styles/tokens";
 
 // ADR-0008 / Sprint 12 PR2:
@@ -40,6 +41,16 @@ const styles = {
     padding: "2rem",
     textAlign: "center",
     color: colors.textSecondary,
+  } as CSSProperties,
+  // 停滞 PR リマインドの手動発火ボタン (ヘッダ独立配置)。
+  // 緑系 (success) で「再レビュー依頼」のオレンジと区別する。
+  nudgeBtn: {
+    background: colors.success,
+    color: colors.textInverse,
+    border: "none",
+    padding: "0.5rem 1rem",
+    borderRadius: "0.25rem",
+    cursor: "pointer",
   } as CSSProperties,
 };
 
@@ -78,7 +89,10 @@ export function PRReviewListTab({
   const [showClosed, setShowClosed] = useState(false);
   // stale-pr-nudge 送信先 action の解決結果。未取得時は none 扱い (ボタン非表示)。
   const [nudgeTarget, setNudgeTarget] = useState<StaleNudgeTarget>({ kind: "none" });
+  // ヘッダの手動リマインドボタンの送信中フラグ。
+  const [nudging, setNudging] = useState(false);
   const isReadOnly = useIsReadOnly();
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -127,31 +141,41 @@ export function PRReviewListTab({
     };
   }, [eventId, refreshKey]);
 
-  // 85さら地: 後で復元 ----------------------------------------------------
-  // デプロイ反映確認のため、PRレビュー一覧の本体描画を一時的に
-  // プレースホルダへ差し替える。マーカー DEPLOY-CHECK-20260619-HACKIT が
-  // 本番画面に表示されていれば、このビルドが正しく反映されている。
-  // 確認後、この early return ブロックを削除すれば元の一覧描画に戻る。
-  return (
-    <div style={{ ...styles.container, textAlign: "center", padding: "3rem 1rem" }}>
-      <h1 style={{ fontSize: "2rem", margin: 0 }}>🧪 さら地確認中</h1>
-      <p
-        style={{
-          marginTop: "1.5rem",
-          fontSize: "1.25rem",
-          fontWeight: "bold",
-          fontFamily: "monospace",
-          letterSpacing: "0.05em",
-        }}
-      >
-        DEPLOY-CHECK-20260619-HACKIT
-      </p>
-    </div>
-  );
-  // ここから下は 85さら地: 後で復元（元の PRレビュー一覧描画）---------------
-  // 確認フェーズが終わったら、下の block コメントを外し、上の early return
-  // プレースホルダを削除すれば元どおり PRレビュー一覧が描画される。
-  /*
+  // 停滞 PR リマインドの手動発火 (ヘッダボタン)。
+  // 従来はカード内 (PRReviewCard) にしか描画されず、PR レビューカードが 0 件だと
+  // ボタンが一切出なかった。ここではタブヘッダに独立配置し、カード件数に関わらず
+  // 押せるようにする。送信先は resolveStaleNudgeTarget で解決した単一 action。
+  // 個別 PRReview レコードには触れないため confirm は出さず即送信する。
+  const handleHeaderNudge = async () => {
+    if (nudgeTarget.kind !== "single") return;
+    setNudging(true);
+    try {
+      const res = await api.prReviews.sendStalePrNudge(
+        eventId,
+        nudgeTarget.actionId,
+      );
+      if (res.nudged > 0) {
+        toast.success(`停滞 PR ${res.nudged} 件にリマインドを送信しました`);
+      } else {
+        toast.info(
+          "催促対象の停滞 PR はありませんでした (送信済み / stale なし)",
+        );
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `リマインド送信に失敗しました: ${err.message}`
+          : "リマインド送信に失敗しました",
+      );
+    } finally {
+      setNudging(false);
+    }
+  };
+  // none → 非表示。single → 有効。ambiguous → 無効化して理由を tooltip 表示。
+  const showHeaderNudge = !isReadOnly && nudgeTarget.kind !== "none";
+  const headerNudgeAmbiguous = nudgeTarget.kind === "ambiguous";
+  const headerNudgeDisabled = nudging || headerNudgeAmbiguous;
+
   if (loading) return <div style={styles.container}>読み込み中...</div>;
   if (error)
     return <div style={{ ...styles.container, color: colors.danger }}>エラー: {error}</div>;
@@ -172,13 +196,33 @@ export function PRReviewListTab({
           />
           {" "}完了/クローズも表示
         </label>
+        {showHeaderNudge && (
+          <button
+            type="button"
+            onClick={handleHeaderNudge}
+            disabled={headerNudgeDisabled}
+            style={{
+              ...styles.nudgeBtn,
+              marginLeft: "auto",
+              opacity: headerNudgeDisabled ? 0.6 : 1,
+              cursor: headerNudgeDisabled ? "not-allowed" : "pointer",
+            }}
+            title={
+              headerNudgeAmbiguous
+                ? "停滞 PR リマインドの設定が複数あるため、どれに送るか特定できません。設定を 1 つに整理してください。"
+                : "停滞している GitHub の open PR をレビュアー名指しで共有チャンネルに即催促します"
+            }
+          >
+            {nudging ? "送信中..." : "📣 停滞PRリマインド送信"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowCreate(true)}
           disabled={isReadOnly}
           style={{
             ...styles.primaryBtn,
-            marginLeft: "auto",
+            marginLeft: showHeaderNudge ? undefined : "auto",
             opacity: isReadOnly ? 0.5 : 1,
             cursor: isReadOnly ? "not-allowed" : "pointer",
           }}
@@ -230,5 +274,4 @@ export function PRReviewListTab({
       )}
     </div>
   );
-  */
 }
