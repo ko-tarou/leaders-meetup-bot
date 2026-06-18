@@ -1,6 +1,7 @@
 import type { EventAction } from "../../types";
 import { MemberWelcomeConfigForm } from "../../components/MemberWelcomeConfigForm";
 import { PRReviewSettingsForm } from "../../components/pr-review/PRReviewSettingsForm";
+import { StalePrNudgeSettingsForm } from "../../components/pr-review/StalePrNudgeSettingsForm";
 import { AttendanceCheckForm } from "../../components/AttendanceCheckForm";
 import { RoleSettingsTab } from "../../components/role-management/RoleSettingsTab";
 import { MorningStandupSettingsForm } from "../../components/morning-standup/MorningStandupSettingsForm";
@@ -103,6 +104,14 @@ export function ActionSettingsContent({
     case "tutorial":
       return (
         <TutorialConfigForm
+          eventId={eventId}
+          action={action}
+          onSaved={onSaved}
+        />
+      );
+    case "stale_pr_nudge":
+      return (
+        <StalePrNudgeSettingsForm
           eventId={eventId}
           action={action}
           onSaved={onSaved}
