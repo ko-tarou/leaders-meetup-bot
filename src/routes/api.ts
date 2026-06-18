@@ -26,6 +26,7 @@ import { goalReminderRouter } from "./api/goal-reminder";
 import { tutorialRouter } from "./api/tutorial";
 import { stalePrNudgeRouter } from "./api/stale-pr-nudge";
 import { sponsorRouter } from "./api/sponsor";
+import { sheetsRouter } from "./api/sheets";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -144,5 +145,8 @@ api.route("/", stalePrNudgeRouter);
 // adminAuth bypass 済み。admin 一覧 (/orgs/:eventId/sponsor-applications) と
 // CRUD (/sponsor-applications/:id) は adminAuth で保護される。
 api.route("/", sponsorRouter);
+// 案6 Google Sheets 連携: spreadsheet read/write 管理 API (/sheets/read, /sheets/write)。
+// gmail_accounts の OAuth credential を再利用。adminAuth で保護される。
+api.route("/", sheetsRouter);
 
 export { api };
