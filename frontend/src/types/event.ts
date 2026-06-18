@@ -26,7 +26,9 @@ export type EventActionType =
   // 宗教イベント goal_reminder PR1 (UI は PR2)
   | "goal_reminder"
   // 宗教イベント tutorial PR1 (UI は PR2)
-  | "tutorial";
+  | "tutorial"
+  // HackIT スポンサー募集 (公開フォーム + 管理一覧)
+  | "sponsor_application";
 
 export type EventAction = {
   id: string;

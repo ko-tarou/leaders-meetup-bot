@@ -2,6 +2,7 @@ import type { EventAction, EventActionType } from "../../types";
 import { TasksTab } from "../../components/TasksTab";
 import { PRReviewListTab } from "../../components/PRReviewListTab";
 import { MemberApplicationListTab } from "../../components/MemberApplicationListTab";
+import { SponsorApplicationListTab } from "../../components/SponsorApplicationListTab";
 import { AttendanceCheckMain } from "../../components/AttendanceCheckForm";
 import { RoleMainTab } from "../../components/role-management/RoleMainTab";
 import { KejimeAdminTab } from "../../components/kejime/KejimeAdminTab";
@@ -35,6 +36,8 @@ export function ActionMainContent({
       );
     case "member_application":
       return <MemberApplicationListTab eventId={eventId} />;
+    case "sponsor_application":
+      return <SponsorApplicationListTab eventId={eventId} />;
     case "schedule_polling":
       // Sprint 005-tabs: schedule_polling は ActionDetailPage 直下の
       // SchedulePollingArea に置き換わったため、ここでは render しない

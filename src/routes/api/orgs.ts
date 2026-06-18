@@ -154,6 +154,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     "goal_reminder",
     // 宗教イベント PR1: tutorial。参加時オンボーディング投稿 (イベント駆動 + 手動送信)。UI は PR2。
     "tutorial",
+    // HackIT スポンサー募集。公開フォーム + メール確認 + 管理一覧。
+    "sponsor_application",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
