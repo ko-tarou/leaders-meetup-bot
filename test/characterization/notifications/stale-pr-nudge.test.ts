@@ -21,6 +21,7 @@ import { eq } from "drizzle-orm";
 
 import {
   processStalePrNudges,
+  nudgeActionById,
   parseStalePrNudgeConfig,
   isStale,
   isWithinFireWindow,
@@ -412,5 +413,112 @@ describe("processStalePrNudges: fail-soft", () => {
       .get();
     expect(job?.status).toBe("failed");
     expect(job?.lastError).toContain("slack down");
+  });
+});
+
+// ============ 手動発火 (nudgeActionById) ============
+
+describe("nudgeActionById: 手動発火", () => {
+  it("窓外でも (平日/時間窓を無視して) 即発火する", async () => {
+    freezeJst(MON_YMD, "15:30"); // nudgeTime=09:00 の窓外
+    const { posts } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    const action = await seedAction(cfg());
+
+    const res = await nudgeActionById(
+      testD1(),
+      env,
+      action.eventId,
+      action.id,
+    );
+    expect(res).toEqual({ ok: true, nudged: 1 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].channel).toBe(NUDGE_CHANNEL);
+  });
+
+  it("土曜 (週末) でも即発火する", async () => {
+    freezeJst(SAT_YMD, "15:30");
+    const { posts } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    const action = await seedAction(cfg());
+
+    const res = await nudgeActionById(
+      testD1(),
+      env,
+      action.eventId,
+      action.id,
+    );
+    expect(res).toEqual({ ok: true, nudged: 1 });
+    expect(posts).toHaveLength(1);
+  });
+
+  it("同日 dedup は維持: 2 回連打しても post は 1 回", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    const action = await seedAction(cfg());
+
+    const r1 = await nudgeActionById(testD1(), env, action.eventId, action.id);
+    const r2 = await nudgeActionById(testD1(), env, action.eventId, action.id);
+    expect(r1).toEqual({ ok: true, nudged: 1 });
+    expect(r2).toEqual({ ok: true, nudged: 0 });
+    expect(posts).toHaveLength(1);
+  });
+
+  it("cron が先に催促済みなら手動は二重投稿しない (dedup 整合)", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    const action = await seedAction(cfg());
+
+    // 平日窓内で cron が 1 回催促 (beforeEach で 09:00 に凍結済み)。
+    const cron = await processStalePrNudges(testD1(), env);
+    expect(cron).toEqual({ nudged: 1 });
+    // 同日に手動発火 → 既に dedup 済みで投稿は増えない。
+    const manual = await nudgeActionById(
+      testD1(),
+      env,
+      action.eventId,
+      action.id,
+    );
+    expect(manual).toEqual({ ok: true, nudged: 0 });
+    expect(posts).toHaveLength(1);
+  });
+
+  it("action 不在 → action_not_found", async () => {
+    setupSlackSpy();
+    const action = await seedAction(cfg());
+    const res = await nudgeActionById(testD1(), env, action.eventId, "nope");
+    expect(res).toEqual({ ok: false, error: "action_not_found" });
+  });
+
+  it("eventId 不一致 → action_not_found (別イベントの action を叩けない)", async () => {
+    setupSlackSpy();
+    const action = await seedAction(cfg());
+    const res = await nudgeActionById(testD1(), env, "wrong-event", action.id);
+    expect(res).toEqual({ ok: false, error: "action_not_found" });
+  });
+
+  it("別 actionType → not_stale_pr_nudge", async () => {
+    setupSlackSpy();
+    const ev = await makeEvent();
+    const action = await makeEventAction(ev.id, {
+      actionType: "goal_reminder",
+      config: cfg(),
+    });
+    const res = await nudgeActionById(testD1(), env, ev.id, action.id);
+    expect(res).toEqual({ ok: false, error: "not_stale_pr_nudge" });
+  });
+
+  it("config 不正 (設定未完了) → invalid_config", async () => {
+    setupSlackSpy();
+    const action = await seedAction(
+      JSON.stringify({ githubRepos: [] }), // 必須欠落 = parse null
+    );
+    const res = await nudgeActionById(
+      testD1(),
+      env,
+      action.eventId,
+      action.id,
+    );
+    expect(res).toEqual({ ok: false, error: "invalid_config" });
   });
 });

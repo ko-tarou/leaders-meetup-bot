@@ -58,3 +58,20 @@ npx wrangler secret put GITHUB_TOKEN
 3. `event_actions` に `stale_pr_nudge` 行を投入（上記の INSERT。`nudgeChannelId` を実チャンネル ID に、`githubRepos` を実 repo に置換）
 4. （任意）private repo / 多数 repo を監視するなら `npx wrangler secret put GITHUB_TOKEN`
 5. デプロイ: `npm run deploy`（= `build:frontend` + `wrangler deploy`）
+
+### 手動リマインド（自動 cron を待たず即発火）
+
+自動 cron（平日 `nudgeTime` 窓）を待たずに、講師 / 管理者が任意のタイミングで停滞 PR リマインドを即発火できる admin エンドポイントを用意している。cron と同じ取得 / stale 判定 / `@メンション` 解決 / 投稿 / 同日 dedup を共有し（`src/services/stale-pr-nudge.ts` の `nudgeActionById`）、平日判定と時間窓だけをスキップする。
+
+- メソッド / パス: `POST /api/orgs/:eventId/actions/:actionId/stale-pr-nudge/send`
+- 認証: 他の admin API と同じ `x-admin-token` ヘッダ（`ADMIN_TOKEN`）。`adminAuth` で保護。
+- レスポンス: `{ "ok": true, "nudged": <投稿した PR 件数> }`。全 PR が同日 dedup 済み / stale でなければ `nudged` は 0。
+- エラー: action 不在 / eventId 不一致 / 別 actionType は 404、`config` 不正（設定未完了）は 400。
+
+同日二重催促ガード（`scheduled_jobs.dedupKey` UNIQUE）は手動でも維持する。連打しても同一 PR を二重投稿せず、cron が既に今日催促済みの PR も手動で二重投稿しない（手動の意図は「cron を待たず今催促する」であってレビュアーへの spam ではないため）。「今日もう一度確実に催促したい」用途では現状そのまま再送できないので、必要なら別途オプション（dedup スキップフラグ）を追加する。
+
+呼び出し例（ローカル `wrangler dev` の場合。`EVENT_ID` / `ACTION_ID` / `ADMIN_TOKEN` は実値に置換）:
+
+```
+curl -X POST http://localhost:8787/api/orgs/EVENT_ID/actions/ACTION_ID/stale-pr-nudge/send -H "x-admin-token: ADMIN_TOKEN"
+```
