@@ -172,7 +172,7 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
     const addBtns = await screen.findAllByRole("button", { name: /\+ 追加/ });
     await user.click(addBtns[0]); // kejime (C0KEJI)
 
-    const minInput = screen.getByLabelText("記事の最小文字数");
+    const minInput = screen.getByLabelText("1pt あたりの文字数");
     await user.clear(minInput);
     await user.type(minInput, "600");
 
@@ -185,14 +185,52 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
     expect(putCall).toBeDefined();
     const body = JSON.parse(JSON.parse(putCall!.body!).config);
     expect(body.kejimeChannelId).toBe("C0KEJI");
+    // 後方互換: minArticleLength と charsPerPoint の両方が同値で乗る。
     expect(body.minArticleLength).toBe(600);
+    expect(body.charsPerPoint).toBe(600);
     expect(body.roleId).toBe("r1");
+    // 遅刻ガチャ確率の default が乗る。
+    expect(body.latePointWeights).toEqual({ p1: 70, p2: 25, p3: 5 });
+  });
+
+  it("遅刻ガチャ確率の合計が 100 でないと保存しない", async () => {
+    const user = userEvent.setup();
+    const { onSaved, calls } = renderForm(
+      makeAction({ kejimeChannelId: "C0KEJI", roleId: "r1" }),
+    );
+    const p1 = screen.getByLabelText("遅刻ガチャ確率 1pt");
+    await user.clear(p1);
+    await user.type(p1, "50"); // 50 + 25 + 5 = 80 != 100
+    expect(p1).toHaveAttribute("aria-invalid", "true");
+    await user.click(screen.getByRole("button", { name: /保存/ }));
+    expect(calls.filter((c) => c.method === "PUT").length).toBe(0);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("遅刻ガチャ確率の合計が 100 なら保存できる", async () => {
+    const user = userEvent.setup();
+    const { onSaved, calls } = renderForm(
+      makeAction({ kejimeChannelId: "C0KEJI", roleId: "r1" }),
+    );
+    const p1 = screen.getByLabelText("遅刻ガチャ確率 1pt");
+    const p2 = screen.getByLabelText("遅刻ガチャ確率 2pt");
+    const p3 = screen.getByLabelText("遅刻ガチャ確率 3pt");
+    await user.clear(p1); await user.type(p1, "60");
+    await user.clear(p2); await user.type(p2, "30");
+    await user.clear(p3); await user.type(p3, "10");
+    await user.click(screen.getByRole("button", { name: /保存/ }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const putCall = calls.find(
+      (c) => c.method === "PUT" && c.url.includes(`/orgs/${EVENT_ID}/actions/act-kejime`),
+    );
+    const body = JSON.parse(JSON.parse(putCall!.body!).config);
+    expect(body.latePointWeights).toEqual({ p1: 60, p2: 30, p3: 10 });
   });
 
   it("minArticleLength = 0 は弾く", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
-    const minInput = screen.getByLabelText("記事の最小文字数");
+    const minInput = screen.getByLabelText("1pt あたりの文字数");
     await user.clear(minInput);
     await user.type(minInput, "0");
     expect(minInput).toHaveAttribute("aria-invalid", "true");
@@ -204,7 +242,7 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
   it("minArticleLength = 負数 は弾く", async () => {
     const user = userEvent.setup();
     const { onSaved, calls } = renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
-    const minInput = screen.getByLabelText("記事の最小文字数");
+    const minInput = screen.getByLabelText("1pt あたりの文字数");
     await user.clear(minInput);
     await user.type(minInput, "-3");
     expect(minInput).toHaveAttribute("aria-invalid", "true");

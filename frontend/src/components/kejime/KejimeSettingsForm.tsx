@@ -20,12 +20,17 @@ type MessageTemplates = {
   rejectedDomain?: string;
   rejectedFetchError?: string;
 };
+type LatePointWeights = { p1: number; p2: number; p3: number };
 type Config = {
-  kejimeChannelId?: string; roleId?: string; minArticleLength?: number;
+  kejimeChannelId?: string; roleId?: string;
+  // charsPerPoint: ペナルティ記事の 1pt あたり必要文字数 (旧 minArticleLength)。
+  charsPerPoint?: number; minArticleLength?: number;
+  latePointWeights?: LatePointWeights;
   messageTemplates?: MessageTemplates;
 };
 
 const DEFAULT_MIN = 500;
+const DEFAULT_WEIGHTS: LatePointWeights = { p1: 70, p2: 25, p3: 5 };
 
 // PR15: 通知文面 textarea の placeholder ヒント。実 default は backend 側で適用。
 const TPL_DEFAULTS: Record<keyof MessageTemplates, string> = {
@@ -52,9 +57,15 @@ export function KejimeSettingsForm({
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [kejimeChannelId, setKejimeChannelId] = useState(initial.kejimeChannelId ?? "");
   const [kejimeChannelName, setKejimeChannelName] = useState<string>("");
-  const [minArticleLength, setMinArticleLength] = useState(
-    String(initial.minArticleLength ?? DEFAULT_MIN),
+  // charsPerPoint は明示キー優先、無ければ旧 minArticleLength を流用 (後方互換)。
+  const [charsPerPoint, setCharsPerPoint] = useState(
+    String(initial.charsPerPoint ?? initial.minArticleLength ?? DEFAULT_MIN),
   );
+  // 遅刻ガチャ確率 (%)。1pt/2pt/3pt。合計 100 を要求。
+  const initWeights = initial.latePointWeights ?? DEFAULT_WEIGHTS;
+  const [p1, setP1] = useState(String(initWeights.p1 ?? DEFAULT_WEIGHTS.p1));
+  const [p2, setP2] = useState(String(initWeights.p2 ?? DEFAULT_WEIGHTS.p2));
+  const [p3, setP3] = useState(String(initWeights.p3 ?? DEFAULT_WEIGHTS.p3));
   // PR15: 通知文面 4 種 (空欄なら backend で default 文言)。
   const initialTpls = initial.messageTemplates ?? {};
   const [tplApproved, setTplApproved] = useState(initialTpls.approved ?? "");
@@ -80,9 +91,17 @@ export function KejimeSettingsForm({
     return () => { cancelled = true; };
   }, []);
 
-  const minParsed = Number(minArticleLength);
+  const minParsed = Number(charsPerPoint);
   const minInvalid =
-    minArticleLength.trim() === "" || !Number.isInteger(minParsed) || minParsed < 1;
+    charsPerPoint.trim() === "" || !Number.isInteger(minParsed) || minParsed < 1;
+
+  // 遅刻ガチャ確率の検証: 各値 0 以上の整数かつ合計 100。
+  const w1 = Number(p1), w2 = Number(p2), w3 = Number(p3);
+  const weightsParseBad =
+    [p1, p2, p3].some((s) => s.trim() === "") ||
+    ![w1, w2, w3].every((n) => Number.isInteger(n) && n >= 0);
+  const weightsSum = w1 + w2 + w3;
+  const weightsInvalid = weightsParseBad || weightsSum !== 100;
 
   const handleSave = async () => {
     setError(null);
@@ -93,7 +112,15 @@ export function KejimeSettingsForm({
       return;
     }
     if (minInvalid) {
-      setError("記事の最小文字数は 1 以上の整数で入力してください");
+      setError("1pt あたりの文字数は 1 以上の整数で入力してください");
+      return;
+    }
+    if (weightsParseBad) {
+      setError("遅刻ガチャの確率は 0 以上の整数で入力してください");
+      return;
+    }
+    if (weightsSum !== 100) {
+      setError(`遅刻ガチャの確率は合計 100% にしてください (現在 ${weightsSum}%)`);
       return;
     }
     // PR15: messageTemplates は空文字を保持して保存する (空 = default を使う合図)。
@@ -104,7 +131,11 @@ export function KejimeSettingsForm({
       rejectedFetchError: tplRejectedFetchError,
     };
     const next: Config = {
-      ...initial, kejimeChannelId: cid, minArticleLength: minParsed, messageTemplates,
+      ...initial, kejimeChannelId: cid,
+      // charsPerPoint を正本に保存しつつ、後方互換のため minArticleLength も同値で残す。
+      charsPerPoint: minParsed, minArticleLength: minParsed,
+      latePointWeights: { p1: w1, p2: w2, p3: w3 },
+      messageTemplates,
     };
 
     setSaving(true);
@@ -163,18 +194,50 @@ export function KejimeSettingsForm({
         </div>
       </Field>
 
-      <Field label="記事の最小文字数">
+      <Field label="1pt あたりの文字数 (ペナルティ記事)">
         <input
-          type="number" min={1} step={1} value={minArticleLength}
-          onChange={(e) => setMinArticleLength(e.target.value)}
-          disabled={saving} aria-invalid={minInvalid} aria-label="記事の最小文字数"
+          type="number" min={1} step={1} value={charsPerPoint}
+          onChange={(e) => setCharsPerPoint(e.target.value)}
+          disabled={saving} aria-invalid={minInvalid} aria-label="1pt あたりの文字数"
           style={{
             ...s.input, width: "10rem",
             ...(minInvalid ? { borderColor: colors.danger } : {}),
           }}
         />
         <div style={s.hint}>
-          default は {DEFAULT_MIN}。これ未満の記事は自動却下されます。
+          default は {DEFAULT_MIN}。ペナルティ記事の必要文字数は「保有ポイント x この値」になります
+          (1pt={DEFAULT_MIN}字 / 2pt={DEFAULT_MIN * 2}字 / 3pt={DEFAULT_MIN * 3}字)。これ未満は自動却下。
+        </div>
+      </Field>
+
+      <Field label="遅刻ガチャ確率 (%)">
+        <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap" }}>
+          {([
+            ["1pt", p1, setP1] as const,
+            ["2pt", p2, setP2] as const,
+            ["3pt", p3, setP3] as const,
+          ]).map(([label, val, set]) => (
+            <label key={label} style={{ display: "flex", flexDirection: "column", fontSize: "0.85rem" }}>
+              {label}
+              <input
+                type="number" min={0} step={1} value={val}
+                onChange={(e) => set(e.target.value)}
+                disabled={saving} aria-invalid={weightsInvalid}
+                aria-label={`遅刻ガチャ確率 ${label}`}
+                style={{
+                  ...s.input, width: "6rem",
+                  ...(weightsInvalid ? { borderColor: colors.danger } : {}),
+                }}
+              />
+            </label>
+          ))}
+          <span style={{ fontSize: "0.85rem", color: weightsSum === 100 ? colors.text : colors.danger }}>
+            合計 {Number.isFinite(weightsSum) ? weightsSum : "?"}%
+          </span>
+        </div>
+        <div style={s.hint}>
+          遅刻時に 1〜3pt をサーバー側で抽選します。default は 1pt=70 / 2pt=25 / 3pt=5。
+          合計はちょうど 100% にしてください。
         </div>
       </Field>
 
