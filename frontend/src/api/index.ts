@@ -16,6 +16,7 @@ import { roster } from "./roster";
 import { slack } from "./slack";
 import { tasks } from "./tasks";
 import { applications } from "./applications";
+import { sponsor } from "./sponsor";
 import { workspaces } from "./workspaces";
 
 export {
@@ -33,6 +34,7 @@ export const api = {
   tasks,
   prReviews,
   applications,
+  sponsor,
   participation,
   interviewers,
   roles,

@@ -10,6 +10,7 @@ export * from "./task";
 export * from "./pr-review";
 export * from "./workspace";
 export * from "./application";
+export * from "./sponsor";
 export * from "./email";
 export * from "./slack-invite";
 export * from "./participation";
