@@ -5,7 +5,9 @@ import { events, eventActions } from "../db/schema";
 // ADR-0008: event.type ごとのデフォルトアクションマップ
 const DEFAULT_ACTIONS_BY_TYPE: Record<string, string[]> = {
   meetup: ["schedule_polling"],
-  hackathon: ["task_management"],
+  // hackathon: タスク管理 + 停滞 PR リマインド (新規 hackathon イベントは自動登録)。
+  // stale_pr_nudge は config 空でも作成可 (service が no-op で skip)。設定タブで repos/channel を埋める。
+  hackathon: ["task_management", "stale_pr_nudge"],
   project: [], // チーム開発系。デフォルトなし、kota が手動追加
 };
 
