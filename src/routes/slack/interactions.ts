@@ -10,6 +10,8 @@ import {
 import { handleMorningAttend } from "../../services/morning-standup";
 import { processQiitaArticleSubmission } from "../../services/kejime-article-flow";
 import { buildKejimeArticleModal } from "../../services/kejime-article-modal";
+import { drawPendingGacha } from "../../services/kejime-gacha-draw";
+import { postOrUpdateKejimeStatus } from "../../services/kejime-status-post";
 import {
   meetings,
   tasks,
@@ -46,7 +48,7 @@ import {
   sendGmailReply,
 } from "../../services/gmail-reply";
 import { renderTemplate } from "../../domain/email/template";
-import { utcToJstFormat } from "../../services/time-utils";
+import { getJstNow, utcToJstFormat } from "../../services/time-utils";
 
 export const interactionsRouter = new Hono<{
   Bindings: Env;
@@ -171,6 +173,56 @@ interactionsRouter.post("/interactions", async (c) => {
           }
         } catch (e) {
           console.error("Failed to open kejime article modal:", e);
+        }
+      })());
+      return c.json({ ok: true });
+    }
+
+    // 朝勉強会けじめ制度 (PR#315 改修): 遅刻ガチャ「本人が引く」ボタン。
+    // action_id = kejime_gacha_draw:<penaltyId>
+    // → サーバー側で 1〜3pt を抽選 (crypto・改ざん不可)、pending -> open へ
+    //   atomic 遷移 (二重抽選防止)。本人以外が押したら ephemeral で拒否。
+    //   結果は簡単な演出 (ドラムロール -> リビール) で本人に ephemeral 表示し、
+    //   確定後に当日ステータスを最新化する。
+    if (action.action_id?.startsWith("kejime_gacha_draw:")) {
+      const penaltyId = action.action_id.slice("kejime_gacha_draw:".length)
+        || (action.value as string | undefined) || "";
+      const userId = payload.user?.id as string | undefined;
+      const channelId = payload.channel?.id as string | undefined;
+      if (!penaltyId || !userId) return c.json({ ok: true });
+      c.executionCtx.waitUntil((async () => {
+        const client = getSlackClient(c);
+        try {
+          const result = await drawPendingGacha(c.env.DB, penaltyId, userId);
+          if (channelId) {
+            if (result.ok) {
+              // 演出: ドラムロール -> リビール (2 通の ephemeral)。
+              await client.postEphemeral(
+                channelId, userId, "🎲 ガチャを回しています... ドゥルルルル...",
+              ).catch(() => undefined);
+              await client.postEphemeral(
+                channelId, userId,
+                `🎉 *${"⭐".repeat(result.points)} ${result.points}pt!* ` +
+                  `(${result.date} の遅刻 / 記事 ${result.requiredChars}字)\n` +
+                  `現在 ${result.displayPoints}pt。記事を書いて消化しましょう。`,
+              ).catch(() => undefined);
+            } else {
+              const msg = result.reason === "forbidden"
+                ? "このガチャは本人だけが引けます。"
+                : result.reason === "already_drawn"
+                  ? "このガチャは既に抽選済みです。"
+                  : "ガチャ対象が見つかりませんでした。";
+              await client.postEphemeral(channelId, userId, msg).catch(() => undefined);
+            }
+          }
+          // 抽選でポイント / pending が変動したのでステータスを更新 (fail-soft)。
+          if (result.ok) {
+            await postOrUpdateKejimeStatus(
+              c.env.DB, client, result.trackerActionId, getJstNow().ymd,
+            ).catch(() => undefined);
+          }
+        } catch (e) {
+          console.error("Failed to draw kejime gacha:", e);
         }
       })());
       return c.json({ ok: true });

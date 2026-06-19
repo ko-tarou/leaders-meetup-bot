@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
   eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
-  kejimeStatusPosts, scheduledJobs,
+  kejimePenalties, kejimeStatusPosts, scheduledJobs,
 } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
@@ -35,6 +35,13 @@ type ArticleRow = {
   displayName: string;
   qiitaUrl: string;
 };
+// 未抽選 (pending) の遅刻イベント。本人が「ガチャを引く」ボタンで抽選する。
+type PendingGacha = {
+  penaltyId: string;
+  slackUserId: string;
+  displayName: string;
+  date: string;
+};
 
 /** pure: 棒グラフ ████░ を組み立てる (5pt キャップ)。 */
 export function pointsBar(points: number, cap: number = POINTS_DISPLAY_CAP): string {
@@ -61,6 +68,7 @@ export function buildStatusBlocks(
   members: MemberRow[], articles: ArticleRow[], dateLabel: string,
   trackerActionId?: string,
   todayLateSlackUserIds?: string[],
+  pendingGachas?: PendingGacha[],
 ): Block[] {
   const lines: string[] = [`:coffee: *朝活けじめステータス* ─ ${dateLabel}`];
 
@@ -110,6 +118,32 @@ export function buildStatusBlocks(
   }
 
   const blocks: Block[] = [mrkdwnSection(lines.join("\n"))];
+
+  // 🎲 未抽選ガチャ: 本人が「ガチャを引く」を押すまでポイント未確定。
+  // penalty ごとに 1 行 (誰の・いつの遅刻か) + ガチャボタンを並べる。
+  // Slack の actions block は最大 5 要素なので、6 件目以降は別 block に分ける。
+  const pending = pendingGachas ?? [];
+  if (pending.length > 0) {
+    blocks.push(mrkdwnSection(
+      [":game_die: *遅刻ガチャ (未抽選)* — 本人がボタンを押して 1〜3pt を引いてください"]
+        .concat(pending.map(
+          (g) => `  • <@${g.slackUserId}> (${g.date}) のガチャ`,
+        )).join("\n"),
+    ));
+    for (let i = 0; i < pending.length; i += 5) {
+      blocks.push({
+        type: "actions",
+        elements: pending.slice(i, i + 5).map((g) => ({
+          type: "button",
+          text: { type: "plain_text", text: `🎲 ${g.displayName} のガチャを引く` },
+          style: "primary",
+          action_id: `kejime_gacha_draw:${g.penaltyId}`,
+          value: g.penaltyId,
+        })),
+      });
+    }
+  }
+
   if (trackerActionId) {
     blocks.push({
       type: "actions",
@@ -276,9 +310,27 @@ async function buildLatestStatusBlocks(
     new Set(lateRows.map((r) => r.slackUserId)),
   );
 
+  // 🎲 未抽選 (pending) の遅刻イベント = 本人がガチャを引く対象。
+  // 当日分に限らず未抽選の penalty を全部出す (引き忘れを溜めない)。
+  const pendingRows = members.length === 0 ? [] : await d1.select({
+    penaltyId: kejimePenalties.id,
+    slackUserId: kejimePenalties.slackUserId,
+    date: kejimePenalties.date,
+  }).from(kejimePenalties).where(and(
+    eq(kejimePenalties.eventActionId, actionId),
+    eq(kejimePenalties.status, "pending"),
+  )).all();
+  const nameMapForGacha = new Map(members.map((m) => [m.slackUserId, m.displayName]));
+  const pendingGachas = pendingRows.map((p) => ({
+    penaltyId: p.penaltyId,
+    slackUserId: p.slackUserId,
+    displayName: nameMapForGacha.get(p.slackUserId) ?? p.slackUserId,
+    date: p.date,
+  }));
+
   const blocks = buildStatusBlocks(
     members, resolvedArticleRows, formatDateLabel(ymd), actionId,
-    todayLateSlackUserIds,
+    todayLateSlackUserIds, pendingGachas,
   );
   const text = `朝活けじめステータス (${ymd})`;
   return { blocks, text };
