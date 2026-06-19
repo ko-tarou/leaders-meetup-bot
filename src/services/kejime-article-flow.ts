@@ -3,9 +3,9 @@
 // URL 処理コアを processQiitaArticleSubmission として抽出した
 // (handleKejimeChannelMessage は channel/text パース後にこのコアを呼ぶ薄い wrapper)。
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
-  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
+  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, kejimePenalties,
 } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import {
@@ -234,6 +234,24 @@ type SubmissionInnerArgs = {
   db?: D1Database;
 };
 
+/**
+ * イベント単位ペナルティ: member の「最も古い open ペナルティ」を 1 件返す。
+ * これがこの記事 1 本の対象 (= 別イベントへ合算できない)。0 件なら null。
+ */
+async function findOldestOpenPenalty(
+  d1: D1, actionId: string, memberId: string,
+): Promise<{ id: string; points: number; requiredChars: number; theme: string } | null> {
+  const p = await d1.select({
+    id: kejimePenalties.id, points: kejimePenalties.points,
+    requiredChars: kejimePenalties.requiredChars, theme: kejimePenalties.theme,
+  }).from(kejimePenalties).where(and(
+    eq(kejimePenalties.eventActionId, actionId),
+    eq(kejimePenalties.memberId, memberId),
+    eq(kejimePenalties.status, "open"),
+  )).orderBy(asc(kejimePenalties.date), asc(kejimePenalties.createdAt)).get();
+  return p ?? null;
+}
+
 async function processQiitaSubmissionInner(
   d1: D1, slack: Poster, fetchImpl: typeof globalThis.fetch,
   args: SubmissionInnerArgs,
@@ -243,11 +261,17 @@ async function processQiitaSubmissionInner(
   const member = await ensureMember(d1, tr.actionId, args.slackUserId);
   const memberId = member.id;
 
-  // ペナルティは「保有ポイント数 x charsPerPoint」字の記事 1 本。
-  // 0pt (ペナルティ無し) でも最低 1pt 相当 (= charsPerPoint 字) を要求して
-  // 旧来の「記事 1 本 = 500 字」のゲートを維持する。
-  const pointsToClear = Math.max(member.currentPoints, 1);
-  const requiredLen = requiredArticleLength(pointsToClear, tr.charsPerPoint);
+  // イベント単位ペナルティ: この記事 1 本の対象 = 最も古い open ペナルティ。
+  // penalty があればその required_chars / points をその回の必要量とする
+  // (別イベントへ合算不可)。penalty が無い (旧データ / penalty 立つ前) は
+  // 従来の「保有ポイント x charsPerPoint」スケールに fallback。
+  const penalty = await findOldestOpenPenalty(d1, tr.actionId, memberId);
+  const pointsToClear = penalty
+    ? Math.max(penalty.points, 1)
+    : Math.max(member.currentPoints, 1);
+  const requiredLen = penalty
+    ? penalty.requiredChars
+    : requiredArticleLength(pointsToClear, tr.charsPerPoint);
 
   let status: string, length: number | null = null, notice: string;
   const parsed = parseQiitaUrl(args.url);
@@ -292,6 +316,10 @@ async function processQiitaSubmissionInner(
     // pending のときだけ「この記事で消す pt 数」を固定保存する。
     // 承認時にこの値だけ減算する (申請後にポイントが動いても矛盾しない)。
     pointsToClear: status === "pending" ? pointsToClear : null,
+    // この記事が対象とする遅刻イベント (penalty)。承認でこの penalty を cleared にする。
+    penaltyId: status === "pending" && penalty ? penalty.id : null,
+    // テーマ準拠は admin 手動承認が基本線なので、申請時点は未承認 (null)。
+    themeApproved: null,
     threadTs: args.threadTs ?? null, noticeTs, channelId,
     createdAt: new Date().toISOString(),
   });
@@ -337,6 +365,19 @@ export async function handleKejimeReactionAdded(
     .where(eq(kejimeMembers.id, req.memberId)).get();
   if (!author) return;
 
+  // イベント単位ペナルティ: この記事が penalty を対象にしている場合、テーマ準拠は
+  // admin の手動承認が基本線。文字数 (リアクション = 勉強会チームの量的承認) を満たしても
+  // theme_approved=1 になるまでは penalty を消さない。リアクションだけでクリアできるのは
+  // (a) penalty 紐付けが無い旧来フロー、または (b) 既に admin がテーマ承認済みの場合のみ。
+  if (req.penaltyId && req.themeApproved !== 1) {
+    await slack.postMessage(
+      event.item.channel,
+      `<@${author.slackUserId}> 文字数は確認できました。テーマ準拠は管理者の承認待ちです` +
+        ` (管理画面で「テーマに沿うか」を承認するとポイントが消えます)。`,
+    );
+    return;
+  }
+
   // この記事 1 本で消すポイント数 = 申請時に固定した pointsToClear。
   // 旧データ (points_to_clear が null) は従来どおり 1pt 消費にフォールバック。
   // 現在の保有ポイントを超えて減算しないようクランプする (0 未満防止)。
@@ -358,6 +399,15 @@ export async function handleKejimeReactionAdded(
     ramenCount: sql`${kejimeMembers.ramenCount} + ${ramenBumped}`,
     updatedAt: now,
   }).where(eq(kejimeMembers.id, author.id));
+  // 対象 penalty を cleared にする (まだ open のときのみ。二重クリア防止)。
+  if (req.penaltyId) {
+    await d1.update(kejimePenalties).set({
+      status: "cleared", clearedByRequestId: req.id, clearedAt: now,
+    }).where(and(
+      eq(kejimePenalties.id, req.penaltyId),
+      eq(kejimePenalties.status, "open"),
+    ));
+  }
   // PR15: approved 通知も config テンプレ対応。template 内の <@..> mention は
   // template 側で書く前提なので、{user} には slack user id のみを渡す
   // (default template が "<@{user}>" を保持して既存挙動 (-1pt 表記) を維持)。
