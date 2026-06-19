@@ -1,19 +1,32 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
 import {
-  eventActions, kejimeEvents, kejimeMembers, morningAttendance,
+  eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   scheduledJobs, slackRoleMembers,
 } from "../db/schema";
 import { getJstNow } from "./time-utils";
 import { getUserName } from "./slack-names";
 import type { SlackClient } from "./slack-api";
 import {
-  DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime, toHHMM,
+  DEFAULT_CLOSE_TIME, isWithinFireWindow, normalizeFireTime,
+  resolveThemeForDate, themeKeyForDate, toHHMM,
 } from "./morning-standup";
 import { postOrUpdateKejimeStatus } from "./kejime-status-post";
 import {
   parseLatePointWeights, rollLatePoints, type LatePointWeights,
 } from "./kejime-late-gacha";
+import { penaltyRequiredChars } from "./kejime-penalty";
+
+// tracker.config.charsPerPoint (旧 minArticleLength) を取り出す。penalty の
+// required_chars を凍結するのに使う。未設定 / 不正は DEFAULT(500)。
+function parseCharsPerPoint(raw: string | null | undefined): number {
+  if (!raw) return 500;
+  try {
+    const o = JSON.parse(raw) as { charsPerPoint?: unknown; minArticleLength?: unknown };
+    const v = (typeof o.charsPerPoint === "number" ? o.charsPerPoint : o.minArticleLength);
+    return typeof v === "number" && Number.isFinite(v) && v >= 1 ? Math.floor(v) : 500;
+  } catch { return 500; }
+}
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -112,6 +125,14 @@ async function judgeOne(
   if (!roleId) { console.warn(`kejime_late_judge: bad config (action=${tracker.id})`); return 0; }
   // 遅刻ガチャ確率は tracker 単位で一度だけ解決し、当日の全 late 認定で共有する。
   const weights = parseWeights(tracker.config);
+  // penalty の required_chars 凍結に使う 1pt あたり文字数。
+  const charsPerPoint = parseCharsPerPoint(tracker.config);
+  // penalty に凍結する「その日のテーマ」を morning_standup config から解決し snapshot。
+  const morning = await d1.select({ config: eventActions.config }).from(eventActions).where(and(
+    eq(eventActions.id, morningActionId),
+  )).get();
+  const theme = resolveThemeForDate(morning?.config, ymd);
+  const themeKey = themeKeyForDate(ymd);
 
   // PR13: dedupKey に発火時刻 (HHMM) を含める。設定変更 (closeTime 変更) で
   // 別 dedup として扱われ、テスト/設定変更後の再発火が可能になる。
@@ -143,6 +164,7 @@ async function judgeOne(
     try {
       await recordLate(
         d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, weights, slackClient,
+        { theme, themeKey, charsPerPoint },
       );
       lateCount++;
     } catch (e) { console.error(`recordLate failed (user=${rm.slackUserId}):`, e); }
@@ -160,6 +182,7 @@ async function judgeOne(
 async function recordLate(
   d1: D1, db: D1Database, trackerActionId: string, morningActionId: string,
   slackUserId: string, ymd: string, weights: LatePointWeights, slackClient?: SlackClient,
+  penaltyCtx?: { theme: string; themeKey: string | null; charsPerPoint: number },
 ): Promise<void> {
   const now = new Date().toISOString();
   try {
@@ -193,8 +216,9 @@ async function recordLate(
   // 遅刻ガチャ: サーバー側で 1〜3pt を抽選 (クライアント改ざん不可)。
   const drawn = rollLatePoints(weights);
   const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, drawn);
+  const lateEventId = crypto.randomUUID();
   await d1.insert(kejimeEvents).values({
-    id: crypto.randomUUID(), memberId: member.id, type: "late",
+    id: lateEventId, memberId: member.id, type: "late",
     pointsDelta: drawn, ramenDelta: ramenBumped,
     note: `auto: ${ymd} (gacha ${drawn}pt)`, occurredAt: now,
   });
@@ -203,4 +227,22 @@ async function recordLate(
     ramenCount: sql`${kejimeMembers.ramenCount} + ${ramenBumped}`,
     updatedAt: now,
   }).where(eq(kejimeMembers.id, member.id));
+
+  // 遅刻イベント単位のペナルティ台帳を 1 行記録する (= 必要記事 1 本)。
+  // theme は当日テーマの snapshot、required_chars は drawn x charsPerPoint で凍結。
+  // (action, slackUserId, date) UNIQUE なので、同日重複認定でも 1 件に収まる (冪等)。
+  if (penaltyCtx) {
+    try {
+      await d1.insert(kejimePenalties).values({
+        id: crypto.randomUUID(), eventActionId: trackerActionId, memberId: member.id,
+        slackUserId, date: ymd, theme: penaltyCtx.theme, themeKey: penaltyCtx.themeKey,
+        points: drawn, requiredChars: penaltyRequiredChars(drawn, penaltyCtx.charsPerPoint),
+        status: "open", lateEventId, createdAt: now,
+      });
+    } catch (e) {
+      // UNIQUE 衝突 (= 同日に既に penalty あり) は冪等扱い。それ以外は warn して握る
+      // (penalty 記録失敗で late 認定本体は巻き戻さない: fail-soft)。
+      if (!isUnique(e)) console.warn(`kejime penalty insert failed (user=${slackUserId}):`, e);
+    }
+  }
 }
