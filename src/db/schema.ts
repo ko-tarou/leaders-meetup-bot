@@ -973,9 +973,11 @@ export const kejimePenalties = sqliteTable(
     theme: text("theme").notNull().default(""),
     themeKey: text("theme_key"),
     // ガチャ付与 pt (1-3)。required_chars = points x charsPerPoint で凍結。
+    // status='pending' (未抽選) の間は placeholder (points=0 / required_chars=0)。
     points: integer("points").notNull().default(1),
-    requiredChars: integer("required_chars").notNull().default(500),
-    // 'open' = 未消化、'cleared' = 記事承認で消化済み。
+    requiredChars: integer("required_chars").notNull().default(1000),
+    // 'pending' = 未抽選 (本人がガチャを引く前)、'open' = 抽選済み未消化、
+    // 'cleared' = 記事承認で消化済み。
     status: text("status").notNull().default("open"),
     clearedByRequestId: text("cleared_by_request_id"),
     clearedAt: text("cleared_at"),
