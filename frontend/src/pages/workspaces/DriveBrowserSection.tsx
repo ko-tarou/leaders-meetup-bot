@@ -31,6 +31,9 @@ function errorMessage(e: unknown): string {
       if (body.error === "scope_missing") {
         return "Drive スコープが未許可です。上の「Gmail 連携」の「+ Gmail を連携」から 1 回 再同意してください。";
       }
+      if (body.error === "api_not_enabled") {
+        return "Google Drive API が GCP プロジェクトで有効化されていません。OAuth クライアントのプロジェクトで Drive API を有効化してください (再同意では直りません)。";
+      }
       if (body.error === "no_connected_account") {
         return "Google アカウントが未連携です。上の「Gmail 連携」から連携してください。";
       }
