@@ -27,6 +27,7 @@ import { tutorialRouter } from "./api/tutorial";
 import { stalePrNudgeRouter } from "./api/stale-pr-nudge";
 import { sponsorRouter } from "./api/sponsor";
 import { sheetsRouter } from "./api/sheets";
+import { driveRouter } from "./api/drive";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -148,5 +149,9 @@ api.route("/", sponsorRouter);
 // 案6 Google Sheets 連携: spreadsheet read/write 管理 API (/sheets/read, /sheets/write)。
 // gmail_accounts の OAuth credential を再利用。adminAuth で保護される。
 api.route("/", sheetsRouter);
+// 案7 Google Drive 閲覧: Drive read-only 管理 API (/drive/list, /drive/file/:id,
+// /drive/file/:id/content)。gmail_accounts の OAuth credential を再利用。
+// adminAuth で保護される。
+api.route("/", driveRouter);
 
 export { api };

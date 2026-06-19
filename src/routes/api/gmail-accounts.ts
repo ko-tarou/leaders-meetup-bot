@@ -32,6 +32,8 @@ export const gmailAccountsRouter = new Hono<{ Bindings: Env }>();
 // Google Calendar event + Meet link を自動生成するため必要。
 // 案6 (sheets): spreadsheets を追加。打診管理シート等を read/write するため必要
 //   (services/sheets.ts + routes/api/sheets.ts)。
+// 案7 (drive): drive.readonly を追加。Drive の中身をアプリ上で閲覧するため必要
+//   (services/drive.ts + routes/api/drive.ts)。read-only なので drive (full) は使わない。
 // 既存連携アカウントは scope 不足なので、kota が一度 /api/google-oauth/install から
 // 再同意する必要がある (新スコープ追加のたびに 1 回 再同意が要る)。
 const GMAIL_SCOPE = [
@@ -40,6 +42,7 @@ const GMAIL_SCOPE = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.readonly",
 ].join(" ");
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 分
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
