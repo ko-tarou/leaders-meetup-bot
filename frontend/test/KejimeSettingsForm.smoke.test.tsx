@@ -114,9 +114,9 @@ describe("KejimeSettingsForm smoke (003 PR9)", () => {
     expect(screen.getByDisplayValue("800")).toBeInTheDocument();
   });
 
-  it("minArticleLength 未設定なら default 500", () => {
+  it("charsPerPoint 未設定なら default 1000", () => {
     renderForm(makeAction({ kejimeChannelId: "C0KEJI" }));
-    expect(screen.getByDisplayValue("500")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("1000")).toBeInTheDocument();
   });
 
   it("ロール名表示: name のみ (PR11: ID は出さない)", async () => {

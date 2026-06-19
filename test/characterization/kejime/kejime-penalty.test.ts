@@ -50,8 +50,8 @@ describe("summarizeOpenPenalties", () => {
 describe("penaltyRequiredChars", () => {
   it("1pt x 500 = 500", () => expect(penaltyRequiredChars(1, 500)).toBe(500));
   it("3pt x 500 = 1500", () => expect(penaltyRequiredChars(3, 500)).toBe(1500));
-  it("charsPerPoint<=0 は DEFAULT(500)", () =>
-    expect(penaltyRequiredChars(2, 0)).toBe(1000));
+  it("charsPerPoint<=0 は DEFAULT(1000) → 2pt x 1000 = 2000", () =>
+    expect(penaltyRequiredChars(2, 0)).toBe(2000));
 });
 
 describe("evaluateArticleForPenalty", () => {

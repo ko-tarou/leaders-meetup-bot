@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { processLateJudgment } from "../../../src/services/kejime-late-judge";
+import { drawPendingGacha } from "../../../src/services/kejime-gacha-draw";
 import {
   handleKejimeChannelMessage,
   handleKejimeReactionAdded,
@@ -63,6 +64,16 @@ async function setupTrio(themes?: Record<string, string>) {
   return { ev, morning, tracker, role };
 }
 
+// 「本人が引く」方式: late 認定後の pending penalty を本人 (U1) のガチャ抽選で
+// 全部 open に確定させるヘルパ。出目は呼び出し側の forceGachaR で固定する。
+async function drawAllPendingForU1(actionId: string): Promise<void> {
+  const pends = await testDb().select().from(kejimePenalties).where(and(
+    eq(kejimePenalties.eventActionId, actionId),
+    eq(kejimePenalties.status, "pending"),
+  )).all();
+  for (const p of pends) await drawPendingGacha(testD1(), p.id, p.slackUserId);
+}
+
 beforeEach(async () => {
   vi.useFakeTimers();
   forceGachaR(0.1); // default: 1pt
@@ -84,6 +95,8 @@ describe("late 認定 → penalty 行の作成とテーマ snapshot", () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
+    // 「本人が引く」: 認定直後は pending。本人がガチャ(1pt)を引いて確定。
+    await drawAllPendingForU1(tracker.id);
     const pens = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.eventActionId, tracker.id)).all();
     expect(pens).toHaveLength(1);
@@ -104,11 +117,12 @@ describe("late 認定 → penalty 行の作成とテーマ snapshot", () => {
     expect(pen?.themeKey).toBe("mon");
   });
 
-  it("3pt 一括 late → penalty 1 件 (1500字)", async () => {
+  it("3pt 一括 late → 本人が 3pt を引くと penalty 1 件 (1500字)", async () => {
     forceGachaR(0.99); // 3pt
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
+    await drawAllPendingForU1(tracker.id);
     const pen = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
     expect(pen?.points).toBe(3);
@@ -121,6 +135,8 @@ describe("late 認定 → penalty 行の作成とテーマ snapshot", () => {
     await processLateJudgment(testD1());
     freezeJst(TUE, "08:00");
     await processLateJudgment(testD1());
+    // 両日分のガチャを本人が引く (各 1pt)。
+    await drawAllPendingForU1(tracker.id);
     const pens = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.eventActionId, tracker.id)).all();
     expect(pens).toHaveLength(2);
@@ -135,6 +151,7 @@ describe("記事提出 → 最も古い open penalty を対象", () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
+    await drawAllPendingForU1(tracker.id); // 本人が 3pt を引いて open 化。
     const pen = await testDb().select().from(kejimePenalties).get();
 
     // 1499字 → 却下 (3pt=1500字 必要)。
@@ -164,6 +181,7 @@ describe("リアクション承認: テーマ手動承認ゲート", () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
+    await drawAllPendingForU1(tracker.id); // 本人が 1pt を引いて open 化 (500字)。
 
     // 500字記事を pending 申請。
     const slack = new MockSlackClient();
@@ -200,6 +218,7 @@ describe("リアクション承認: テーマ手動承認ゲート", () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
+    await drawAllPendingForU1(tracker.id); // 本人が 1pt を引いて open 化 (500字)。
     const slack = new MockSlackClient();
     slack.setResponse("postMessage", { ok: true, ts: "notice-2" });
     freezeJst(MON, "12:00");

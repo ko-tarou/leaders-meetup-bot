@@ -76,6 +76,6 @@ describe("requiredArticleLength", () => {
   it("3pt x 500 = 1500", () => expect(requiredArticleLength(3, 500)).toBe(1500));
   it("charsPerPoint を変えれば追従 (2pt x 300 = 600)", () =>
     expect(requiredArticleLength(2, 300)).toBe(600));
-  it("charsPerPoint<=0 は DEFAULT(500) に丸める", () =>
-    expect(requiredArticleLength(1, 0)).toBe(500));
+  it("charsPerPoint<=0 は DEFAULT(1000) に丸める", () =>
+    expect(requiredArticleLength(1, 0)).toBe(1000));
 });
