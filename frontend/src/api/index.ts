@@ -7,6 +7,7 @@
 import { events } from "./events";
 import { feedback, appSettings } from "./feedback";
 import { gmailAccounts } from "./gmail";
+import { drive } from "./drive";
 import { interviewers } from "./interviewers";
 import { meetings } from "./meetings";
 import { participation } from "./participation";
@@ -42,6 +43,7 @@ export const api = {
   publicTokens,
   workspaces,
   gmailAccounts,
+  drive,
   appSettings,
   feedback,
 };
