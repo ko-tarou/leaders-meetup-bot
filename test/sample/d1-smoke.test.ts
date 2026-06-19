@@ -21,11 +21,11 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は sponsor_applications テーブルを追加した
-    // 0064_create_sponsor_applications。
+    // 末尾は個人スポンサー化で affiliation/message 列を追加した
+    // 0065_sponsor_individual_fields。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0064_create_sponsor_applications");
+    expect(names[names.length - 1]).toBe("0065_sponsor_individual_fields");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);

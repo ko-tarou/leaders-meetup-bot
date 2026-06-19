@@ -84,11 +84,22 @@ beforeEach(() => {
   slackInstances.length = 0;
 });
 
+// 個人スポンサー (0065) の新フォーム body。お名前(name) / 所属(affiliation) /
+// 応援メッセージ(message) を主項目に。
 const validBody = {
-  companyName: "テスト株式会社",
-  contactName: "担当 太郎",
+  name: "山田 太郎",
+  affiliation: "○○大学",
   email: "sponsor@example.com",
   amount: 50000,
+  message: "応援しています！",
+};
+
+// 後方互換: 旧フォーム (企業前提) の body も BE は受け付ける。
+const legacyBody = {
+  companyName: "テスト株式会社",
+  contactName: "担当 太郎",
+  email: "legacy@example.com",
+  amount: 30000,
   period: "単発",
   purpose: "学生支援",
 };
@@ -109,9 +120,36 @@ describe("POST /sponsor/:eventId", () => {
       .where(eq(sponsorApplications.id, json.id))
       .get();
     expect(row?.status).toBe("unconfirmed");
-    expect(row?.companyName).toBe("テスト株式会社");
+    // 個人化 0065: name は companyName 列に格納され、contactName も同値になる。
+    expect(row?.companyName).toBe("山田 太郎");
+    expect(row?.contactName).toBe("山田 太郎");
+    expect(row?.affiliation).toBe("○○大学");
+    expect(row?.message).toBe("応援しています！");
     expect(row?.amount).toBe(50000);
     expect(row?.confirmToken).toBeTruthy();
+  });
+
+  it("旧フォーム (企業前提) の body も後方互換で受け付ける", async () => {
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, { actionType: "sponsor_application" });
+
+    const res = await app().request(
+      jsonReq(`/sponsor/${ev.id}`, "POST", legacyBody),
+      {},
+      env,
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(sponsorApplications)
+      .where(eq(sponsorApplications.id, json.id))
+      .get();
+    // companyName をお名前として保持し、旧 period/purpose も残る。
+    expect(row?.companyName).toBe("テスト株式会社");
+    expect(row?.contactName).toBe("担当 太郎");
+    expect(row?.period).toBe("単発");
+    expect(row?.purpose).toBe("学生支援");
   });
 
   it("必須欠落 / 不正金額 / 不正 email は 400", async () => {
@@ -120,7 +158,7 @@ describe("POST /sponsor/:eventId", () => {
     const a = app();
 
     const noName = await a.request(
-      jsonReq(`/sponsor/${ev.id}`, "POST", { ...validBody, companyName: "" }),
+      jsonReq(`/sponsor/${ev.id}`, "POST", { ...validBody, name: "" }),
       {},
       env,
     );
@@ -181,7 +219,7 @@ describe("POST /sponsor/:eventId", () => {
           id: "tpl-confirm",
           name: "受付確認",
           subject: "ご申込ありがとうございます",
-          body: "{contactName} 様\n金額: {amount} 円\n確認: {confirmUrl}",
+          body: "{name} 様\n所属: {affiliation}\n金額: {amount} 円\n確認: {confirmUrl}",
         },
       ],
     });
@@ -196,6 +234,9 @@ describe("POST /sponsor/:eventId", () => {
     // 確認メール 1 件 (confirmUrl が body に埋まる)
     expect(sentEmails.length).toBe(1);
     expect(sentEmails[0].to).toBe("sponsor@example.com");
+    // 個人化 0065: {name} {affiliation} placeholder が埋まる。
+    expect(sentEmails[0].body).toContain("山田 太郎 様");
+    expect(sentEmails[0].body).toContain("所属: ○○大学");
     // confirm リンクは /api 配下 (SPA fallback に吸われないため必須)。
     expect(sentEmails[0].body).toContain("/api/sponsor/");
     expect(sentEmails[0].body).toContain("/confirm?t=");
