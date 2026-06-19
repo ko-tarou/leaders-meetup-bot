@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { EventAction, PRReview } from "../types";
 import { api } from "../api";
+import { APIError } from "../api/client";
 import {
   PRReviewCard,
   type PRReviewWithLgtm,
@@ -42,6 +43,16 @@ const styles = {
     textAlign: "center",
     color: colors.textSecondary,
   } as CSSProperties,
+  // 設定未完了時に header 直下へ出す誘導バナー (トーストは消えるため恒久表示)。
+  notice: {
+    background: colors.warningSubtle,
+    border: `1px solid ${colors.warning}`,
+    borderRadius: "0.25rem",
+    padding: "0.75rem 1rem",
+    marginBottom: "1rem",
+    fontSize: "0.875rem",
+    color: colors.text,
+  } as CSSProperties,
   // 停滞 PR リマインドの手動発火ボタン (ヘッダ独立配置)。
   // 緑系 (success) で「再レビュー依頼」のオレンジと区別する。
   nudgeBtn: {
@@ -72,6 +83,26 @@ function resolveStaleNudgeTarget(actions: EventAction[]): StaleNudgeTarget {
   return { kind: "ambiguous", count: candidates.length };
 }
 
+// 手動リマインド送信が「設定未完了 (監視 repo / 催促チャンネル未設定)」で
+// 弾かれたかを判定する。BE は HTTP400 + body
+// { error: "invalid_config", reason: "config_incomplete" } を返す
+// (src/routes/api/stale-pr-nudge.ts)。body が JSON でない / 古い BE でも、
+// status 400 かつ "invalid_config" を含めば設定未完了とみなす (フォールバック)。
+function isStaleNudgeConfigIncomplete(err: unknown): boolean {
+  if (!(err instanceof APIError) || err.status !== 400) return false;
+  try {
+    const body = JSON.parse(err.body) as {
+      error?: string;
+      reason?: string;
+    };
+    return (
+      body.reason === "config_incomplete" || body.error === "invalid_config"
+    );
+  } catch {
+    return err.body.includes("invalid_config");
+  }
+}
+
 export function PRReviewListTab({
   eventId,
   lgtmThreshold,
@@ -91,6 +122,9 @@ export function PRReviewListTab({
   const [nudgeTarget, setNudgeTarget] = useState<StaleNudgeTarget>({ kind: "none" });
   // ヘッダの手動リマインドボタンの送信中フラグ。
   const [nudging, setNudging] = useState(false);
+  // 設定未完了 (監視 repo / 催促チャンネル未設定) 時に、トーストだけでなく
+  // ボタン下にインライン誘導を残すための案内文。null のときは非表示。
+  const [nudgeNotice, setNudgeNotice] = useState<string | null>(null);
   const isReadOnly = useIsReadOnly();
   const toast = useToast();
 
@@ -149,6 +183,7 @@ export function PRReviewListTab({
   const handleHeaderNudge = async () => {
     if (nudgeTarget.kind !== "single") return;
     setNudging(true);
+    setNudgeNotice(null);
     try {
       const res = await api.prReviews.sendStalePrNudge(
         eventId,
@@ -162,11 +197,21 @@ export function PRReviewListTab({
         );
       }
     } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? `リマインド送信に失敗しました: ${err.message}`
-          : "リマインド送信に失敗しました",
-      );
+      // 設定未完了 (監視 repo / 催促チャンネル未設定) は「失敗」ではなく
+      // 「設定が足りない」ので、生のエラー文字列ではなく設定タブへの誘導を出す。
+      if (isStaleNudgeConfigIncomplete(err)) {
+        const guide =
+          "停滞 PR リマインドの設定が未完了です。「停滞PRリマインド」アクションの設定タブで、監視リポジトリと催促チャンネルを設定してください。";
+        setNudgeNotice(guide);
+        toast.warning(guide);
+      } else {
+        setNudgeNotice(null);
+        toast.error(
+          err instanceof Error
+            ? `リマインド送信に失敗しました: ${err.message}`
+            : "リマインド送信に失敗しました",
+        );
+      }
     } finally {
       setNudging(false);
     }
@@ -230,6 +275,12 @@ export function PRReviewListTab({
           + 新規レビュー依頼
         </button>
       </div>
+
+      {nudgeNotice && (
+        <div style={styles.notice} role="alert">
+          {nudgeNotice}
+        </div>
+      )}
 
       {displayed.length === 0 && (
         <div style={styles.empty}>
