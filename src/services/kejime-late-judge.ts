@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   scheduledJobs, slackRoleMembers,
@@ -12,21 +12,6 @@ import {
   resolveThemeForDate, themeKeyForDate, toHHMM,
 } from "./morning-standup";
 import { postOrUpdateKejimeStatus } from "./kejime-status-post";
-import {
-  parseLatePointWeights, rollLatePoints, type LatePointWeights,
-} from "./kejime-late-gacha";
-import { penaltyRequiredChars } from "./kejime-penalty";
-
-// tracker.config.charsPerPoint (旧 minArticleLength) を取り出す。penalty の
-// required_chars を凍結するのに使う。未設定 / 不正は DEFAULT(500)。
-function parseCharsPerPoint(raw: string | null | undefined): number {
-  if (!raw) return 500;
-  try {
-    const o = JSON.parse(raw) as { charsPerPoint?: unknown; minArticleLength?: unknown };
-    const v = (typeof o.charsPerPoint === "number" ? o.charsPerPoint : o.minArticleLength);
-    return typeof v === "number" && Number.isFinite(v) && v >= 1 ? Math.floor(v) : 500;
-  } catch { return 500; }
-}
 
 // 003 朝勉強会けじめ制度 PR3: 平日 8:00 JST に「参加ボタン未押下」を late 認定し
 // +1pt / ramen を自動加算する。同 event の kejime_tracker.config.roleId に紐づく
@@ -50,16 +35,6 @@ function parseRoleId(raw: string | null | undefined): string | null {
     const o = JSON.parse(raw) as { roleId?: unknown };
     return typeof o.roleId === "string" && o.roleId.trim() ? o.roleId : null;
   } catch { return null; }
-}
-
-// 遅刻ガチャの確率を tracker.config.latePointWeights から取り出す。
-// 未設定 / 不正は DEFAULT (1pt=70/2pt=25/3pt=5) にフォールバック。
-function parseWeights(raw: string | null | undefined): LatePointWeights {
-  if (!raw) return parseLatePointWeights(undefined);
-  try {
-    const o = JSON.parse(raw) as { latePointWeights?: unknown };
-    return parseLatePointWeights(o.latePointWeights);
-  } catch { return parseLatePointWeights(undefined); }
 }
 
 // PR12: morning_standup の config.closeTime を取り出す。
@@ -123,10 +98,8 @@ async function judgeOne(
   if (!tracker) { console.warn(`kejime_late_judge: no tracker (event=${eventId})`); return 0; }
   const roleId = parseRoleId(tracker.config);
   if (!roleId) { console.warn(`kejime_late_judge: bad config (action=${tracker.id})`); return 0; }
-  // 遅刻ガチャ確率は tracker 単位で一度だけ解決し、当日の全 late 認定で共有する。
-  const weights = parseWeights(tracker.config);
-  // penalty の required_chars 凍結に使う 1pt あたり文字数。
-  const charsPerPoint = parseCharsPerPoint(tracker.config);
+  // 「本人が引く」方式なので late 認定では抽選しない (確率 / charsPerPoint は
+  // 抽選時 drawPendingGacha が tracker.config から解決する)。
   // penalty に凍結する「その日のテーマ」を morning_standup config から解決し snapshot。
   const morning = await d1.select({ config: eventActions.config }).from(eventActions).where(and(
     eq(eventActions.id, morningActionId),
@@ -163,8 +136,8 @@ async function judgeOne(
     if (attendedSet.has(rm.slackUserId)) continue;
     try {
       await recordLate(
-        d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, weights, slackClient,
-        { theme, themeKey, charsPerPoint },
+        d1, db, tracker.id, morningActionId, rm.slackUserId, ymd, slackClient,
+        { theme, themeKey },
       );
       lateCount++;
     } catch (e) { console.error(`recordLate failed (user=${rm.slackUserId}):`, e); }
@@ -181,8 +154,8 @@ async function judgeOne(
 
 async function recordLate(
   d1: D1, db: D1Database, trackerActionId: string, morningActionId: string,
-  slackUserId: string, ymd: string, weights: LatePointWeights, slackClient?: SlackClient,
-  penaltyCtx?: { theme: string; themeKey: string | null; charsPerPoint: number },
+  slackUserId: string, ymd: string, slackClient?: SlackClient,
+  penaltyCtx?: { theme: string; themeKey: string | null },
 ): Promise<void> {
   const now = new Date().toISOString();
   try {
@@ -213,31 +186,29 @@ async function recordLate(
     });
     member = (await d1.select().from(kejimeMembers).where(eq(kejimeMembers.id, id)).get())!;
   }
-  // 遅刻ガチャ: サーバー側で 1〜3pt を抽選 (クライアント改ざん不可)。
-  const drawn = rollLatePoints(weights);
-  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, drawn);
+  // 遅刻ガチャ「本人が引く」方式: ここでは抽選しない。ポイント未確定 (pointsDelta=0)
+  // の late event を記録し、penalty を status='pending' (未抽選) で立てるだけにする。
+  // 本人が Slack の「ガチャを引く」を押した時点で drawPendingGacha が抽選し、
+  // points / required_chars 確定 + member ポイント加算 + この late event の
+  // points_delta 後埋めを atomic に行う。
   const lateEventId = crypto.randomUUID();
   await d1.insert(kejimeEvents).values({
     id: lateEventId, memberId: member.id, type: "late",
-    pointsDelta: drawn, ramenDelta: ramenBumped,
-    note: `auto: ${ymd} (gacha ${drawn}pt)`, occurredAt: now,
+    pointsDelta: 0, ramenDelta: 0,
+    note: `auto: ${ymd}`, occurredAt: now,
   });
-  await d1.update(kejimeMembers).set({
-    currentPoints: internalAfter,
-    ramenCount: sql`${kejimeMembers.ramenCount} + ${ramenBumped}`,
-    updatedAt: now,
-  }).where(eq(kejimeMembers.id, member.id));
 
   // 遅刻イベント単位のペナルティ台帳を 1 行記録する (= 必要記事 1 本)。
-  // theme は当日テーマの snapshot、required_chars は drawn x charsPerPoint で凍結。
+  // theme は当日テーマの snapshot。status='pending' / points=0 / required_chars=0 で
+  // プレースホルダを置き、抽選 (本人がガチャを引く) で確定する。
   // (action, slackUserId, date) UNIQUE なので、同日重複認定でも 1 件に収まる (冪等)。
   if (penaltyCtx) {
     try {
       await d1.insert(kejimePenalties).values({
         id: crypto.randomUUID(), eventActionId: trackerActionId, memberId: member.id,
         slackUserId, date: ymd, theme: penaltyCtx.theme, themeKey: penaltyCtx.themeKey,
-        points: drawn, requiredChars: penaltyRequiredChars(drawn, penaltyCtx.charsPerPoint),
-        status: "open", lateEventId, createdAt: now,
+        points: 0, requiredChars: 0,
+        status: "pending", lateEventId, createdAt: now,
       });
     } catch (e) {
       // UNIQUE 衝突 (= 同日に既に penalty あり) は冪等扱い。それ以外は warn して握る
