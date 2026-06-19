@@ -15,8 +15,8 @@ export type LatePointWeights = {
 /** 仕様のデフォルト確率: 1pt=70% / 2pt=25% / 3pt=5%。合計 100。 */
 export const DEFAULT_LATE_POINT_WEIGHTS: LatePointWeights = { p1: 70, p2: 25, p3: 5 };
 
-/** ペナルティ記事の「1pt あたりの必要文字数」。1pt=500字 / 2pt=1000字 / 3pt=1500字。 */
-export const DEFAULT_CHARS_PER_POINT = 500;
+/** ペナルティ記事の「1pt あたりの必要文字数」。1pt=1000字 / 2pt=2000字 / 3pt=3000字。 */
+export const DEFAULT_CHARS_PER_POINT = 1000;
 
 export type WeightsValidation =
   | { ok: true; weights: LatePointWeights }

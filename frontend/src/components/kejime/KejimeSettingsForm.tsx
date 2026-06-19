@@ -29,7 +29,7 @@ type Config = {
   messageTemplates?: MessageTemplates;
 };
 
-const DEFAULT_MIN = 500;
+const DEFAULT_MIN = 1000;
 const DEFAULT_WEIGHTS: LatePointWeights = { p1: 70, p2: 25, p3: 5 };
 
 // PR15: 通知文面 textarea の placeholder ヒント。実 default は backend 側で適用。

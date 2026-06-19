@@ -1,10 +1,10 @@
 // 朝勉強会けじめ制度: ペナルティを「遅刻 (欠席) イベント単位」で管理する純粋ロジック。
 //
-// 基盤 (PR#315) はガチャ抽選 (1-3pt) と「保有ポイント x 500字」スケールを実装した。
+// 基盤 (PR#315) はガチャ抽選 (1-3pt) と「保有ポイント x 1000字」スケールを実装した。
 // 本モジュールはそれを「イベント単位」へ拡張する:
 //   - 各遅刻イベント = { 日付, その日のテーマ, ガチャ付与pt } を 1 行の penalty として記録。
 //   - 各ペナルティ = 記事 1 本・(pt x charsPerPoint) 文字・その日のテーマ準拠。
-//   - 3pt 一括イベント = 1 本 (1500字) で消せる。1ptずつ別々のイベントは各イベントに 1 本ずつ。
+//   - 3pt 一括イベント = 1 本 (3000字) で消せる。1ptずつ別々のイベントは各イベントに 1 本ずつ。
 //   - 別イベントを 1 本に合算して消すのは不可 (= penalty 単位でしかクリアできない)。
 //
 // I/O を持たない pure 関数だけをここに置き、DB/Slack 副作用は service 側に置く (テスタブル)。
@@ -42,7 +42,7 @@ export function summarizeOpenPenalties(
 
 /**
  * pure: penalty 行に凍結する requiredChars を計算する。
- * points x charsPerPoint。charsPerPoint<=0 は DEFAULT(500) に丸める (基盤と同じ規約)。
+ * points x charsPerPoint。charsPerPoint<=0 は DEFAULT(1000) に丸める (基盤と同じ規約)。
  */
 export function penaltyRequiredChars(points: number, charsPerPoint: number): number {
   return requiredArticleLength(points, charsPerPoint > 0 ? charsPerPoint : DEFAULT_CHARS_PER_POINT);

@@ -27,7 +27,7 @@ export type ArticleMessageTemplates = {
 type Tracker = {
   actionId: string; roleId: string; channelId: string;
   // 1pt あたりの必要文字数 (= 旧 minArticleLength)。ペナルティ記事の必要文字数は
-  // 「その時点の保有ポイント x charsPerPoint」で動的に決まる (1pt=500/2pt=1000/3pt=1500)。
+  // 「その時点の保有ポイント x charsPerPoint」で動的に決まる (1pt=1000/2pt=2000/3pt=3000)。
   charsPerPoint: number;
   messageTemplates?: ArticleMessageTemplates;
 };
