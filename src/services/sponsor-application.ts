@@ -4,7 +4,9 @@
  * member_application (application-notification / application-email) と同じ
  * event_actions.config 基盤 (notifications / autoSendEmail / emailTemplates) を
  * 再利用するが、テンプレ placeholder はスポンサー固有
- * ({companyName} {contactName} {amount} {period} {purpose} {confirmUrl} 等) にする。
+ * ({name} {affiliation} {amount} {message} {confirmUrl} 等) にする。
+ * 個人スポンサー化 (0065) 前のテンプレ互換のため {companyName} {contactName}
+ * {period} {purpose} も引き続き埋める ({companyName}={name} と同値)。
  *
  * 設計方針 (member_application と同一):
  * - 通知 / メール失敗で申込 API を失敗させない (fail-soft)。例外はログのみ。
@@ -34,10 +36,22 @@ import {
 } from "../domain/email/auto-send";
 import type { Env } from "../types/env";
 
-/** 通知 / メールテンプレに渡せる sponsor 申込の最小形。 */
+/**
+ * 通知 / メールテンプレに渡せる sponsor 申込の最小形。
+ * 個人化 (0065): name(氏名) / affiliation(所属) / message(応援メッセージ) を主項目に。
+ * companyName / contactName / period / purpose は後方互換 (旧テンプレ / 旧データ) 用に残す。
+ */
 export type SponsorApplicationLike = {
-  companyName: string;
-  contactName: string;
+  /** お名前(氏名)。companyName 未指定時のフォールバックにも使う。 */
+  name?: string | null;
+  /** 所属(任意)。 */
+  affiliation?: string | null;
+  /** 応援メッセージ / コメント(任意)。 */
+  message?: string | null;
+  /** 旧「会社/団体名」。後方互換。新フォームでは name と同値。 */
+  companyName?: string | null;
+  /** 旧「担当者名」。後方互換。 */
+  contactName?: string | null;
   email: string;
   amount: number;
   period?: string | null;
@@ -50,21 +64,32 @@ export type SponsorApplicationLike = {
 /**
  * デフォルト通知文 (notifications.messageTemplate 未設定時)。
  * member_application の DEFAULT_TEMPLATE と同じく {mentions} を先頭に置く。
+ * 個人スポンサー前提の文面 (氏名 / 所属 / 金額 / 応援メッセージ)。
  */
-export const DEFAULT_SPONSOR_TEMPLATE = `{mentions} 新しいスポンサー申込がありました
-会社/団体: {companyName}
-担当者: {contactName}
+export const DEFAULT_SPONSOR_TEMPLATE = `{mentions} 新しい個人スポンサー申込がありました
+お名前: {name}
+所属: {affiliation}
 メール: {email}
 金額: {amount} 円
+応援メッセージ: {message}
 申込日時: {appliedAt} (JST)`;
 
-/** sponsor 申込 → テンプレ vars。未設定 field は空文字に置換される。 */
+/**
+ * sponsor 申込 → テンプレ vars。未設定 field は空文字に置換される。
+ * name は app.name を優先し、無ければ後方互換で companyName を使う。
+ * 旧テンプレ互換のため companyName / contactName / period / purpose も埋める。
+ */
 function buildSponsorVars(
   app: SponsorApplicationLike,
 ): Record<string, string> {
+  const name = (app.name ?? app.companyName ?? "").toString();
   return {
-    companyName: app.companyName,
-    contactName: app.contactName,
+    name,
+    affiliation: app.affiliation ?? "",
+    message: app.message ?? "",
+    // 後方互換 (旧テンプレ / 旧管理通知文)
+    companyName: app.companyName ?? name,
+    contactName: app.contactName ?? name,
     email: app.email,
     amount: String(app.amount),
     period: app.period ?? "",
