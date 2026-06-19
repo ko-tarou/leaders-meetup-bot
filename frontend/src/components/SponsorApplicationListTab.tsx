@@ -209,7 +209,7 @@ export function SponsorApplicationListTab({ eventId }: Props) {
       <section style={styles.shareBox} aria-label="スポンサー募集フォーム URL">
         <div style={styles.shareLabel}>スポンサー募集フォーム URL</div>
         <p style={styles.shareDesc}>
-          このリンクを SNS や企業へ共有してスポンサーを募りましょう。申込者には
+          このリンクを SNS などで共有して個人スポンサーを募りましょう。申込者には
           メール確認のリンクが自動送信されます。
         </p>
         <div style={styles.shareRow}>
@@ -301,8 +301,8 @@ function SponsorCard({
         </span>
       </div>
       <div style={styles.cardMeta}>
-        {a.contactName} / {formatAmount(a.amount)} / 申込日:{" "}
-        {a.appliedAt.slice(0, 10)}
+        {a.affiliation ? `${a.affiliation} / ` : ""}
+        {formatAmount(a.amount)} / 申込日: {a.appliedAt.slice(0, 10)}
       </div>
     </div>
   );
@@ -399,8 +399,10 @@ function SponsorDetailModal({
           </button>
         </div>
 
-        <Section label="担当者">
-          <div style={{ fontSize: "0.875rem" }}>{application.contactName}</div>
+        <Section label="所属">
+          <div style={{ fontSize: "0.875rem" }}>
+            {application.affiliation || "（未記入）"}
+          </div>
         </Section>
         <Section label="メール">
           <div style={{ fontSize: "0.875rem" }}>{application.email}</div>
@@ -410,16 +412,24 @@ function SponsorDetailModal({
             {formatAmount(application.amount)}
           </div>
         </Section>
-        <Section label="協賛期間">
-          <div style={{ fontSize: "0.875rem" }}>
-            {application.period || "（未記入）"}
-          </div>
-        </Section>
-        <Section label="用途・ご要望">
+        <Section label="応援メッセージ・コメント">
           <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-            {application.purpose || "（未記入）"}
+            {application.message || "（未記入）"}
           </div>
         </Section>
+        {/* 旧データ (企業前提) の項目は値がある時だけ表示する (後方互換)。 */}
+        {application.period && (
+          <Section label="協賛期間（旧項目）">
+            <div style={{ fontSize: "0.875rem" }}>{application.period}</div>
+          </Section>
+        )}
+        {application.purpose && (
+          <Section label="用途・ご要望（旧項目）">
+            <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
+              {application.purpose}
+            </div>
+          </Section>
+        )}
         <Section label="メール確認">
           <div style={{ fontSize: "0.875rem" }}>
             {application.confirmedAt
