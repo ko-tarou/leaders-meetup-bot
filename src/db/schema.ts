@@ -924,6 +924,14 @@ export const kejimeArticleRequests = sqliteTable(
     // 承認時はこの値だけポイントを減算する (1pt=500字 / 2pt=1000字 / 3pt=1500字 を
     // 申請時の保有ポイントで決め、承認までの間にポイントが動いても矛盾しないようにする)。
     pointsToClear: integer("points_to_clear"),
+    // migration 0066: この記事が「どの遅刻イベント (penalty) を対象に提出されたか」。
+    // null = 旧データ / penalty を指定しない汎用申請 (後方互換)。指定時は承認でその
+    // penalty を cleared にする (= 別イベントへ合算できない)。
+    penaltyId: text("penalty_id"),
+    // migration 0066: テーマ準拠の管理者手動承認フラグ。
+    // null/0 = 未承認 (テーマ確認待ち)、1 = admin がテーマ準拠を承認済み。
+    // 文字数 OK でもこれが 1 になるまで自動承認 (リアクション) ではクリアしない。
+    themeApproved: integer("theme_approved"),
     threadTs: text("thread_ts"),
     // migration 0063: Bot の受領メッセージ (notice) の ts。
     // リアクション承認はこの ts で照合する。
@@ -939,6 +947,47 @@ export const kejimeArticleRequests = sqliteTable(
     index("idx_kejime_article_requests_event_action_id").on(t.eventActionId),
     index("idx_kejime_article_requests_status").on(t.status),
     index("kejime_article_requests_notice_ts_idx").on(t.noticeTs),
+  ],
+);
+
+// 朝勉強会けじめ制度 (migration 0066): ペナルティを「遅刻 (欠席) イベント単位」で記録。
+// 1 遅刻イベント = 1 行 = { date, theme(snapshot), points(1-3), required_chars }。
+// 各ペナルティは記事 1 本 (required_chars 字・theme 準拠) でしか消せず、別イベントへ
+// 合算できない。status='open' の件数 = 必要記事本数。承認で 'cleared' に遷移する。
+// kejime_events (集計ジャーナル) とは別軸: events はポイント増減の履歴、penalties は
+// 「未消化の遅刻イベント」の台帳。article_requests.penalty_id でひも付く。
+export const kejimePenalties = sqliteTable(
+  "kejime_penalties",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    memberId: text("member_id")
+      .notNull()
+      .references(() => kejimeMembers.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    // 遅刻 (欠席) した日 (JST YYYY-MM-DD)。
+    date: text("date").notNull(),
+    // その日のテーマ (morning_standup.config.themes から snapshot)。空文字可。
+    theme: text("theme").notNull().default(""),
+    themeKey: text("theme_key"),
+    // ガチャ付与 pt (1-3)。required_chars = points x charsPerPoint で凍結。
+    points: integer("points").notNull().default(1),
+    requiredChars: integer("required_chars").notNull().default(500),
+    // 'open' = 未消化、'cleared' = 記事承認で消化済み。
+    status: text("status").notNull().default("open"),
+    clearedByRequestId: text("cleared_by_request_id"),
+    clearedAt: text("cleared_at"),
+    // どの kejime_events(late) 由来か (監査用・任意)。
+    lateEventId: text("late_event_id"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("idx_kejime_penalties_member").on(t.memberId),
+    index("idx_kejime_penalties_action_status").on(t.eventActionId, t.status),
+    uniqueIndex("uq_kejime_penalties_action_user_date")
+      .on(t.eventActionId, t.slackUserId, t.date),
   ],
 );
 

@@ -41,8 +41,31 @@ const DOW_KEYS: Record<number, ThemeKey | null> = {
   0: null, 1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: null };
 const DOW_LABEL: Record<ThemeKey, string> = {
   mon: "月曜日", tue: "火曜日", wed: "水曜日", thu: "木曜日", fri: "金曜日" };
-const DEFAULT_THEMES: Themes = {
+export const DEFAULT_THEMES: Themes = {
   mon: "ハードウェア", tue: "フロントエンド", wed: "バックエンド", thu: "Android", fri: "Unity" };
+
+/** pure: JST 日付 (YYYY-MM-DD) → ThemeKey (mon..fri)。土日は null。 */
+export function themeKeyForDate(ymd: string): ThemeKey | null {
+  const t = Date.parse(`${ymd}T00:00:00+09:00`);
+  if (Number.isNaN(t)) return null;
+  const jst = new Date(t + 9 * 3600 * 1000);
+  return DOW_KEYS[jst.getUTCDay()] ?? null;
+}
+
+/**
+ * pure: morning_standup の config (raw JSON) と JST 日付から「その日のテーマ」を解決する。
+ * config が無効 / 土日 / テーマ未設定の場合は DEFAULT_THEMES に fallback、
+ * 日付が解釈不能なら "" を返す。late 認定時に penalty 行へテーマを凍結するのに使う。
+ */
+export function resolveThemeForDate(
+  morningConfigRaw: string | null | undefined, ymd: string,
+): string {
+  const tk = themeKeyForDate(ymd);
+  if (!tk) return "";
+  const cfg = parseConfig(morningConfigRaw);
+  if (cfg) return cfg.themes[tk];
+  return DEFAULT_THEMES[tk];
+}
 
 // 003 PR8: リマインド / 締切 文面のカスタマイズ対応。
 // テンプレ未指定 (or 空文字) なら従来の hardcoded 文言が使われる。

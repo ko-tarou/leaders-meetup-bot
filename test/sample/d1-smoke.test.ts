@@ -21,11 +21,10 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は kejime_article_requests に points_to_clear を追加した
-    // 0065_add_points_to_clear_to_article_requests。
+    // 末尾はイベント単位ペナルティ台帳を追加した 0066_kejime_event_penalties。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0065_add_points_to_clear_to_article_requests");
+    expect(names[names.length - 1]).toBe("0066_kejime_event_penalties");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);
