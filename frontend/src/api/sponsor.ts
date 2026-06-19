@@ -15,12 +15,12 @@ export const sponsor = {
   apply: (
     eventId: string,
     data: {
-      companyName: string;
-      contactName: string;
+      // 個人スポンサー (0065): お名前(必須) / 所属(任意) / 応援メッセージ(任意)
+      name: string;
+      affiliation?: string;
+      message?: string;
       email: string;
       amount: number;
-      period?: string;
-      purpose?: string;
     },
   ) =>
     publicRequest<{ ok: boolean; id: string }>(`/sponsor/${eventId}`, {

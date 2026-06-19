@@ -22,6 +22,7 @@ describe("D1 harness smoke", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
     // 末尾は遅刻ガチャ pending status を追加した 0067_kejime_penalties_pending_status。
+    // (個人スポンサー化 0065_sponsor_individual_fields も含むが、ソート上は 0067 が末尾)
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
     expect(names[names.length - 1]).toBe("0067_kejime_penalties_pending_status");

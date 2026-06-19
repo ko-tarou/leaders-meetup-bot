@@ -170,11 +170,17 @@ export const applications = sqliteTable(
   ],
 );
 
-// sponsor_application: HackIT 個人スポンサー募集（migration 0064）
-// 公開フォームから企業/個人スポンサー希望者が申込む。member_application とは
-// 入力項目が大きく異なる（会社名/担当者/金額/期間/用途）ため applications には
-// 混在させず専用テーブルにする。通知 / 受付メールは member_application と同じ
-// event_actions.config.notifications / autoSendEmail 基盤を再利用する。
+// sponsor_application: HackIT 個人スポンサー募集（migration 0064 / 個人化 0065）
+// 公開フォームから個人スポンサー希望者が申込む（企業前提から個人前提に調整）。
+// member_application とは入力項目が異なる（氏名/所属/金額/応援メッセージ）ため
+// applications には混在させず専用テーブルにする。通知 / 受付メールは
+// member_application と同じ event_actions.config.notifications / autoSendEmail
+// 基盤を再利用する。
+//
+// 後方互換（0065）: 旧スキーマの companyName を「お名前(氏名)」として再利用し、
+// contactName / period / purpose 列は残す（個人フォームでは未使用だが既存
+// データ保持。アプリ層は contactName に氏名と同じ値を書き込む）。所属 affiliation
+// と応援メッセージ message を NULL 許容で追加。
 //
 // スパム対策: confirmToken（メール確認用の不透明トークン）と confirmedAt を持つ。
 // 公開 POST 時点では status='unconfirmed' で作成し、確認リンク踏下で 'pending' へ昇格。
@@ -186,16 +192,20 @@ export const sponsorApplications = sqliteTable(
     eventId: text("event_id")
       .notNull()
       .references(() => events.id),
-    // 会社 / 団体名（個人スポンサーは個人名でも可）
+    // お名前（氏名）。旧「会社/団体名」列を個人化で氏名格納先に再利用。
     companyName: text("company_name").notNull(),
-    // 担当者名
+    // 旧「担当者名」。個人フォームでは独立項目を廃止し氏名と同値を書き込む（後方互換で残置）。
     contactName: text("contact_name").notNull(),
     email: text("email").notNull(),
     // 希望スポンサー金額（円・整数）。0 以上の妥当な数値をアプリ層で検証。
     amount: integer("amount").notNull(),
-    // 協賛期間（自由記述。例: "2026年4月〜2027年3月" / "単発"）
+    // 所属（学校 / 会社 / 団体など・任意）。個人化 0065 で追加。
+    affiliation: text("affiliation"),
+    // 応援メッセージ / コメント（任意）。個人化 0065 で追加。
+    message: text("message"),
+    // 協賛期間（旧項目・後方互換で残置。個人フォームでは未使用）。
     period: text("period"),
-    // 協賛の用途 / 意図の説明（任意）
+    // 協賛の用途 / 意図（旧項目・後方互換で残置。個人フォームでは未使用）。
     purpose: text("purpose"),
     // 'unconfirmed' | 'pending' | 'approved' | 'rejected'
     // unconfirmed = メール確認待ち（公開 POST 直後）。confirm で pending へ昇格。

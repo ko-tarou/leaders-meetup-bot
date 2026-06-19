@@ -14,6 +14,7 @@ import { colors } from "../styles/tokens";
 import { FeedbackSettingsSection } from "../components/feedback/FeedbackSettingsSection";
 import { WorkspaceCard } from "./workspaces/WorkspaceCard";
 import { GmailAccountsSection } from "./workspaces/GmailAccountsSection";
+import { DriveBrowserSection } from "./workspaces/DriveBrowserSection";
 import { WorkspaceCreateForm } from "./workspaces/WorkspaceCreateForm";
 
 // ADR-0006 / ADR-0007: Slack workspace 管理画面
@@ -324,6 +325,9 @@ export function WorkspacesPage() {
         onInstall={handleGmailInstall}
         onDelete={handleGmailDelete}
       />
+
+      {/* 案7: Google Drive 閲覧 — 連携済みアカウントの Drive を read-only で閲覧 */}
+      <DriveBrowserSection />
 
       {/* 005-feedback: フィードバックウィジェットの通知先と AI 有効化を設定 */}
       <FeedbackSettingsSection

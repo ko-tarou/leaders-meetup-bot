@@ -73,6 +73,11 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
   type SponsorBody = {
+    // 個人スポンサー (0065) 主項目
+    name?: unknown;
+    affiliation?: unknown;
+    message?: unknown;
+    // 後方互換: 旧フォーム (企業前提) の項目も受け付ける
     companyName?: unknown;
     contactName?: unknown;
     email?: unknown;
@@ -84,14 +89,16 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
     .json<SponsorBody>()
     .catch(() => ({}) as SponsorBody);
 
-  // 必須バリデーション
-  const companyName =
-    typeof body.companyName === "string" ? body.companyName.trim() : "";
-  const contactName =
-    typeof body.contactName === "string" ? body.contactName.trim() : "";
+  // 必須バリデーション。
+  // お名前(氏名)は name を優先し、旧フォーム互換で companyName もフォールバックに使う。
+  const name =
+    typeof body.name === "string" && body.name.trim()
+      ? body.name.trim()
+      : typeof body.companyName === "string"
+        ? body.companyName.trim()
+        : "";
   const email = typeof body.email === "string" ? body.email.trim() : "";
-  if (!companyName) return c.json({ error: "companyName is required" }, 400);
-  if (!contactName) return c.json({ error: "contactName is required" }, 400);
+  if (!name) return c.json({ error: "name is required" }, 400);
   if (!email) return c.json({ error: "email is required" }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return c.json({ error: "invalid email format" }, 400);
@@ -106,6 +113,16 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
   if (!Number.isInteger(amountNum) || amountNum < 1 || amountNum > MAX_AMOUNT) {
     return c.json({ error: "invalid amount" }, 400);
   }
+  // 所属(任意) / 応援メッセージ(任意)。個人化 0065。
+  const affiliation =
+    typeof body.affiliation === "string" && body.affiliation.trim()
+      ? body.affiliation.trim()
+      : null;
+  const message =
+    typeof body.message === "string" && body.message.trim()
+      ? body.message.trim()
+      : null;
+  // 旧項目 (後方互換): 明示送信された場合のみ保持。個人フォームは送らない。
   const period =
     typeof body.period === "string" && body.period.trim()
       ? body.period.trim()
@@ -114,6 +131,11 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
     typeof body.purpose === "string" && body.purpose.trim()
       ? body.purpose.trim()
       : null;
+  // contactName 列は NOT NULL。旧フォーム互換で値が来ればそれを、無ければ氏名を入れる。
+  const contactName =
+    typeof body.contactName === "string" && body.contactName.trim()
+      ? body.contactName.trim()
+      : name;
 
   // event 存在確認
   const event = await db.select().from(events).where(eq(events.id, eventId)).get();
@@ -143,10 +165,13 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
   await db.insert(sponsorApplications).values({
     id,
     eventId,
-    companyName,
+    // companyName 列は個人化で「お名前(氏名)」格納先に再利用。
+    companyName: name,
     contactName,
     email,
     amount: amountNum,
+    affiliation,
+    message,
     period,
     purpose,
     status: "unconfirmed",
@@ -165,7 +190,10 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
       // /api を必ず含める (含めないと SPA fallback に吸われ confirm が動かない)。
       const confirmUrl = `${new URL(c.req.url).origin}/api/sponsor/${eventId}/confirm?t=${confirmToken}`;
       const appLike = {
-        companyName,
+        name,
+        affiliation,
+        message,
+        companyName: name,
         contactName,
         email,
         amount: amountNum,
@@ -306,6 +334,10 @@ sponsorRouter.put("/sponsor-applications/:id", async (c) => {
           c.env,
           action.config,
           {
+            // companyName 列は個人化で氏名格納先。name にも渡す。
+            name: existing.companyName,
+            affiliation: existing.affiliation,
+            message: existing.message,
             companyName: existing.companyName,
             contactName: existing.contactName,
             email: existing.email,

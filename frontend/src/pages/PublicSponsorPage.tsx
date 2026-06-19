@@ -4,8 +4,9 @@ import { api } from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { colors } from "../styles/tokens";
 
-// sponsor_application 公開フォーム。PublicApplyPage を複製し、面談日時/学籍番号等の
-// メンバー固有項目を、会社名/担当者/金額/期間/用途 のスポンサー項目に置き換えた。
+// sponsor_application 公開フォーム (個人スポンサー前提・0065)。
+// 項目: お名前(氏名・必須) / 所属(任意) / メール(必須) / ご協賛金額(必須) /
+// 応援メッセージ・コメント(任意)。企業前提の会社名/担当者/期間/用途は廃止。
 // 認証不要。event 情報は公開エンドポイント /api/sponsor/:eventId/event で取得する。
 
 type PublicSponsorEvent = {
@@ -21,12 +22,11 @@ export function PublicSponsorPage() {
   const isMobile = useIsMobile();
   const [event, setEvent] = useState<PublicSponsorEvent | null>(null);
   const [loading, setLoading] = useState(true);
-  const [companyName, setCompanyName] = useState("");
-  const [contactName, setContactName] = useState("");
+  const [name, setName] = useState("");
+  const [affiliation, setAffiliation] = useState("");
   const [email, setEmail] = useState("");
   const [amount, setAmount] = useState("");
-  const [period, setPeriod] = useState("");
-  const [purpose, setPurpose] = useState("");
+  const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,12 +49,8 @@ export function PublicSponsorPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyName.trim()) {
-      setError("会社名・団体名を入力してください");
-      return;
-    }
-    if (!contactName.trim()) {
-      setError("担当者名を入力してください");
+    if (!name.trim()) {
+      setError("お名前を入力してください");
       return;
     }
     if (!email.trim()) {
@@ -70,12 +66,11 @@ export function PublicSponsorPage() {
     setSubmitting(true);
     try {
       await api.sponsor.apply(eventId!, {
-        companyName: companyName.trim(),
-        contactName: contactName.trim(),
+        name: name.trim(),
+        affiliation: affiliation.trim() || undefined,
         email: email.trim(),
         amount: amountNum,
-        period: period.trim() || undefined,
-        purpose: purpose.trim() || undefined,
+        message: message.trim() || undefined,
       });
       navigate(`/sponsor/${eventId}/thanks`);
     } catch (err) {
@@ -130,7 +125,7 @@ export function PublicSponsorPage() {
         {event.name} スポンサー募集
       </h1>
       <p style={{ color: colors.textSecondary, marginBottom: "1.5rem" }}>
-        個人・企業スポンサーを募集しています。以下のフォームにご記入ください。送信後、ご記入のメールアドレス宛に確認メールをお送りします。メール内のリンクをクリックして申込を確定してください。
+        個人スポンサーを募集しています。応援してくださる方は以下のフォームにご記入ください。送信後、ご記入のメールアドレス宛に確認メールをお送りします。メール内のリンクをクリックして申込を確定してください。
       </p>
 
       {error && (
@@ -150,23 +145,25 @@ export function PublicSponsorPage() {
       )}
 
       <form onSubmit={handleSubmit}>
-        <Field label="会社名・団体名 *">
+        <Field label="お名前（氏名） *">
           <input
             type="text"
-            value={companyName}
-            onChange={(e) => setCompanyName(e.target.value)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             required
-            maxLength={200}
+            maxLength={100}
             style={inputStyle}
           />
         </Field>
-        <Field label="ご担当者名 *">
+        <Field
+          label="所属（任意）"
+          hint="学校・会社・団体など（任意）"
+        >
           <input
             type="text"
-            value={contactName}
-            onChange={(e) => setContactName(e.target.value)}
-            required
-            maxLength={100}
+            value={affiliation}
+            onChange={(e) => setAffiliation(e.target.value)}
+            maxLength={200}
             style={inputStyle}
           />
         </Field>
@@ -192,24 +189,12 @@ export function PublicSponsorPage() {
           />
         </Field>
         <Field
-          label="協賛期間（任意）"
-          hint="例: 2026年4月〜2027年3月 / 単発"
-        >
-          <input
-            type="text"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            maxLength={100}
-            style={inputStyle}
-          />
-        </Field>
-        <Field
-          label="ご協賛の用途・ご要望（任意）"
-          hint="協賛の意図やご要望があればご記入ください"
+          label="応援メッセージ・コメント（任意）"
+          hint="運営への応援メッセージがあればご記入ください"
         >
           <textarea
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value)}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
             maxLength={1000}
             rows={4}
             style={{ ...inputStyle, resize: "vertical" }}
