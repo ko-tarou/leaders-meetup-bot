@@ -19,7 +19,7 @@ import { api } from "../../../src/routes/api";
 import { testDb } from "../../helpers/db";
 import { makeEnv } from "../../helpers/env";
 import { makeEvent, makeEventAction } from "../../helpers/factory";
-import { kejimeEvents, kejimeMembers } from "../../../src/db/schema";
+import { eventActions, kejimeEvents, kejimeMembers } from "../../../src/db/schema";
 
 const TOKEN = "test-admin-token";
 const env = makeEnv();
@@ -180,5 +180,51 @@ describe("POST /kejime/exemption", () => {
         body: JSON.stringify({ memberId: "x", refEventId: "y" }) },
     );
     expect(res.status).toBe(401);
+  });
+});
+
+// 新ルール: kejime_tracker の config 更新時、latePointWeights をサーバー側で検証する。
+describe("PUT /orgs/:eventId/actions/:actionId (latePointWeights 検証)", () => {
+  function putConfig(eventId: string, actionId: string, config: unknown) {
+    return req(`/api/orgs/${eventId}/actions/${actionId}`, {
+      method: "PUT",
+      headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+      body: JSON.stringify({ config: JSON.stringify(config) }),
+    });
+  }
+
+  it("合計 100 の weights → 200 で保存", async () => {
+    const { ev, tracker } = await setupTracker();
+    const res = await putConfig(ev.id, tracker.id, {
+      schemaVersion: 1, roleId: "r1", latePointWeights: { p1: 60, p2: 30, p3: 10 },
+    });
+    expect(res.status).toBe(200);
+    const row = await testDb().select().from(eventActions)
+      .where(eq(eventActions.id, tracker.id)).get();
+    expect(JSON.parse(row!.config!).latePointWeights).toEqual({ p1: 60, p2: 30, p3: 10 });
+  });
+
+  it("合計 99 の weights → 400", async () => {
+    const { ev, tracker } = await setupTracker();
+    const res = await putConfig(ev.id, tracker.id, {
+      schemaVersion: 1, roleId: "r1", latePointWeights: { p1: 60, p2: 30, p3: 9 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("負の値 → 400", async () => {
+    const { ev, tracker } = await setupTracker();
+    const res = await putConfig(ev.id, tracker.id, {
+      schemaVersion: 1, roleId: "r1", latePointWeights: { p1: -1, p2: 50, p3: 51 },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("latePointWeights 未指定 → 200 (任意項目)", async () => {
+    const { ev, tracker } = await setupTracker();
+    const res = await putConfig(ev.id, tracker.id, {
+      schemaVersion: 1, roleId: "r1", charsPerPoint: 500,
+    });
+    expect(res.status).toBe(200);
   });
 });

@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, asc, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
-  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers,
+  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, kejimePenalties,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
 import { getUserNames } from "../../services/slack-names";
@@ -178,6 +178,9 @@ kejimeRouter.get(`${BASE}/articles`, async (c: C) => {
     id: kejimeArticleRequests.id, memberId: kejimeArticleRequests.memberId,
     qiitaUrl: kejimeArticleRequests.qiitaUrl, bodyLength: kejimeArticleRequests.bodyLength,
     status: kejimeArticleRequests.status, createdAt: kejimeArticleRequests.createdAt,
+    penaltyId: kejimeArticleRequests.penaltyId,
+    themeApproved: kejimeArticleRequests.themeApproved,
+    pointsToClear: kejimeArticleRequests.pointsToClear,
     memberDisplayName: kejimeMembers.displayName,
     slackUserId: kejimeMembers.slackUserId,
   }).from(kejimeArticleRequests)
@@ -217,10 +220,142 @@ kejimeRouter.post(`${BASE}/article-manual-approve`, async (c: C) => {
     .where(eq(kejimeMembers.id, req.memberId)).get();
   if (!member) return c.json({ error: "member not found" }, 404);
   const now = new Date().toISOString();
-  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, -1);
+  // イベント単位ペナルティ: penalty 紐付けがあればその凍結 pt を消費 (= テーマ承認 +
+  // 文字数 OK を admin がまとめて承認したとみなす)。旧データ (penalty_id=null) は
+  // 従来どおり -1pt。現在保有を超えて減算しないようクランプ。
+  const wantClear = req.penaltyId
+    ? Math.max(req.pointsToClear ?? 1, 1)
+    : 1;
+  const clear = Math.min(wantClear, Math.max(member.currentPoints, 0));
+  const delta = -Math.max(clear, 0);
+  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, delta);
   const ev: typeof kejimeEvents.$inferInsert = {
     id: crypto.randomUUID(), memberId: member.id, type: "article",
-    pointsDelta: -1, ramenDelta: ramenBumped, ref: req.qiitaUrl,
+    pointsDelta: delta, ramenDelta: ramenBumped, ref: req.qiitaUrl,
+    note: body.note?.trim() || null, decidedBy: "admin", occurredAt: now,
+  };
+  await db.insert(kejimeEvents).values(ev);
+  const nextRamen = Math.max(0, member.ramenCount + ramenBumped);
+  await db.update(kejimeMembers).set({
+    currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
+  }).where(eq(kejimeMembers.id, member.id));
+  // 手動承認はテーマ承認も兼ねる (theme_approved=1)。
+  await db.update(kejimeArticleRequests).set({
+    status: "approved", themeApproved: 1, decidedBy: "admin", decidedAt: now,
+  }).where(eq(kejimeArticleRequests.id, req.id));
+  // 対象 penalty を cleared にする (open のときのみ)。
+  if (req.penaltyId) {
+    await db.update(kejimePenalties).set({
+      status: "cleared", clearedByRequestId: req.id, clearedAt: now,
+    }).where(and(
+      eq(kejimePenalties.id, req.penaltyId),
+      eq(kejimePenalties.status, "open"),
+    ));
+  }
+  await triggerStatusUpdate(c.env, r.action.id);
+  return c.json({ ok: true, event: ev, member: {
+    ...member, currentPoints: internalAfter, ramenCount: nextRamen,
+    displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
+  } }, 201);
+});
+
+// イベント単位ペナルティ一覧。member ごとの open/cleared を返す。
+// status=open|cleared|all (default: open)。管理画面の「未消化の遅刻イベント」表示用。
+kejimeRouter.get(`${BASE}/penalties`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const status = c.req.query("status") ?? "open";
+  const conds = [eq(kejimePenalties.eventActionId, r.action.id)];
+  if (status === "open") conds.push(eq(kejimePenalties.status, "open"));
+  else if (status === "cleared") conds.push(eq(kejimePenalties.status, "cleared"));
+  const rows = await db.select({
+    id: kejimePenalties.id, memberId: kejimePenalties.memberId,
+    slackUserId: kejimePenalties.slackUserId, date: kejimePenalties.date,
+    theme: kejimePenalties.theme, points: kejimePenalties.points,
+    requiredChars: kejimePenalties.requiredChars, status: kejimePenalties.status,
+    clearedAt: kejimePenalties.clearedAt,
+    memberDisplayName: kejimeMembers.displayName,
+  }).from(kejimePenalties)
+    .innerJoin(kejimeMembers, eq(kejimePenalties.memberId, kejimeMembers.id))
+    .where(and(...conds))
+    .orderBy(desc(kejimePenalties.date)).all();
+  const resolved = await resolveMemberNames(
+    c.env, rows.map((row) => ({ ...row, displayName: row.memberDisplayName })),
+  );
+  return c.json(resolved.map(({ displayName, ...rest }) => ({
+    ...rest, memberDisplayName: displayName,
+  })));
+});
+
+// イベント単位ペナルティ: テーマ準拠の admin 手動承認。
+// 「この記事は ○○ の日のテーマに沿うか」を admin が承認/差し戻しする基本フロー。
+// approve=true:
+//   - theme_approved=1 をセット。
+//   - 文字数が必要量を満たしていれば (bodyLength >= penalty.required_chars)、
+//     その場で penalty を cleared にしポイントを減算する (= 即承認)。
+//   - 文字数未達なら theme_approved=1 だけ残し、ポイントは消さない (文字数の再提出待ち)。
+// approve=false: 差し戻し (theme_approved=0)。ポイント・penalty は触らない。
+kejimeRouter.post(`${BASE}/article-theme-approve`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const body = await c.req
+    .json<{ articleRequestId?: string; approve?: boolean; note?: string }>()
+    .catch(() => null);
+  if (!body) return c.json({ error: "invalid JSON body" }, 400);
+  const articleRequestId = (body.articleRequestId ?? "").trim();
+  if (!articleRequestId) return c.json({ error: "articleRequestId is required" }, 400);
+  const approve = body.approve !== false; // default true
+  const req = await db.select().from(kejimeArticleRequests)
+    .where(eq(kejimeArticleRequests.id, articleRequestId)).get();
+  if (!req || req.eventActionId !== r.action.id) {
+    return c.json({ error: "articleRequest not found" }, 404);
+  }
+  if (req.status !== "pending" && req.status !== "rejected_fetch_error") {
+    return c.json({ error: `cannot review status=${req.status}` }, 400);
+  }
+  const now = new Date().toISOString();
+  if (!approve) {
+    // 差し戻し: テーマ未承認に戻す。ポイントは変動しない。
+    await db.update(kejimeArticleRequests).set({
+      themeApproved: 0, decidedBy: "admin", decidedAt: now,
+    }).where(eq(kejimeArticleRequests.id, req.id));
+    await triggerStatusUpdate(c.env, r.action.id);
+    return c.json({ ok: true, approved: false, request: { ...req, themeApproved: 0 } });
+  }
+  // penalty を引いて文字数充足を確認する。
+  const penalty = req.penaltyId
+    ? await db.select().from(kejimePenalties)
+        .where(eq(kejimePenalties.id, req.penaltyId)).get()
+    : null;
+  const requiredChars = penalty?.requiredChars ?? 0;
+  const lengthOk = (req.bodyLength ?? 0) >= requiredChars;
+
+  if (!penalty || !lengthOk) {
+    // テーマだけ承認 (文字数未達 or penalty 無し)。ポイント・penalty は据え置き。
+    await db.update(kejimeArticleRequests).set({
+      themeApproved: 1, decidedBy: "admin", decidedAt: now,
+    }).where(eq(kejimeArticleRequests.id, req.id));
+    await triggerStatusUpdate(c.env, r.action.id);
+    return c.json({
+      ok: true, approved: true, cleared: false,
+      reason: !penalty ? "no_penalty" : "length_not_met",
+      request: { ...req, themeApproved: 1 },
+    });
+  }
+
+  // テーマ承認 + 文字数 OK → penalty を cleared にしポイント減算 (= 完全承認)。
+  const member = await db.select().from(kejimeMembers)
+    .where(eq(kejimeMembers.id, req.memberId)).get();
+  if (!member) return c.json({ error: "member not found" }, 404);
+  const wantClear = Math.max(req.pointsToClear ?? penalty.points, 1);
+  const clear = Math.min(wantClear, Math.max(member.currentPoints, 0));
+  const delta = -Math.max(clear, 0);
+  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, delta);
+  const ev: typeof kejimeEvents.$inferInsert = {
+    id: crypto.randomUUID(), memberId: member.id, type: "article",
+    pointsDelta: delta, ramenDelta: ramenBumped, ref: req.qiitaUrl,
     note: body.note?.trim() || null, decidedBy: "admin", occurredAt: now,
   };
   await db.insert(kejimeEvents).values(ev);
@@ -229,10 +364,16 @@ kejimeRouter.post(`${BASE}/article-manual-approve`, async (c: C) => {
     currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
   }).where(eq(kejimeMembers.id, member.id));
   await db.update(kejimeArticleRequests).set({
-    status: "approved", decidedBy: "admin", decidedAt: now,
+    status: "approved", themeApproved: 1, decidedBy: "admin", decidedAt: now,
   }).where(eq(kejimeArticleRequests.id, req.id));
+  await db.update(kejimePenalties).set({
+    status: "cleared", clearedByRequestId: req.id, clearedAt: now,
+  }).where(and(
+    eq(kejimePenalties.id, penalty.id),
+    eq(kejimePenalties.status, "open"),
+  ));
   await triggerStatusUpdate(c.env, r.action.id);
-  return c.json({ ok: true, event: ev, member: {
+  return c.json({ ok: true, approved: true, cleared: true, event: ev, member: {
     ...member, currentPoints: internalAfter, ramenCount: nextRamen,
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
   } }, 201);

@@ -123,6 +123,55 @@ describe("buildStatusBlocks: PR14 記事申請ボタン", () => {
   });
 });
 
+describe("buildStatusBlocks: 遅刻ガチャ「本人が引く」ボタン", () => {
+  it("pendingGachas 0 件 → ガチャ section / ボタンは出ない", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 0, ramenCount: 0 }],
+      [], "2026-05-19 (火)", "tracker-abc", [], [],
+    );
+    // section(1) + 記事申請 actions(1) のみ。ガチャ block は無い。
+    expect(blocks).toHaveLength(2);
+    const all = JSON.stringify(blocks);
+    expect(all).not.toContain("kejime_gacha_draw:");
+  });
+
+  it("pendingGachas 1 件 → ガチャ section + 本人ボタン (action_id=kejime_gacha_draw:<penaltyId>)", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 0, ramenCount: 0 }],
+      [], "2026-05-19 (火)", "tracker-abc",
+      [],
+      [{ penaltyId: "pen-1", slackUserId: "U1", displayName: "山田", date: "2026-05-19" }],
+    );
+    // section + ガチャ説明 section + ガチャ actions + 記事申請 actions = 4 block。
+    const actionsBlocks = blocks.filter(
+      (b) => (b as { type?: string }).type === "actions",
+    ) as Array<{ elements: Array<{ action_id: string; value: string; text: { text: string } }> }>;
+    const gacha = actionsBlocks.find((b) =>
+      b.elements.some((e) => e.action_id.startsWith("kejime_gacha_draw:")));
+    expect(gacha).toBeTruthy();
+    const btn = gacha!.elements[0];
+    expect(btn.action_id).toBe("kejime_gacha_draw:pen-1");
+    expect(btn.value).toBe("pen-1");
+    expect(btn.text.text).toContain("ガチャを引く");
+  });
+
+  it("pendingGachas 6 件 → actions block は 5 要素ずつ分割される (Slack 制限)", () => {
+    const pend = Array.from({ length: 6 }, (_, i) => ({
+      penaltyId: `pen-${i}`, slackUserId: `U${i}`, displayName: `m${i}`, date: "2026-05-19",
+    }));
+    const blocks = buildStatusBlocks(
+      [], [], "2026-05-19 (火)", "tracker-abc", [], pend,
+    );
+    const gachaActions = (blocks as Array<{ type?: string; elements?: unknown[] }>)
+      .filter((b) => b.type === "actions"
+        && JSON.stringify(b).includes("kejime_gacha_draw:"));
+    // 6 件 = 5 + 1 の 2 つの actions block。
+    expect(gachaActions).toHaveLength(2);
+    expect((gachaActions[0].elements ?? []).length).toBe(5);
+    expect((gachaActions[1].elements ?? []).length).toBe(1);
+  });
+});
+
 describe("buildStatusBlocks: セクション省略", () => {
   it("ramen_count 全員 0 → 激辛セクションは出ない", () => {
     const blocks = buildStatusBlocks(

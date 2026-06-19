@@ -304,3 +304,76 @@ describe("handleKejimeReactionAdded", () => {
     expect(req?.status).toBe("pending");
   });
 });
+
+// 新ルール: ペナルティを「保有ポイント数 x charsPerPoint」字の記事 1 本にスケール。
+describe("ペナルティ文字数スケール (charsPerPoint)", () => {
+  async function setupTrackerWithMember(opts: {
+    currentPoints: number; charsPerPoint?: number;
+  }) {
+    const ev = await makeEvent();
+    const tracker = await makeEventAction(ev.id, {
+      actionType: "kejime_tracker",
+      config: JSON.stringify({
+        schemaVersion: 1, kejimeChannelId: KEJIME_CH, roleId: "role-cpp",
+        charsPerPoint: opts.charsPerPoint ?? 500,
+      }),
+    });
+    await makeSlackRole(tracker.id, { id: "role-cpp", name: "勉強会" });
+    await testDb().insert(kejimeMembers).values({
+      id: "km-cpp", eventActionId: tracker.id, slackUserId: "U-AUTHOR",
+      displayName: "U-AUTHOR", currentPoints: opts.currentPoints,
+      ramenCount: 0, createdAt: NOW, updatedAt: NOW,
+    });
+    return tracker;
+  }
+
+  it("2pt 保有 → 必要 1000 字。999 字は rejected_short", async () => {
+    await setupTrackerWithMember({ currentPoints: 2 });
+    const slack = new MockSlackClient();
+    await handleKejimeChannelMessage(testD1(), slack, fetchOk(999), {
+      type: "message", channel: KEJIME_CH, user: "U-AUTHOR", text: QIITA_URL, ts: "2.0",
+    });
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.status).toBe("rejected_short");
+    expect(req?.bodyLength).toBe(999);
+  });
+
+  it("2pt 保有 → 1000 字ちょうどは pending + pointsToClear=2", async () => {
+    await setupTrackerWithMember({ currentPoints: 2 });
+    const slack = new MockSlackClient();
+    await handleKejimeChannelMessage(testD1(), slack, fetchOk(1000), {
+      type: "message", channel: KEJIME_CH, user: "U-AUTHOR", text: QIITA_URL, ts: "2.1",
+    });
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.status).toBe("pending");
+    expect(req?.pointsToClear).toBe(2);
+  });
+
+  it("3pt 保有 → 1500 字記事 1 本の承認で 3pt 一括クリア (0pt へ)", async () => {
+    await setupTrackerWithMember({ currentPoints: 3 });
+    const slack = new MockSlackClient();
+    // notice メッセージの ts を固定 (リアクション照合に使う noticeTs として保存される)。
+    slack.setResponse("postMessage", { ok: true, ts: MOCK_POST_TS });
+    // 申請 (1500 字 -> pending, pointsToClear=3)
+    await handleKejimeChannelMessage(testD1(), slack, fetchOk(1500), {
+      type: "message", channel: KEJIME_CH, user: "U-AUTHOR", text: QIITA_URL, ts: "3.0",
+    });
+    const req = await testDb().select().from(kejimeArticleRequests).get();
+    expect(req?.pointsToClear).toBe(3);
+    // 承認 (3 リアクション)
+    const slack2 = new MockSlackClient();
+    slack2.setResponse("callApi:reactions.get", {
+      ok: true, message: { reactions: [{ name: "+1", count: 3 }] },
+    });
+    await handleKejimeReactionAdded(testD1(), slack2, {
+      type: "reaction_added", reaction: "+1", user: "U-X",
+      item: { type: "message", channel: KEJIME_CH, ts: MOCK_POST_TS },
+    });
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.id, "km-cpp")).get();
+    expect(m?.currentPoints).toBe(0);
+    const ev = await testDb().select().from(kejimeEvents)
+      .where(eq(kejimeEvents.type, "article")).get();
+    expect(ev?.pointsDelta).toBe(-3);
+  });
+});

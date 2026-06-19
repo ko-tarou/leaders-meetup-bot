@@ -54,6 +54,11 @@ function installFetchSpy(opts?: {
           status: 200, headers: { "Content-Type": "application/json" },
         });
       }
+      if (url.includes("/kejime/penalties")) {
+        return new Response(JSON.stringify([]), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.includes("/kejime/edit-points")) {
         return new Response(JSON.stringify({ ok: true }), {
           status: 201, headers: { "Content-Type": "application/json" },

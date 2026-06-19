@@ -5,6 +5,7 @@ import type { Env } from "../../types/env";
 import { events, eventActions } from "../../db/schema";
 import { ensureDefaultActions } from "../../services/event-actions-bootstrap";
 import { DEFAULT_TUTORIAL_TEMPLATE } from "../../services/tutorial";
+import { validateLatePointWeights } from "../../services/kejime-late-gacha";
 
 export const orgsRouter = new Hono<{ Bindings: Env }>();
 
@@ -216,7 +217,11 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
       schemaVersion: 1,
       kejimeChannelId: null,
       roleId: null,
+      // charsPerPoint: ペナルティ記事の 1pt あたり必要文字数 (旧 minArticleLength)。
+      charsPerPoint: 500,
       minArticleLength: 500,
+      // 遅刻ガチャ確率 (%): 1pt=70 / 2pt=25 / 3pt=5。合計 100。
+      latePointWeights: { p1: 70, p2: 25, p3: 5 },
     }),
     // 宗教イベント PR1: goal_reminder。朝夜の目標アファメーション投稿。
     // 詳細は PR2 の設定 UI で編集可能。
@@ -292,10 +297,25 @@ orgsRouter.put("/orgs/:eventId/actions/:actionId", async (c) => {
     updatedAt: new Date().toISOString(),
   };
   if (body.config !== undefined) {
+    let parsedConfig: unknown;
     try {
-      JSON.parse(body.config);
+      parsedConfig = JSON.parse(body.config);
     } catch {
       return c.json({ error: "config must be valid JSON" }, 400);
+    }
+    // kejime_tracker の遅刻ガチャ確率 (latePointWeights) はサーバー側で検証する。
+    // 1pt/2pt/3pt は 0 以上の整数かつ合計 100 でなければ 400。
+    if (existing.actionType === "kejime_tracker") {
+      const w = (parsedConfig as { latePointWeights?: unknown }).latePointWeights;
+      if (w !== undefined) {
+        const v = validateLatePointWeights(w);
+        if (!v.ok) {
+          return c.json(
+            { error: "latePointWeights must be non-negative integers summing to 100" },
+            400,
+          );
+        }
+      }
     }
     updates.config = body.config;
   }

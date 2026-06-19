@@ -12,9 +12,10 @@ import {
   processLateJudgment,
   bumpPointsAndRamen,
 } from "../../../src/services/kejime-late-judge";
+import { drawPendingGacha } from "../../../src/services/kejime-gacha-draw";
 import { testD1, testDb } from "../../helpers/db";
 import {
-  eventActions, kejimeEvents, kejimeMembers, morningAttendance,
+  eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   scheduledJobs, slackRoleMembers, slackRoles,
 } from "../../../src/db/schema";
 import {
@@ -60,10 +61,26 @@ async function setupTrio(opts: {
   return { ev, morning, tracker, role };
 }
 
+// 遅刻ガチャ: rollLatePoints は crypto.getRandomValues([0,1)) を引いて
+// drawLatePoints に渡す。デフォルト weights(70/25/5) 下で r を固定すると出目を固定できる。
+//   r<0.70 -> 1pt / 0.70<=r<0.95 -> 2pt / r>=0.95 -> 3pt
+// テストの決定性確保のため getRandomValues を r 固定にスタブする。
+function forceGachaR(r: number): void {
+  vi.spyOn(crypto, "getRandomValues").mockImplementation(((arr: ArrayBufferView) => {
+    const u = arr as unknown as Uint32Array;
+    u[0] = Math.floor(r * 2 ** 32);
+    return arr;
+  }) as typeof crypto.getRandomValues);
+}
+
 beforeEach(async () => {
   vi.useFakeTimers();
+  // 「本人が引く」方式: late 認定では抽選しないので getRandomValues スタブは
+  // 抽選 (drawPendingGacha) のテストでだけ使う。ここでは念のため 1pt 寄りに固定。
+  forceGachaR(0.1);
   const db = testDb();
   await db.delete(scheduledJobs);
+  await db.delete(kejimePenalties);
   await db.delete(kejimeEvents);
   await db.delete(kejimeMembers);
   await db.delete(morningAttendance);
@@ -72,7 +89,7 @@ beforeEach(async () => {
   await db.delete(eventActions);
 });
 
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("bumpPointsAndRamen (pure)", () => {
   it("0 → +1: internal=1, ramen=0", () => {
@@ -122,7 +139,7 @@ describe("processLateJudgment: 走らない条件", () => {
 });
 
 describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
-  it("3 名中 1 名 attended → 2 名を late に+1pt", async () => {
+  it("3 名中 1 名 attended → 2 名を late 認定 (pending penalty・ポイントは未加算)", async () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio({
       roleMembers: ["U1", "U2", "U3"], attendedUsers: ["U1"],
@@ -133,10 +150,17 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     const members = await db.select().from(kejimeMembers)
       .where(eq(kejimeMembers.eventActionId, tracker.id)).all();
     expect(members.map((m) => m.slackUserId).sort()).toEqual(["U2", "U3"]);
-    expect(members.every((m) => m.currentPoints === 1)).toBe(true);
+    // 「本人が引く」方式: 抽選前なのでポイントは加算されない (全員 0pt)。
+    expect(members.every((m) => m.currentPoints === 0)).toBe(true);
     const events = await db.select().from(kejimeEvents).all();
     expect(events).toHaveLength(2);
-    expect(events.every((e) => e.type === "late" && e.pointsDelta === 1)).toBe(true);
+    // late event は記録するが points_delta=0 (抽選で後埋めされる)。
+    expect(events.every((e) => e.type === "late" && e.pointsDelta === 0)).toBe(true);
+    // penalty は status='pending' (未抽選) で 2 件作られる。
+    const pens = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).all();
+    expect(pens).toHaveLength(2);
+    expect(pens.every((p) => p.status === "pending" && p.points === 0)).toBe(true);
     // morning_attendance に late が 2 件追加されている。
     const late = await db.select().from(morningAttendance)
       .where(eq(morningAttendance.status, "late")).all();
@@ -154,7 +178,8 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     expect(events).toHaveLength(2);
   });
 
-  it("既に internal=4 → late で 5 に達し ramen_count=+1 (5pt 表示キャップは UI 側)", async () => {
+  it("late 認定はポイントを動かさない / 本人がガチャ(1pt)を引くと internal=4→5 で ramen+1", async () => {
+    forceGachaR(0.1); // 1pt
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
     const db = testDb();
@@ -164,12 +189,22 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
       createdAt: "2026-05-17T00:00:00.000Z", updatedAt: "2026-05-17T00:00:00.000Z",
     });
     await processLateJudgment(testD1());
-    const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, "km-pre")).get();
+    // 認定直後はポイント据え置き (抽選前)。
+    let m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, "km-pre")).get();
+    expect(m?.currentPoints).toBe(4);
+    expect(m?.ramenCount).toBe(0);
+    // 本人がガチャを引く → 1pt 加算で 5 に達し ramen+1。
+    const pen = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    const r = await drawPendingGacha(testD1(), pen!.id, "U1");
+    expect(r.ok).toBe(true);
+    m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, "km-pre")).get();
     expect(m?.currentPoints).toBe(5);
     expect(m?.ramenCount).toBe(1);
   });
 
-  it("internal=9 → late で 10 に達し ramen +1", async () => {
+  it("internal=9 → 本人がガチャ(1pt)を引くと 10 に達し ramen +1", async () => {
+    forceGachaR(0.1); // 1pt
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
     const db = testDb();
@@ -179,6 +214,9 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
       createdAt: "2026-05-17T00:00:00.000Z", updatedAt: "2026-05-17T00:00:00.000Z",
     });
     await processLateJudgment(testD1());
+    const pen = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    await drawPendingGacha(testD1(), pen!.id, "U1");
     const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, "km-9")).get();
     expect(m?.currentPoints).toBe(10);
     expect(m?.ramenCount).toBe(2);
@@ -226,6 +264,113 @@ describe("processLateJudgment: 月曜 8:00 / 平日 late 認定", () => {
     const keys = jobs.map((j) => j.dedupKey).sort();
     expect(keys[0]).toMatch(/:20260518:0800$/);
     expect(keys[1]).toMatch(/:20260518:1000$/);
+  });
+});
+
+describe("遅刻ガチャ「本人が引く」(drawPendingGacha)", () => {
+  it("late 認定 → 本人がガチャ(r=0.80, 2pt)を引くと 2pt 確定 + late event 後埋め", async () => {
+    forceGachaR(0.80); // 0.70<=r<0.95 → 2pt
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const db = testDb();
+    const pen = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    const r = await drawPendingGacha(testD1(), pen!.id, "U1");
+    expect(r.ok && r.points).toBe(2);
+    const m = await db.select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(2);
+    // penalty が pending -> open に遷移し points / required_chars 確定 (2pt x 1000)。
+    const penAfter = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, pen!.id)).get();
+    expect(penAfter?.status).toBe("open");
+    expect(penAfter?.points).toBe(2);
+    expect(penAfter?.requiredChars).toBe(2000);
+    // late event の points_delta が後埋めされ note にガチャ結果が入る。
+    const ev = await db.select().from(kejimeEvents).all();
+    expect(ev).toHaveLength(1);
+    expect(ev[0].pointsDelta).toBe(2);
+    expect(ev[0].note).toContain("gacha 2pt");
+  });
+
+  it("r=0.99 → 3pt (3000字)", async () => {
+    forceGachaR(0.99); // r>=0.95 → 3pt
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const pen = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    await drawPendingGacha(testD1(), pen!.id, "U1");
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(3);
+    const penAfter = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, pen!.id)).get();
+    expect(penAfter?.requiredChars).toBe(3000);
+  });
+
+  it("config の latePointWeights を尊重する (p1=0/p2=0/p3=100 なら必ず 3pt)", async () => {
+    forceGachaR(0.0); // どんな r でも 3pt のはず
+    freezeJst(MON, "08:00");
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, {
+      actionType: "morning_standup",
+      config: JSON.stringify({ schemaVersion: 1, channelId: "C-X", themes: {} }),
+    });
+    const tracker = await makeEventAction(ev.id, {
+      actionType: "kejime_tracker",
+      config: JSON.stringify({
+        schemaVersion: 1, roleId: "role-w",
+        latePointWeights: { p1: 0, p2: 0, p3: 100 },
+      }),
+    });
+    const role = await makeSlackRole(tracker.id, { id: "role-w", name: "勉強会" });
+    await makeSlackRoleMember(role.id, "U1");
+    await processLateJudgment(testD1());
+    const pen = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    await drawPendingGacha(testD1(), pen!.id, "U1");
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(3);
+  });
+
+  it("二重抽選防止: 同じ penalty を 2 回引いても 1 回しか確定しない", async () => {
+    forceGachaR(0.1); // 1pt
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const pen = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    const r1 = await drawPendingGacha(testD1(), pen!.id, "U1");
+    const r2 = await drawPendingGacha(testD1(), pen!.id, "U1");
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toBe("already_drawn");
+    // ポイントは 1 回分 (1pt) しか加算されない。
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.eventActionId, tracker.id)).get();
+    expect(m?.currentPoints).toBe(1);
+    // late event も 1 件・points_delta=1 のまま (重複加算なし)。
+    const ev = await testDb().select().from(kejimeEvents).all();
+    expect(ev).toHaveLength(1);
+    expect(ev[0].pointsDelta).toBe(1);
+  });
+
+  it("他人は引けない (forbidden) / 本人なら引ける", async () => {
+    forceGachaR(0.1);
+    freezeJst(MON, "08:00");
+    const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
+    await processLateJudgment(testD1());
+    const pen = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    const other = await drawPendingGacha(testD1(), pen!.id, "U-OTHER");
+    expect(other.ok).toBe(false);
+    if (!other.ok) expect(other.reason).toBe("forbidden");
+    // 本人なら引ける。
+    const mine = await drawPendingGacha(testD1(), pen!.id, "U1");
+    expect(mine.ok).toBe(true);
   });
 });
 
