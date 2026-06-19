@@ -205,8 +205,10 @@ export function KejimeSettingsForm({
           }}
         />
         <div style={s.hint}>
-          default は {DEFAULT_MIN}。ペナルティ記事の必要文字数は「保有ポイント x この値」になります
+          default は {DEFAULT_MIN}。ペナルティは遅刻イベント単位で、各イベントごとに記事 1 本
+          (そのイベントのガチャ pt x この値・その日のテーマ準拠) が必要です
           (1pt={DEFAULT_MIN}字 / 2pt={DEFAULT_MIN * 2}字 / 3pt={DEFAULT_MIN * 3}字)。これ未満は自動却下。
+          別イベントを 1 本に合算してクリアはできません。
         </div>
       </Field>
 

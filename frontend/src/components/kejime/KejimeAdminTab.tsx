@@ -10,7 +10,12 @@ type Member = { id: string; displayName: string; slackUserId: string;
 type EventRow = { id: string; type: string; pointsDelta: number; ramenDelta: number;
   ref: string | null; note: string | null; decidedBy: string | null; occurredAt: string };
 type Article = { id: string; memberId: string; memberDisplayName: string;
-  qiitaUrl: string; bodyLength: number | null; status: string; createdAt: string };
+  qiitaUrl: string; bodyLength: number | null; status: string; createdAt: string;
+  // イベント単位ペナルティ連携: 対象 penalty / テーマ承認状態 / 消費 pt。
+  penaltyId: string | null; themeApproved: number | null; pointsToClear: number | null };
+type Penalty = { id: string; memberDisplayName: string; slackUserId: string;
+  date: string; theme: string; points: number; requiredChars: number;
+  status: string; clearedAt: string | null };
 
 function Section({ title, empty, isEmpty, children }: {
   title: string; empty: string; isEmpty: boolean; children: ReactNode;
@@ -75,6 +80,7 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
   const [members, setMembers] = useState<Member[] | null>(null);
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [articles, setArticles] = useState<Article[] | null>(null);
+  const [penalties, setPenalties] = useState<Penalty[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,12 +88,13 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [m, e, a] = await Promise.all([
+      const [m, e, a, p] = await Promise.all([
         request<Member[]>(`${base}/members`),
         request<EventRow[]>(`${base}/events`),
         request<Article[]>(`${base}/articles?status=needs_review`),
+        request<Penalty[]>(`${base}/penalties?status=open`),
       ]);
-      setMembers(m); setEvents(e.slice(0, 20)); setArticles(a);
+      setMembers(m); setEvents(e.slice(0, 20)); setArticles(a); setPenalties(p);
     } catch (err) { setError(err instanceof Error ? err.message : "load failed"); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
@@ -114,11 +121,12 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
     } finally { setBusy(null); }
   }
 
-  if (members === null || events === null || articles === null) {
+  if (members === null || events === null || articles === null || penalties === null) {
     return <div style={s.hint}>読み込み中...</div>;
   }
   const ranking = members.filter((m) => m.ramenCount > 0)
     .sort((a, b) => b.ramenCount - a.ramenCount);
+  const penaltyById = new Map(penalties.map((p) => [p.id, p]));
 
   return (
     <div style={{ display: "grid", gap: "1.5rem" }}>
@@ -165,22 +173,64 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
 
       <Section title={`📝 申請待ち記事 (${articles.length})`}
         empty="申請待ちなし" isEmpty={articles.length === 0}>
-        {articles.map((a) => (
-          <div key={a.id} style={s.row}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600 }}>{a.memberDisplayName}</div>
-              <div style={s.meta}>
-                <a href={a.qiitaUrl} target="_blank" rel="noreferrer">{a.qiitaUrl}</a>
+        {articles.map((a) => {
+          const pen = a.penaltyId ? penaltyById.get(a.penaltyId) : null;
+          return (
+            <div key={a.id} style={{ ...s.row, flexDirection: "column", alignItems: "stretch" }}>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{a.memberDisplayName}</div>
+                  <div style={s.meta}>
+                    <a href={a.qiitaUrl} target="_blank" rel="noreferrer">{a.qiitaUrl}</a>
+                  </div>
+                  <div style={s.meta}>
+                    {a.bodyLength != null ? `${a.bodyLength}文字` : "本文未取得"} / {a.status}
+                    {pen && ` / 対象: ${pen.date} ${pen.theme || "(テーマ未設定)"} (要 ${pen.requiredChars}字)`}
+                    {a.themeApproved === 1 && " / テーマ承認済"}
+                  </div>
+                </div>
+                <button className="btn btn-primary btn-sm" disabled={busy === `a-${a.id}`}
+                  onClick={() => post("/article-manual-approve", { articleRequestId: a.id },
+                    `a-${a.id}`,
+                    `この記事を手動承認します (テーマ承認 + 文字数承認):\n${a.qiitaUrl}`)}>
+                  手動承認
+                </button>
               </div>
+              {a.penaltyId && (
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                  <span style={{ ...s.meta, flex: 1 }}>
+                    テーマ準拠の確認: 「{pen?.theme || "テーマ"}」に沿うか
+                  </span>
+                  <button className="btn btn-ghost btn-sm" disabled={busy === `t-${a.id}`}
+                    onClick={() => post("/article-theme-approve",
+                      { articleRequestId: a.id, approve: true }, `t-${a.id}`,
+                      `この記事はテーマ「${pen?.theme || ""}」に沿うと承認します。`)}>
+                    テーマ承認
+                  </button>
+                  <button className="btn btn-ghost btn-sm" disabled={busy === `tr-${a.id}`}
+                    onClick={() => post("/article-theme-approve",
+                      { articleRequestId: a.id, approve: false }, `tr-${a.id}`,
+                      `この記事をテーマ不一致で差し戻します。`)}>
+                    差し戻し
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Section>
+
+      <Section title={`🗓 未消化の遅刻イベント (${penalties.length})`}
+        empty="未消化なし" isEmpty={penalties.length === 0}>
+        {penalties.map((p) => (
+          <div key={p.id} style={s.row}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600 }}>{p.memberDisplayName}</div>
               <div style={s.meta}>
-                {a.bodyLength != null ? `${a.bodyLength}文字` : "本文未取得"} / {a.status}
+                {p.date} / テーマ: {p.theme || "(未設定)"} / {p.points}pt = 記事1本 {p.requiredChars}字
               </div>
             </div>
-            <button className="btn btn-primary btn-sm" disabled={busy === `a-${a.id}`}
-              onClick={() => post("/article-manual-approve", { articleRequestId: a.id },
-                `a-${a.id}`, `この記事を手動承認します:\n${a.qiitaUrl}\n-1pt 加算されます。`)}>
-              手動承認
-            </button>
+            <span style={s.badge}>open</span>
           </div>
         ))}
       </Section>
