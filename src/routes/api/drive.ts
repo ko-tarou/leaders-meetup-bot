@@ -8,11 +8,13 @@
  *   - GET /drive/list           (admin) - フォルダ直下の一覧 (?folderId= &pageToken= &pageSize=)
  *   - GET /drive/file/:id        (admin) - ファイルのメタデータ
  *   - GET /drive/file/:id/content (admin) - ファイル内容 (export/get media を表示用に返す)
+ *   - PUT /drive/file/:id/content (admin) - プレーンファイルの本文を上書き (files.update media)
  *
  * gmailAccountId は query で明示できる。省略時は連携済みアカウントが 1 件だけなら
  * それを使い、複数あれば 400 (どれを使うか曖昧) を返す (sheets.ts と同方針)。
  *
- * scope: `https://www.googleapis.com/auth/drive.readonly` (gmail-accounts.ts の GMAIL_SCOPE)。
+ * scope: `https://www.googleapis.com/auth/drive` (gmail-accounts.ts の GMAIL_SCOPE)。
+ *   案2 で write を足したため readonly -> drive (full)。
  *   既存連携アカウントは scope 不足。403 (scope_missing) が返るので、その場合は
  *   `/api/google-oauth/install` から 1 回 再同意すれば解消する。
  */
@@ -24,6 +26,7 @@ import {
   listFiles,
   getFileMeta,
   getFileContent,
+  updateFileContent,
   DriveError,
 } from "../../services/drive";
 
@@ -84,6 +87,17 @@ function driveErrorResponse(e: DriveError): {
           detail: e.body,
         },
       };
+    case "not_writable":
+      // Google ネイティブ形式 (Docs/Sheets/Slides) やフォルダ・バイナリは
+      // media upload で書けない。FE には「この種類は書き込み不可」と伝える。
+      return {
+        status: 400,
+        body: {
+          error: "not_writable",
+          message:
+            "このファイルは media 書き込みに対応していません (Google ネイティブ形式・フォルダ・バイナリは不可)。",
+        },
+      };
     case "no_credentials":
       return { status: 400, body: { error: "no_credentials", message: e.message } };
     default:
@@ -140,6 +154,48 @@ driveRouter.get("/drive/file/:id", async (c) => {
   try {
     const meta = await getFileMeta(c.env, acc.id, fileId);
     return c.json(meta);
+  } catch (e) {
+    if (e instanceof DriveError) {
+      const { status, body } = driveErrorResponse(e);
+      return c.json(body, status);
+    }
+    return c.json({ error: "internal_error", message: String(e) }, 500);
+  }
+});
+
+// === PUT /drive/file/:id/content === (admin) - プレーンファイルの本文を上書き
+// body: { content: string, contentType?: string, gmailAccountId?: string }
+// Google ネイティブ形式 (Docs/Sheets/Slides) は別 API が必要なため 400 (not_writable)。
+driveRouter.put("/drive/file/:id/content", async (c) => {
+  const fileId = c.req.param("id");
+  if (!fileId) return c.json({ error: "file_id_required" }, 400);
+
+  let payload: { content?: unknown; contentType?: unknown; gmailAccountId?: unknown };
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_json" }, 400);
+  }
+  if (typeof payload.content !== "string") {
+    return c.json({ error: "content_required", hint: "content は文字列で渡してください" }, 400);
+  }
+  const contentType =
+    typeof payload.contentType === "string" ? payload.contentType : undefined;
+  const explicitAccount =
+    typeof payload.gmailAccountId === "string" ? payload.gmailAccountId : undefined;
+
+  const acc = await resolveAccountId(c.env, explicitAccount);
+  if ("error" in acc) return c.json(accountErrorJson(acc), 400);
+
+  try {
+    const result = await updateFileContent(
+      c.env,
+      acc.id,
+      fileId,
+      payload.content,
+      contentType,
+    );
+    return c.json(result);
   } catch (e) {
     if (e instanceof DriveError) {
       const { status, body } = driveErrorResponse(e);
