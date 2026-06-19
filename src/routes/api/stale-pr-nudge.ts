@@ -30,8 +30,22 @@ stalePrNudgeRouter.post(`${BASE}/send`, async (c) => {
   const res = await nudgeActionById(c.env.DB, c.env, eventId, actionId);
   if (!res.ok) {
     // action 不在 / 別 actionType → 404、config 不正 (設定未完了) → 400。
-    const status = res.error === "invalid_config" ? 400 : 404;
-    return c.json({ ok: false, error: res.error }, status);
+    // config 未完了 (監視 repo / 催促チャンネル未設定) は「エラー」ではなく
+    // 「設定が足りない」ので、フロントが設定タブへ誘導できるよう機械可読な
+    // reason ("config_incomplete") と日本語 message を一緒に返す。
+    if (res.error === "invalid_config") {
+      return c.json(
+        {
+          ok: false,
+          error: "invalid_config",
+          reason: "config_incomplete",
+          message:
+            "停滞 PR リマインドの設定が未完了です。設定タブで監視リポジトリと催促チャンネルを設定してください。",
+        },
+        400,
+      );
+    }
+    return c.json({ ok: false, error: res.error }, 404);
   }
   return c.json({ ok: true, nudged: res.nudged });
 });
