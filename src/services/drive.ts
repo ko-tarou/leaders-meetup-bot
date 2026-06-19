@@ -67,6 +67,7 @@ const MAX_CONTENT_BYTES = 1024 * 1024;
 
 export type DriveErrorReason =
   | "scope_missing"
+  | "api_not_enabled"
   | "account_not_found"
   | "no_credentials"
   | "refresh_failed"
@@ -249,12 +250,44 @@ async function fetchWithRetry(
 }
 
 /**
+ * Drive API の 403 には 2 種類あり、ユーザーへの案内が真逆になるため区別する。
+ *
+ *   - `accessNotConfigured` (= API 未有効化):
+ *       GCP プロジェクトで Drive API が有効化されていない。OAuth scope は付与済みでも
+ *       発生し、再同意では絶対に直らない。GCP Console で Drive API を有効化する必要がある。
+ *   - それ以外 (`insufficientPermissions` 等 = scope 不足):
+ *       連携アカウントの token に drive.readonly が無い。再同意で直る。
+ *
+ * 旧実装は全 403 を scope_missing 扱いにしていたため、API 未有効化のときも
+ * 「再同意して」と案内し、ユーザーが何度再同意しても直らない無限ループに陥っていた。
+ */
+function isAccessNotConfigured(body: string): boolean {
+  // Google の 403 body には reason / status / message が含まれる。
+  // accessNotConfigured (errors[].reason) または SERVICE_DISABLED (status) で判定。
+  // message にも "has not been used in project ... or it is disabled" が入る。
+  return (
+    /accessNotConfigured/i.test(body) ||
+    /SERVICE_DISABLED/i.test(body) ||
+    /has not been used in project|it is disabled/i.test(body)
+  );
+}
+
+/**
  * Drive API のエラー Response を DriveError に変換して throw する。
- * 403 は scope 不足 (OAuth 再同意が必要)、404 は not_found として reason を分ける。
+ * 403 は API 未有効化 (api_not_enabled) と scope 不足 (scope_missing) を区別し、
+ * 404 は not_found として reason を分ける。
  */
 async function throwDriveApiError(res: Response): Promise<never> {
   const text = await res.text().catch(() => "");
   if (res.status === 403) {
+    if (isAccessNotConfigured(text)) {
+      throw new DriveError(
+        "drive API not enabled in GCP project",
+        "api_not_enabled",
+        res.status,
+        text.slice(0, 500),
+      );
+    }
     throw new DriveError(
       "drive API forbidden (scope_missing?): " + text.slice(0, 200),
       "scope_missing",

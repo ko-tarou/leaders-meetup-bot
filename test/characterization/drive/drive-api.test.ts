@@ -138,6 +138,25 @@ describe("listFiles (service)", () => {
     });
   });
 
+  it("403 accessNotConfigured (API 未有効化) -> DriveError(reason=api_not_enabled)", async () => {
+    // Drive API が GCP プロジェクトで未有効化のときの実際の Google エラー body。
+    // scope は付与済みでも発生し、再同意では直らない。scope_missing と区別する。
+    const body = JSON.stringify({
+      error: {
+        code: 403,
+        message:
+          "Google Drive API has not been used in project 630835230066 before or it is disabled.",
+        errors: [{ reason: "accessNotConfigured" }],
+        status: "PERMISSION_DENIED",
+      },
+    });
+    stubFetch(() => new Response(body, { status: 403 }));
+    await expect(listFiles(env, ACCOUNT_ID, { folderId: "root" })).rejects.toMatchObject({
+      name: "DriveError",
+      reason: "api_not_enabled",
+    });
+  });
+
   it("account 不在 -> DriveError(account_not_found), API は呼ばれない", async () => {
     stubFetch(() => jsonResponse({ files: [] }));
     await expect(listFiles(env, "ghost", { folderId: "root" })).rejects.toMatchObject({
@@ -243,6 +262,23 @@ describe("GET /drive/list (route)", () => {
     const body = (await res.json()) as { error: string; message: string };
     expect(body.error).toBe("scope_missing");
     expect(body.message).toContain("google-oauth/install");
+  });
+
+  it("403 api_not_enabled -> 403 + Drive API 有効化案内 (再同意ではない)", async () => {
+    const gbody = JSON.stringify({
+      error: {
+        message: "... has not been used in project 630835230066 ... it is disabled.",
+        errors: [{ reason: "accessNotConfigured" }],
+        status: "PERMISSION_DENIED",
+      },
+    });
+    stubFetch(() => new Response(gbody, { status: 403 }));
+    const res = await app().request("/drive/list", {}, env);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe("api_not_enabled");
+    expect(body.message).toContain("Drive API");
+    expect(body.message).not.toContain("google-oauth/install");
   });
 
   it("0 件 -> 400 no_connected_account", async () => {

@@ -72,6 +72,18 @@ function driveErrorResponse(e: DriveError): {
           detail: e.body,
         },
       };
+    case "api_not_enabled":
+      // GCP プロジェクトで Drive API が未有効化。再同意では直らない。
+      // OAuth クライアント所有プロジェクトの管理者が Console で有効化する必要がある。
+      return {
+        status: 403,
+        body: {
+          error: "api_not_enabled",
+          message:
+            "Google Drive API が GCP プロジェクトで有効化されていません。OAuth クライアントのプロジェクトで Drive API を有効化してください (再同意では直りません)。",
+          detail: e.body,
+        },
+      };
     case "no_credentials":
       return { status: 400, body: { error: "no_credentials", message: e.message } };
     default:
