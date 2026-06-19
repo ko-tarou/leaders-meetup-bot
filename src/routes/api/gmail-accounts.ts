@@ -33,7 +33,14 @@ export const gmailAccountsRouter = new Hono<{ Bindings: Env }>();
 // 案6 (sheets): spreadsheets を追加。打診管理シート等を read/write するため必要
 //   (services/sheets.ts + routes/api/sheets.ts)。
 // 案7 (drive): drive.readonly を追加。Drive の中身をアプリ上で閲覧するため必要
-//   (services/drive.ts + routes/api/drive.ts)。read-only なので drive (full) は使わない。
+//   (services/drive.ts + routes/api/drive.ts)。
+// 案2 (drive write): drive.readonly -> drive (full) に昇格。プレーンファイル
+//   (text/markdown/csv/code/json) を files.update の media upload で書き戻すため、
+//   書き込み権限が要る。drive.file は「アプリが作成 or Picker で開いたファイル」しか
+//   触れず、既存の「ドライブ全体をブラウズ (files.list で root から全走査)」機能が
+//   壊れる。既存 read を維持したまま write も得るには drive (full) が必要。
+//   write 先は services/drive.ts の isPlainWritable で round-trip 可能な
+//   プレーンファイルに限定し、Google ネイティブ形式は弾く。
 // 既存連携アカウントは scope 不足なので、kota が一度 /api/google-oauth/install から
 // 再同意する必要がある (新スコープ追加のたびに 1 回 再同意が要る)。
 const GMAIL_SCOPE = [
@@ -42,7 +49,7 @@ const GMAIL_SCOPE = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive",
 ].join(" ");
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 分
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";

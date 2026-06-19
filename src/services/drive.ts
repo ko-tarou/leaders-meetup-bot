@@ -12,7 +12,8 @@
  *     user-friendly message (= OAuth 再同意が必要) に変換させる。
  *   - 裸 fetch で実装 (リポジトリの既存方針: googleapis を足さない)。
  *
- * scope: `https://www.googleapis.com/auth/drive.readonly` (gmail-accounts.ts の GMAIL_SCOPE)。
+ * scope: `https://www.googleapis.com/auth/drive` (gmail-accounts.ts の GMAIL_SCOPE)。
+ *   案2 で write (files.update media upload) を追加したため readonly -> drive (full)。
  * docs:
  *   list:   https://developers.google.com/drive/api/reference/rest/v3/files/list
  *   get:    https://developers.google.com/drive/api/reference/rest/v3/files/get
@@ -72,6 +73,7 @@ export type DriveErrorReason =
   | "no_credentials"
   | "refresh_failed"
   | "not_found"
+  | "not_writable"
   | "api_error";
 
 export class DriveError extends Error {
@@ -117,6 +119,24 @@ export type FileContent = {
   /** MAX_CONTENT_BYTES を超えて切り詰めたか。 */
   truncated: boolean;
 };
+
+export type UpdateResult = {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+};
+
+/**
+ * media upload で書き込み可能 (round-trip 可能) と判断する mimeType か。
+ * Google ネイティブ形式 (Docs/Sheets/Slides) は media upload では書けない
+ * (Sheets/Docs API 経由が必要) ので false を返し、呼び出し側で 400 にさせる。
+ */
+export function isPlainWritable(mimeType: string): boolean {
+  if (isFolderMime(mimeType)) return false;
+  if (mimeType.startsWith("application/vnd.google-apps.")) return false;
+  return isTextual(mimeType);
+}
 
 /**
  * 有効な access_token を返す。失効していれば refresh して DB を更新する。
@@ -464,4 +484,64 @@ export async function getFileContent(
 
   // バイナリ (画像/PDF 等) はインライン表示しない。FE が Drive で開く案内を出す。
   return { kind: "binary", contentType: meta.mimeType, truncated: false };
+}
+
+/** files.update (media upload) のエンドポイント。 */
+const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
+
+/**
+ * files.update + uploadType=media でプレーンファイルの本文を上書きする。
+ *
+ *   - Docs/Sheets/Slides 等の Google ネイティブ形式はここでは扱えない
+ *     (Sheets/Docs API 経由が必要)。呼び出し側で isPlainWritable で弾く。
+ *   - body は raw bytes をそのまま PATCH する (round-trip)。contentType は
+ *     呼び出し側が指定 (省略時はファイルの既存 mimeType)。
+ *   - 既存 read 同様 fetchWithRetry で 401 を 1 回 refresh + retry する。
+ *   - エラーは throwDriveApiError で scope_missing / api_not_enabled / not_found を区別。
+ *
+ * docs: https://developers.google.com/drive/api/reference/rest/v3/files/update
+ */
+export async function updateFileContent(
+  env: Env,
+  gmailAccountId: string,
+  fileId: string,
+  content: string,
+  contentType?: string,
+): Promise<UpdateResult> {
+  const row = await getAccountRow(env, gmailAccountId);
+  // 既存 mimeType を取得し、ネイティブ形式や mimeType の取り違えを防ぐ。
+  const meta = await getFileMeta(env, gmailAccountId, fileId);
+  if (!isPlainWritable(meta.mimeType)) {
+    throw new DriveError(
+      `not a plain writable file: ${meta.mimeType}`,
+      "not_writable",
+      400,
+    );
+  }
+  const mime = contentType && contentType.trim() !== "" ? contentType : meta.mimeType;
+
+  const params = new URLSearchParams({
+    uploadType: "media",
+    supportsAllDrives: "true",
+    fields: "id,name,mimeType,modifiedTime",
+  });
+  const url = `${DRIVE_UPLOAD_BASE}/files/${encodeURIComponent(fileId)}?${params.toString()}`;
+  const res = await fetchWithRetry(env, row, (token) =>
+    fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": mime,
+      },
+      body: content,
+    }),
+  );
+  if (!res.ok) await throwDriveApiError(res);
+  const json = (await res.json()) as Record<string, unknown>;
+  return {
+    id: String(json.id ?? fileId),
+    name: String(json.name ?? meta.name),
+    mimeType: String(json.mimeType ?? mime),
+    modifiedTime: json.modifiedTime ? String(json.modifiedTime) : undefined,
+  };
 }
