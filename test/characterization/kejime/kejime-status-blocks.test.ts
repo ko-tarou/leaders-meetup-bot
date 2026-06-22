@@ -215,6 +215,51 @@ describe("buildStatusBlocks: セクション省略", () => {
     const t = text(blocks);
     expect(t).toContain("記事申請待ち");
     expect(t).toContain("山田: https://qiita.com/foo/items/xxx");
-    expect(t).toContain("いいね待ち");
+    expect(t).toContain("LGTM");
+  });
+});
+
+describe("buildStatusBlocks: 申請待ち記事の承認 (LGTM) ボタン", () => {
+  it("requestId 付きの申請待ち → 承認ボタン (action_id=kejime_article_lgtm:<requestId>) が出る", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 1, ramenCount: 0 }],
+      [{ displayName: "山田", qiitaUrl: "https://qiita.com/foo/items/xxx", requestId: "req-1" }],
+      "2026-05-19 (火)",
+    );
+    const actionsBlocks = blocks.filter(
+      (b) => (b as { type?: string }).type === "actions",
+    ) as Array<{ elements: Array<{ action_id: string; value: string; text: { text: string } }> }>;
+    const approve = actionsBlocks.find((b) =>
+      b.elements.some((e) => e.action_id.startsWith("kejime_article_lgtm:")));
+    expect(approve).toBeTruthy();
+    const btn = approve!.elements[0];
+    expect(btn.action_id).toBe("kejime_article_lgtm:req-1");
+    expect(btn.value).toBe("req-1");
+    expect(btn.text.text).toContain("承認");
+  });
+
+  it("requestId 無しの申請待ち → 承認ボタンは出ない (旧呼び出し互換)", () => {
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 1, ramenCount: 0 }],
+      [{ displayName: "山田", qiitaUrl: "https://qiita.com/foo/items/xxx" }],
+      "2026-05-19 (火)",
+    );
+    expect(JSON.stringify(blocks)).not.toContain("kejime_article_lgtm:");
+  });
+
+  it("申請待ち 6 件 → 承認ボタンは 5 要素ずつ分割される (Slack 制限)", () => {
+    const arts = Array.from({ length: 6 }, (_, i) => ({
+      displayName: `m${i}`, qiitaUrl: `https://qiita.com/x/items/${i}`, requestId: `req-${i}`,
+    }));
+    const blocks = buildStatusBlocks(
+      [{ displayName: "山田", currentPoints: 1, ramenCount: 0 }],
+      arts, "2026-05-19 (火)",
+    );
+    const approveActions = (blocks as Array<{ type?: string; elements?: unknown[] }>)
+      .filter((b) => b.type === "actions"
+        && JSON.stringify(b).includes("kejime_article_lgtm:"));
+    expect(approveActions).toHaveLength(2);
+    expect((approveActions[0].elements ?? []).length).toBe(5);
+    expect((approveActions[1].elements ?? []).length).toBe(1);
   });
 });

@@ -12,6 +12,7 @@ import {
   DEFAULT_CLOSE_TIME, addMinutesToHHMM, isWithinFireWindow, normalizeFireTime,
   toHHMM,
 } from "./morning-standup";
+import { KEJIME_LGTM_THRESHOLD } from "./kejime-article-flow";
 
 // 003 朝勉強会けじめ制度 PR4: 平日 8:05 JST window で kejime_tracker action
 // ごとに「現在のけじめステータス (激辛累計 / ポイント / 申請待ち)」を再投稿。
@@ -34,6 +35,9 @@ type MemberRow = {
 type ArticleRow = {
   displayName: string;
   qiitaUrl: string;
+  // 承認 (LGTM) ボタンを当ステータスにも出すための request id。
+  // 旧呼び出し (テスト等) では未指定可。未指定の行はボタンを出さない。
+  requestId?: string;
 };
 // 未抽選 (pending) の遅刻イベント。本人が「ガチャを引く」ボタンで抽選する。
 type PendingGacha = {
@@ -113,11 +117,34 @@ export function buildStatusBlocks(
   if (articles.length > 0) {
     lines.push("", ":memo: *記事申請待ち*");
     for (const a of articles) {
-      lines.push(`  • ${a.displayName}: ${a.qiitaUrl} (いいね待ち)`);
+      lines.push(`  • ${a.displayName}: ${a.qiitaUrl} (LGTM ${KEJIME_LGTM_THRESHOLD} 件で承認)`);
     }
   }
 
   const blocks: Block[] = [mrkdwnSection(lines.join("\n"))];
+
+  // 📝 申請待ち記事の承認 (LGTM) ボタン。元の記事メッセージが流れて見つから
+  // なくても、このステータスから誰でも承認できるようにする (CHANGE ②)。
+  // action_id = kejime_article_lgtm:<requestId> は既存の interactions ハンドラと共通。
+  // requestId が分かる行だけボタンを出す。Slack の actions block は最大 5 要素
+  // なので 5 件ずつ別 block に分割する (ガチャと同様)。
+  const approvable = articles.filter(
+    (a): a is ArticleRow & { requestId: string } => !!a.requestId,
+  );
+  for (let i = 0; i < approvable.length; i += 5) {
+    blocks.push({
+      type: "actions",
+      elements: approvable.slice(i, i + 5).map((a) => ({
+        type: "button",
+        text: {
+          type: "plain_text",
+          text: `:+1: ${a.displayName} の記事を承認`,
+        },
+        action_id: `kejime_article_lgtm:${a.requestId}`,
+        value: a.requestId,
+      })),
+    });
+  }
 
   // 🎲 未抽選ガチャ: 本人が「ガチャを引く」を押すまでポイント未確定。
   // penalty ごとに 1 行 (誰の・いつの遅刻か) + ガチャボタンを並べる。
@@ -279,6 +306,7 @@ async function buildLatestStatusBlocks(
 
   // 申請待ち = status='pending'。member_id JOIN で display_name を解決。
   const articleRows = await d1.select({
+    requestId: kejimeArticleRequests.id,
     qiitaUrl: kejimeArticleRequests.qiitaUrl,
     displayName: kejimeMembers.displayName,
     slackUserId: kejimeMembers.slackUserId,
@@ -290,6 +318,7 @@ async function buildLatestStatusBlocks(
     )).all();
   const nameMap = new Map(members.map((m) => [m.slackUserId, m.displayName]));
   const resolvedArticleRows = articleRows.map((a) => ({
+    requestId: a.requestId,
     qiitaUrl: a.qiitaUrl,
     displayName: nameMap.get(a.slackUserId) ?? a.displayName,
   }));

@@ -172,7 +172,7 @@ describe("processKejimeStatusPost: 平日 8:05 投稿", () => {
     expect(blocks).toContain("████░ 4 pt");
     expect(blocks).toContain("田中 ×2");
     expect(blocks).toContain("https://qiita.com/yamada/items/abc");
-    expect(blocks).toContain("いいね待ち");
+    expect(blocks).toContain("LGTM");
   });
 
   it("approved / rejected の申請は申請待ちセクションに出ない", async () => {
