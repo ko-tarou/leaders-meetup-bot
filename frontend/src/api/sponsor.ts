@@ -16,11 +16,13 @@ export const sponsor = {
     eventId: string,
     data: {
       // 個人スポンサー (0065): お名前(必須) / 所属(任意) / 応援メッセージ(任意)
+      // 協賛金額は一律 5000 円固定 (0069) のため送らない。
       name: string;
       affiliation?: string;
       message?: string;
       email: string;
-      amount: number;
+      // 当日来場アンケート (0069・任意)
+      attendanceOnDay?: "coming" | "not_coming" | "undecided";
     },
   ) =>
     publicRequest<{ ok: boolean; id: string }>(`/sponsor/${eventId}`, {

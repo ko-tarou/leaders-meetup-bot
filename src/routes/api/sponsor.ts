@@ -13,8 +13,12 @@ export const sponsorRouter = new Hono<{ Bindings: Env }>();
 
 const ACTION_TYPE = "sponsor_application";
 
-// 申込金額の上限ガード (誤入力 / いたずら対策)。1 億円。
-const MAX_AMOUNT = 100_000_000;
+// 個人スポンサーは一律 5000 円固定 (0069)。フォームの金額入力は廃止し、
+// 公開申込ではこの値を必ず使う (クライアント送信値は無視)。
+const FLAT_AMOUNT = 5000;
+
+// 当日来場アンケートの許容値 (任意・0069)。範囲外 / 未送信は null 扱い。
+const ATTENDANCE_VALUES = ["coming", "not_coming", "undecided"] as const;
 // 簡易 rate-limit / 重複防止: 同一 (event, email) で直近この秒数以内の
 // 申込があれば 429 を返す。メール確認 (confirmToken) と二段で spam を抑える。
 const DUP_WINDOW_SEC = 60;
@@ -77,6 +81,8 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
     name?: unknown;
     affiliation?: unknown;
     message?: unknown;
+    // 当日来場アンケート (0069・任意)
+    attendanceOnDay?: unknown;
     // 後方互換: 旧フォーム (企業前提) の項目も受け付ける
     companyName?: unknown;
     contactName?: unknown;
@@ -103,16 +109,14 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return c.json({ error: "invalid email format" }, 400);
   }
-  // amount: 整数 (number or 数字文字列) で 1 以上 MAX_AMOUNT 以下。
-  const amountNum =
-    typeof body.amount === "number"
-      ? body.amount
-      : typeof body.amount === "string" && body.amount.trim() !== ""
-        ? Number(body.amount)
-        : NaN;
-  if (!Number.isInteger(amountNum) || amountNum < 1 || amountNum > MAX_AMOUNT) {
-    return c.json({ error: "invalid amount" }, 400);
-  }
+  // 個人スポンサーは一律 5000 円固定 (0069)。クライアント送信値は無視する。
+  const amountNum = FLAT_AMOUNT;
+  // 当日来場アンケート (任意)。許容値以外 / 未送信は null。
+  const attendanceOnDay =
+    typeof body.attendanceOnDay === "string" &&
+    (ATTENDANCE_VALUES as readonly string[]).includes(body.attendanceOnDay)
+      ? body.attendanceOnDay
+      : null;
   // 所属(任意) / 応援メッセージ(任意)。個人化 0065。
   const affiliation =
     typeof body.affiliation === "string" && body.affiliation.trim()
@@ -172,6 +176,7 @@ sponsorRouter.post("/sponsor/:eventId", async (c) => {
     amount: amountNum,
     affiliation,
     message,
+    attendanceOnDay,
     period,
     purpose,
     status: "unconfirmed",

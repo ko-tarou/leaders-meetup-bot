@@ -203,6 +203,8 @@ export const sponsorApplications = sqliteTable(
     affiliation: text("affiliation"),
     // 応援メッセージ / コメント（任意）。個人化 0065 で追加。
     message: text("message"),
+    // 当日来場アンケート（任意・0069）。'coming'|'not_coming'|'undecided'|NULL。
+    attendanceOnDay: text("attendance_on_day"),
     // 協賛期間（旧項目・後方互換で残置。個人フォームでは未使用）。
     period: text("period"),
     // 協賛の用途 / 意図（旧項目・後方互換で残置。個人フォームでは未使用）。

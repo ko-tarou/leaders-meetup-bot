@@ -19,6 +19,8 @@ export type SponsorApplication = {
   affiliation: string | null;
   // 応援メッセージ / コメント (任意・個人化 0065)。
   message: string | null;
+  // 当日来場アンケート (任意・0069)。'coming'|'not_coming'|'undecided'|null。
+  attendanceOnDay: "coming" | "not_coming" | "undecided" | null;
   // 旧項目 (後方互換)。
   period: string | null;
   purpose: string | null;
