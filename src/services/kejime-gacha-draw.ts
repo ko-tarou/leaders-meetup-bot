@@ -13,7 +13,7 @@
 //   - 既に open (抽選済み) の penalty を引こうとしたら already_drawn を返す。
 
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { eventActions, kejimeEvents, kejimeMembers, kejimePenalties } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import {
@@ -39,6 +39,74 @@ export type GachaDrawResult =
   | { ok: false; reason: "not_found" | "already_drawn" | "forbidden" | "member_not_found" };
 
 const DISPLAY_CAP = 5;
+
+/** 本人の未抽選 (pending) 遅刻ガチャ 1 件分。 */
+export type MyPendingGacha = {
+  penaltyId: string;
+  date: string;
+  theme: string;
+};
+
+/**
+ * slackUserId 本人の「未抽選 (pending)」遅刻ガチャを古い順に列挙する。
+ * 朝の自動ステータス投稿を待たずに /devhub kejime gacha で本人がいつでも
+ * 引けるようにするための取得 API (CHANGE ①)。
+ * 全 kejime_tracker 横断 (= 本人の slackUserId に紐づく pending 全部)。
+ */
+export async function listMyPendingGachas(
+  db: D1Database, slackUserId: string,
+): Promise<MyPendingGacha[]> {
+  if (!slackUserId) return [];
+  const d1: D1 = drizzle(db);
+  const rows = await d1.select({
+    penaltyId: kejimePenalties.id,
+    date: kejimePenalties.date,
+    theme: kejimePenalties.theme,
+  }).from(kejimePenalties).where(and(
+    eq(kejimePenalties.slackUserId, slackUserId),
+    eq(kejimePenalties.status, "pending"),
+  )).orderBy(asc(kejimePenalties.date), asc(kejimePenalties.createdAt)).all();
+  return rows.map((r) => ({ penaltyId: r.penaltyId, date: r.date, theme: r.theme }));
+}
+
+/**
+ * pure: 本人の未抽選ガチャから Slack Block Kit (ephemeral 用) を組み立てる。
+ * 既存の interactions ハンドラと共通の action_id (kejime_gacha_draw:<penaltyId>)
+ * を使うので、押下時の抽選ロジックはそのまま再利用される。
+ * actions block は Slack 制限に合わせ 5 件ずつ分割する。
+ */
+export function buildMyGachaBlocks(
+  pending: MyPendingGacha[],
+): Array<Record<string, unknown>> {
+  if (pending.length === 0) {
+    return [{
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: ":game_die: 未抽選の遅刻ガチャはありません。遅刻が無ければ何も引く必要はありません。",
+      },
+    }];
+  }
+  const lines = [
+    ":game_die: *あなたの遅刻ガチャ (未抽選)* — ボタンを押して 1〜3pt を引いてください",
+  ].concat(pending.map((g) => `  • ${g.date} (${g.theme}) のガチャ`));
+  const blocks: Array<Record<string, unknown>> = [
+    { type: "section", text: { type: "mrkdwn", text: lines.join("\n") } },
+  ];
+  for (let i = 0; i < pending.length; i += 5) {
+    blocks.push({
+      type: "actions",
+      elements: pending.slice(i, i + 5).map((g) => ({
+        type: "button",
+        text: { type: "plain_text", text: `🎲 ${g.date} のガチャを引く` },
+        style: "primary",
+        action_id: `kejime_gacha_draw:${g.penaltyId}`,
+        value: g.penaltyId,
+      })),
+    });
+  }
+  return blocks;
+}
 
 /** tracker.config (JSON 文字列) から latePointWeights を取り出す。 */
 function parseConfigWeights(raw: string | null | undefined): unknown {
