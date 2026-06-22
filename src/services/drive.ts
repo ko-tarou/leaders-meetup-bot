@@ -127,6 +127,14 @@ export type UpdateResult = {
   modifiedTime?: string;
 };
 
+export type CreateResult = {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  modifiedTime?: string;
+};
+
 /**
  * media upload で書き込み可能 (round-trip 可能) と判断する mimeType か。
  * Google ネイティブ形式 (Docs/Sheets/Slides) は media upload では書けない
@@ -545,3 +553,95 @@ export async function updateFileContent(
     modifiedTime: json.modifiedTime ? String(json.modifiedTime) : undefined,
   };
 }
+
+/** Google Sheet に変換させる際に target mimeType として指定する値。 */
+const GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet";
+
+/** multipart/related の境界文字列 (固定で衝突しない値)。 */
+const MULTIPART_BOUNDARY = "drive-create-boundary-7f3a2c";
+
+/**
+ * files.create (multipart upload) で新規ファイルを作成 / アップロードする。
+ *
+ *   - metadata ({name, parents, mimeType}) + media (本文) を multipart/related で送る。
+ *   - CSV -> Google Sheet 変換: targetMimeType に
+ *     "application/vnd.google-apps.spreadsheet" を指定し、mediaContentType に
+ *     "text/csv" を指定して CSV bytes を送ると、Google が import 時に変換する。
+ *   - そのまま素のファイルとして置くなら targetMimeType を省略 (= mediaContentType)。
+ *   - 既存 read/update 同様 fetchWithRetry で 401 を 1 回 refresh + retry する。
+ *   - エラーは throwDriveApiError で scope_missing / api_not_enabled を区別。
+ *     OAuth scope は drive (full) のため create が許可される。
+ *
+ * docs: https://developers.google.com/drive/api/guides/manage-uploads#multipart
+ */
+export async function createFile(
+  env: Env,
+  gmailAccountId: string,
+  opts: {
+    /** 作成するファイル名。 */
+    name: string;
+    /** 親フォルダ id。省略時はマイドライブ直下。 */
+    parentId?: string;
+    /** アップロードする本文 (バイト列 = string)。 */
+    content: string;
+    /** media (本文) の content type。CSV 変換時は "text/csv"。 */
+    mediaContentType: string;
+    /**
+     * Drive 上で保存する mimeType。CSV -> Sheet 変換なら
+     * "application/vnd.google-apps.spreadsheet"。省略時は mediaContentType と同じ
+     * (= 素のファイルとしてそのまま保存)。
+     */
+    targetMimeType?: string;
+  },
+): Promise<CreateResult> {
+  const row = await getAccountRow(env, gmailAccountId);
+
+  const metadata: Record<string, unknown> = {
+    name: opts.name,
+    mimeType:
+      opts.targetMimeType && opts.targetMimeType.trim() !== ""
+        ? opts.targetMimeType
+        : opts.mediaContentType,
+  };
+  if (opts.parentId && opts.parentId.trim() !== "") {
+    metadata.parents = [opts.parentId.trim()];
+  }
+
+  // multipart/related body を手組みする (Cloudflare Workers の fetch で送れる形)。
+  const body =
+    `--${MULTIPART_BOUNDARY}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${MULTIPART_BOUNDARY}\r\n` +
+    `Content-Type: ${opts.mediaContentType}\r\n\r\n` +
+    `${opts.content}\r\n` +
+    `--${MULTIPART_BOUNDARY}--`;
+
+  const params = new URLSearchParams({
+    uploadType: "multipart",
+    supportsAllDrives: "true",
+    fields: "id,name,mimeType,webViewLink,modifiedTime",
+  });
+  const url = `${DRIVE_UPLOAD_BASE}/files?${params.toString()}`;
+  const res = await fetchWithRetry(env, row, (token) =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": `multipart/related; boundary=${MULTIPART_BOUNDARY}`,
+      },
+      body,
+    }),
+  );
+  if (!res.ok) await throwDriveApiError(res);
+  const json = (await res.json()) as Record<string, unknown>;
+  return {
+    id: String(json.id ?? ""),
+    name: String(json.name ?? opts.name),
+    mimeType: String(json.mimeType ?? metadata.mimeType),
+    webViewLink: json.webViewLink ? String(json.webViewLink) : undefined,
+    modifiedTime: json.modifiedTime ? String(json.modifiedTime) : undefined,
+  };
+}
+
+export { GOOGLE_SHEET_MIME };

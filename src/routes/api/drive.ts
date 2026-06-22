@@ -9,6 +9,7 @@
  *   - GET /drive/file/:id        (admin) - ファイルのメタデータ
  *   - GET /drive/file/:id/content (admin) - ファイル内容 (export/get media を表示用に返す)
  *   - PUT /drive/file/:id/content (admin) - プレーンファイルの本文を上書き (files.update media)
+ *   - POST /drive/upload          (admin) - 新規ファイル作成/アップロード (files.create multipart, CSV->Sheet 変換可)
  *
  * gmailAccountId は query で明示できる。省略時は連携済みアカウントが 1 件だけなら
  * それを使い、複数あれば 400 (どれを使うか曖昧) を返す (sheets.ts と同方針)。
@@ -27,6 +28,8 @@ import {
   getFileMeta,
   getFileContent,
   updateFileContent,
+  createFile,
+  GOOGLE_SHEET_MIME,
   DriveError,
 } from "../../services/drive";
 
@@ -196,6 +199,76 @@ driveRouter.put("/drive/file/:id/content", async (c) => {
       contentType,
     );
     return c.json(result);
+  } catch (e) {
+    if (e instanceof DriveError) {
+      const { status, body } = driveErrorResponse(e);
+      return c.json(body, status);
+    }
+    return c.json({ error: "internal_error", message: String(e) }, 500);
+  }
+});
+
+// === POST /drive/upload === (admin) - 新規ファイル作成 / アップロード (files.create multipart)
+// body: {
+//   name: string,             // 作成するファイル名 (必須)
+//   content: string,          // 本文 (必須)
+//   mediaContentType?: string,// media の content type (既定 text/plain)
+//   parentId?: string,        // 親フォルダ id (省略時マイドライブ直下)
+//   asGoogleSheet?: boolean,  // true なら CSV -> Google Sheet 変換 (mediaContentType=text/csv 推奨)
+//   targetMimeType?: string,  // Drive 保存 mimeType を直接指定 (asGoogleSheet より優先度低)
+//   gmailAccountId?: string,
+// }
+driveRouter.post("/drive/upload", async (c) => {
+  let payload: {
+    name?: unknown;
+    content?: unknown;
+    mediaContentType?: unknown;
+    parentId?: unknown;
+    asGoogleSheet?: unknown;
+    targetMimeType?: unknown;
+    gmailAccountId?: unknown;
+  };
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_json" }, 400);
+  }
+  if (typeof payload.name !== "string" || payload.name.trim() === "") {
+    return c.json({ error: "name_required", hint: "name は文字列で渡してください" }, 400);
+  }
+  if (typeof payload.content !== "string") {
+    return c.json({ error: "content_required", hint: "content は文字列で渡してください" }, 400);
+  }
+
+  const asGoogleSheet = payload.asGoogleSheet === true;
+  const mediaContentType =
+    typeof payload.mediaContentType === "string" && payload.mediaContentType.trim() !== ""
+      ? payload.mediaContentType
+      : asGoogleSheet
+        ? "text/csv"
+        : "text/plain";
+  // asGoogleSheet が最優先。次に明示 targetMimeType。どちらも無ければ素のファイル。
+  const targetMimeType = asGoogleSheet
+    ? GOOGLE_SHEET_MIME
+    : typeof payload.targetMimeType === "string" && payload.targetMimeType.trim() !== ""
+      ? payload.targetMimeType
+      : undefined;
+  const parentId = typeof payload.parentId === "string" ? payload.parentId : undefined;
+  const explicitAccount =
+    typeof payload.gmailAccountId === "string" ? payload.gmailAccountId : undefined;
+
+  const acc = await resolveAccountId(c.env, explicitAccount);
+  if ("error" in acc) return c.json(accountErrorJson(acc), 400);
+
+  try {
+    const result = await createFile(c.env, acc.id, {
+      name: payload.name,
+      content: payload.content,
+      mediaContentType,
+      parentId,
+      targetMimeType,
+    });
+    return c.json(result, 201);
   } catch (e) {
     if (e instanceof DriveError) {
       const { status, body } = driveErrorResponse(e);

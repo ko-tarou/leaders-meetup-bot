@@ -19,6 +19,7 @@ import {
   listFiles,
   getFileMeta,
   getFileContent,
+  createFile,
   DriveError,
 } from "../../../src/services/drive";
 import { makeEnv } from "../../helpers/env";
@@ -324,6 +325,168 @@ describe("GET /drive/file/:id and /content (route)", () => {
     const res = await app().request("/drive/file/ghost/content", {}, env);
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: "not_found" });
+  });
+});
+
+describe("createFile (service)", () => {
+  it("CSV -> Google Sheet 変換: multipart で files.create を叩き webViewLink を返す", async () => {
+    stubFetch((call) => {
+      // multipart upload エンドポイントに POST しているか
+      expect(call.url).toContain("/upload/drive/v3/files?");
+      expect(call.url).toContain("uploadType=multipart");
+      expect(call.init?.method).toBe("POST");
+      const ct = (call.init?.headers as Record<string, string>)["Content-Type"];
+      expect(ct).toContain("multipart/related");
+      const body = String(call.init?.body ?? "");
+      // metadata に target mimeType (= Sheet) と parents が入っているか
+      expect(body).toContain("application/vnd.google-apps.spreadsheet");
+      expect(body).toContain("folder-xyz");
+      // media part の content type が text/csv か
+      expect(body).toContain("Content-Type: text/csv");
+      expect(body).toContain("a,b\n1,2");
+      return jsonResponse({
+        id: "new-sheet-1",
+        name: "リスト",
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        webViewLink: "https://docs.google.com/spreadsheets/d/new-sheet-1/edit",
+      });
+    });
+    const result = await createFile(env, ACCOUNT_ID, {
+      name: "リスト",
+      content: "a,b\n1,2",
+      mediaContentType: "text/csv",
+      parentId: "folder-xyz",
+      targetMimeType: "application/vnd.google-apps.spreadsheet",
+    });
+    expect(result.id).toBe("new-sheet-1");
+    expect(result.webViewLink).toContain("/spreadsheets/d/new-sheet-1/");
+    expect(result.mimeType).toBe("application/vnd.google-apps.spreadsheet");
+  });
+
+  it("targetMimeType 省略時は mediaContentType をそのまま保存 mimeType にする", async () => {
+    stubFetch((call) => {
+      const body = String(call.init?.body ?? "");
+      // metadata.mimeType も media も text/plain
+      expect(body).toContain('"mimeType":"text/plain"');
+      return jsonResponse({ id: "t9", name: "memo", mimeType: "text/plain" });
+    });
+    const result = await createFile(env, ACCOUNT_ID, {
+      name: "memo",
+      content: "hi",
+      mediaContentType: "text/plain",
+    });
+    expect(result.id).toBe("t9");
+  });
+
+  it("401 -> refresh + 1 回 retry して作成成功", async () => {
+    let createCall = 0;
+    stubFetch((call) => {
+      if (call.url.includes("oauth2.googleapis.com/token")) {
+        return jsonResponse({ access_token: "access-new", expires_in: 3600 });
+      }
+      createCall += 1;
+      if (createCall === 1) return new Response("expired", { status: 401 });
+      return jsonResponse({ id: "ok", name: "n", mimeType: "text/plain" });
+    });
+    const result = await createFile(env, ACCOUNT_ID, {
+      name: "n",
+      content: "x",
+      mediaContentType: "text/plain",
+    });
+    expect(result.id).toBe("ok");
+    expect(fetchCalls.some((c) => c.url.includes("oauth2.googleapis.com/token"))).toBe(true);
+  });
+
+  it("403 -> DriveError(scope_missing)", async () => {
+    stubFetch(() => new Response("forbidden", { status: 403 }));
+    await expect(
+      createFile(env, ACCOUNT_ID, {
+        name: "n",
+        content: "x",
+        mediaContentType: "text/plain",
+      }),
+    ).rejects.toMatchObject({ name: "DriveError", reason: "scope_missing" });
+  });
+});
+
+describe("POST /drive/upload (route)", () => {
+  it("CSV -> Sheet: asGoogleSheet=true で 201 + webViewLink を返す", async () => {
+    stubFetch((call) => {
+      const body = String(call.init?.body ?? "");
+      expect(body).toContain("application/vnd.google-apps.spreadsheet");
+      expect(body).toContain("Content-Type: text/csv");
+      return jsonResponse({
+        id: "sheet-2",
+        name: "個人スポンサー候補リスト",
+        mimeType: "application/vnd.google-apps.spreadsheet",
+        webViewLink: "https://docs.google.com/spreadsheets/d/sheet-2/edit",
+      });
+    });
+    const res = await app().request(
+      "/drive/upload",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "個人スポンサー候補リスト",
+          content: "名前,金額\n,5000",
+          asGoogleSheet: true,
+          parentId: "hackit-folder",
+        }),
+      },
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; webViewLink: string };
+    expect(body.id).toBe("sheet-2");
+    expect(body.webViewLink).toContain("/spreadsheets/d/sheet-2/");
+  });
+
+  it("name 欠如 -> 400 name_required", async () => {
+    stubFetch(() => jsonResponse({}));
+    const res = await app().request(
+      "/drive/upload",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "x" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "name_required" });
+  });
+
+  it("content 欠如 -> 400 content_required", async () => {
+    stubFetch(() => jsonResponse({}));
+    const res = await app().request(
+      "/drive/upload",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "x" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "content_required" });
+  });
+
+  it("403 scope_missing -> 403 + 再同意案内", async () => {
+    stubFetch(() => new Response("forbidden", { status: 403 }));
+    const res = await app().request(
+      "/drive/upload",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "n", content: "x" }),
+      },
+      env,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe("scope_missing");
+    expect(body.message).toContain("google-oauth/install");
   });
 });
 
