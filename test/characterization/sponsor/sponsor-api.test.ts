@@ -125,7 +125,8 @@ describe("POST /sponsor/:eventId", () => {
     expect(row?.contactName).toBe("山田 太郎");
     expect(row?.affiliation).toBe("○○大学");
     expect(row?.message).toBe("応援しています！");
-    expect(row?.amount).toBe(50000);
+    // 個人スポンサーは一律 5000 円固定 (0069)。送信値 50000 は無視される。
+    expect(row?.amount).toBe(5000);
     expect(row?.confirmToken).toBeTruthy();
   });
 
@@ -152,7 +153,7 @@ describe("POST /sponsor/:eventId", () => {
     expect(row?.purpose).toBe("学生支援");
   });
 
-  it("必須欠落 / 不正金額 / 不正 email は 400", async () => {
+  it("必須欠落 / 不正 email は 400 (金額は固定なので検証しない)", async () => {
     const ev = await makeEvent();
     await makeEventAction(ev.id, { actionType: "sponsor_application" });
     const a = app();
@@ -171,12 +172,54 @@ describe("POST /sponsor/:eventId", () => {
     );
     expect(badEmail.status).toBe(400);
 
+    // 金額入力は廃止 (一律 5000)。不正金額を送っても 5000 で受理される (0069)。
     const badAmount = await a.request(
       jsonReq(`/sponsor/${ev.id}`, "POST", { ...validBody, amount: 0 }),
       {},
       env,
     );
-    expect(badAmount.status).toBe(400);
+    expect(badAmount.status).toBe(201);
+  });
+
+  it("当日来場アンケートを保存する / 範囲外は null (0069)", async () => {
+    const ev = await makeEvent();
+    await makeEventAction(ev.id, { actionType: "sponsor_application" });
+    const a = app();
+
+    const ok = await a.request(
+      jsonReq(`/sponsor/${ev.id}`, "POST", {
+        ...validBody,
+        attendanceOnDay: "coming",
+      }),
+      {},
+      env,
+    );
+    expect(ok.status).toBe(201);
+    const okId = ((await ok.json()) as { id: string }).id;
+    const okRow = await testDb()
+      .select()
+      .from(sponsorApplications)
+      .where(eq(sponsorApplications.id, okId))
+      .get();
+    expect(okRow?.attendanceOnDay).toBe("coming");
+
+    const bad = await a.request(
+      jsonReq(`/sponsor/${ev.id}`, "POST", {
+        ...validBody,
+        email: "another@example.com",
+        attendanceOnDay: "maybe",
+      }),
+      {},
+      env,
+    );
+    expect(bad.status).toBe(201);
+    const badId = ((await bad.json()) as { id: string }).id;
+    const badRow = await testDb()
+      .select()
+      .from(sponsorApplications)
+      .where(eq(sponsorApplications.id, badId))
+      .get();
+    expect(badRow?.attendanceOnDay).toBeNull();
   });
 
   it("存在しない event は 404", async () => {
