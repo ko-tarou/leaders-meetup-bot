@@ -7,6 +7,9 @@ import { createReminderJob } from "../../services/scheduler";
 import { meetings, tasks, taskAssignees } from "../../db/schema";
 import { buildTaskAddModalView } from "../../services/devhub-task-modal";
 import { buildTaskListBlocks } from "../../services/devhub-task-list";
+import {
+  buildMyGachaBlocks, listMyPendingGachas,
+} from "../../services/kejime-gacha-draw";
 import { getSlackClient, type SlackVariables } from "./utils";
 
 export const commandsRouter = new Hono<{
@@ -228,9 +231,31 @@ commandsRouter.post("/commands", async (c) => {
       return c.json({ response_type: "ephemeral", text: "" });
     }
 
+    // /devhub kejime gacha (alias: kejime / gacha) — 本人の未抽選 遅刻ガチャを
+    // いつでも自分で引けるようにする (CHANGE ①)。朝の自動ステータス投稿を
+    // 待たなくてよい。ephemeral でボタンを出し、押下時は既存の
+    // kejime_gacha_draw:<penaltyId> ハンドラがサーバー側で抽選する。
+    if (
+      trimmed === "kejime" || trimmed === "gacha" ||
+      trimmed === "kejime gacha" || trimmed.startsWith("kejime gacha")
+    ) {
+      const userId = params.get("user_id") || "";
+      if (!userId) {
+        return c.json({
+          response_type: "ephemeral",
+          text: "ユーザーを特定できませんでした。",
+        });
+      }
+      const pending = await listMyPendingGachas(c.env.DB, userId);
+      return c.json({
+        response_type: "ephemeral",
+        blocks: buildMyGachaBlocks(pending),
+      });
+    }
+
     return c.json({
       response_type: "ephemeral",
-      text: "使い方:\n`/devhub task add` - タスクを作成\n`/devhub task list` - 自分担当の未完了タスク一覧\n`/devhub task list all` - チャンネル内の全未完了タスク",
+      text: "使い方:\n`/devhub task add` - タスクを作成\n`/devhub task list` - 自分担当の未完了タスク一覧\n`/devhub task list all` - チャンネル内の全未完了タスク\n`/devhub kejime gacha` - 自分の未抽選 遅刻ガチャを引く",
     });
   }
 
