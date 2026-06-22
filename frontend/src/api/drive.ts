@@ -30,6 +30,24 @@ export type DriveFileContent = {
   truncated: boolean;
 };
 
+// POST /drive/upload のレスポンス (services/drive.ts createFile の CreateResult)。
+export type DriveUploadResult = {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  modifiedTime?: string;
+};
+
+export type DriveUploadBody = {
+  name: string;
+  content: string;
+  /** true で CSV -> Google Sheet 変換 (mediaContentType=text/csv)。 */
+  asGoogleSheet?: boolean;
+  /** 親フォルダ id。省略でマイドライブ直下。 */
+  parentId?: string;
+};
+
 function qs(params: Record<string, string | undefined>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -50,4 +68,19 @@ export const drive = {
   /** ファイル内容 (Google ネイティブは export / テキストは get media)。 */
   fileContent: (id: string) =>
     request<DriveFileContent>(`/drive/file/${encodeURIComponent(id)}/content`),
+  /**
+   * 新規ファイル作成 / アップロード (POST /drive/upload)。
+   * asGoogleSheet=true なら CSV を Google Sheet に変換して保存する。
+   * x-admin-token は request() が自動付与するので呼び出し側でトークンを扱わない。
+   */
+  upload: (body: DriveUploadBody) =>
+    request<DriveUploadResult>("/drive/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        name: body.name,
+        content: body.content,
+        asGoogleSheet: body.asGoogleSheet ?? false,
+        ...(body.parentId ? { parentId: body.parentId } : {}),
+      }),
+    }),
 };
