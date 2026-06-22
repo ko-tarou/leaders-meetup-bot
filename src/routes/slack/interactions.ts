@@ -190,13 +190,28 @@ interactionsRouter.post("/interactions", async (c) => {
         (action.value as string | undefined) || "";
       const userId = payload.user?.id;
       const channelId = payload.channel?.id;
+      const responseUrl: string | null = payload.response_url ?? null;
       if (!requestId || !userId || !channelId) return c.json({ ok: true });
       c.executionCtx.waitUntil((async () => {
         try {
           const client = getSlackClient(c);
-          await handleKejimeArticleLgtm(c.env.DB, client, {
+          const res = await handleKejimeArticleLgtm(c.env.DB, client, {
             requestId, slackUserId: userId, channelId,
           });
+          // 出席ボタン (attendance/morning_attend) と同様、押した本人にだけ
+          // ephemeral で確認を返す。トグル方向で文言を変える。
+          if (res && responseUrl) {
+            const text = res.action === "added"
+              ? `LGTM しました (${res.count}/${res.threshold})`
+              : `LGTM を取り消しました (${res.count}/${res.threshold})`;
+            await fetch(responseUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                response_type: "ephemeral", replace_original: false, text,
+              }),
+            });
+          }
         } catch (e) {
           console.error("Failed to handle kejime_article_lgtm:", e);
         }

@@ -499,16 +499,23 @@ async function approveArticleRequest(
  * - 同一ユーザーの再押下はトグルで LGTM を取り消す (誤操作対応)。
  * - LGTM 件数が KEJIME_LGTM_THRESHOLD に達した時点で記事を承認する。
  */
+// LGTM ボタン押下の結果。押した本人にだけ ephemeral 確認を返すため、
+// トグル方向 (added=付与 / removed=取消) と現在の件数 / 閾値を返す。
+// status が pending でない (= 既に承認済み等) 場合は null (= 表示なし)。
+export type KejimeLgtmResult =
+  | { action: "added" | "removed"; count: number; threshold: number }
+  | null;
+
 export async function handleKejimeArticleLgtm(
   db: D1Database, slack: Poster,
   args: { requestId: string; slackUserId: string; channelId: string },
-): Promise<void> {
+): Promise<KejimeLgtmResult> {
   const d1 = drizzle(db);
   const req = await d1.select().from(kejimeArticleRequests)
     .where(eq(kejimeArticleRequests.id, args.requestId)).get();
-  if (!req || req.status !== "pending") return;
+  if (!req || req.status !== "pending") return null;
   const tr = await findTrackerById(d1, req.eventActionId);
-  if (!tr) return;
+  if (!tr) return null;
   const channelId = req.channelId ?? args.channelId ?? tr.channelId;
 
   // トグル: 既に押していれば取り消す。新規なら INSERT。UNIQUE で二重押下を防止。
@@ -519,7 +526,11 @@ export async function handleKejimeArticleLgtm(
   if (existing) {
     await d1.delete(kejimeArticleLgtms)
       .where(eq(kejimeArticleLgtms.id, existing.id));
-    return;
+    const remaining = await d1.select().from(kejimeArticleLgtms)
+      .where(eq(kejimeArticleLgtms.requestId, args.requestId)).all();
+    return {
+      action: "removed", count: remaining.length, threshold: KEJIME_LGTM_THRESHOLD,
+    };
   }
   try {
     await d1.insert(kejimeArticleLgtms).values({
@@ -533,8 +544,12 @@ export async function handleKejimeArticleLgtm(
 
   const lgtms = await d1.select().from(kejimeArticleLgtms)
     .where(eq(kejimeArticleLgtms.requestId, args.requestId)).all();
-  if (lgtms.length < KEJIME_LGTM_THRESHOLD) return;
-  await approveArticleRequest(db, d1, slack, tr, req, args.slackUserId, channelId);
+  if (lgtms.length >= KEJIME_LGTM_THRESHOLD) {
+    await approveArticleRequest(db, d1, slack, tr, req, args.slackUserId, channelId);
+  }
+  return {
+    action: "added", count: lgtms.length, threshold: KEJIME_LGTM_THRESHOLD,
+  };
 }
 
 /**
