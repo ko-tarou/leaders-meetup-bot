@@ -1,12 +1,14 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, asc, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
-  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, kejimePenalties,
+  eventActions, kejimeArticleLgtms, kejimeArticleRequests, kejimeEvents,
+  kejimeMembers, kejimePenalties,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
+import { KEJIME_LGTM_THRESHOLD } from "../../services/kejime-article-flow";
 import { getUserNames } from "../../services/slack-names";
 import { SlackClient } from "../../services/slack-api";
 import { postOrUpdateKejimeStatus } from "../../services/kejime-status-post";
@@ -187,6 +189,19 @@ kejimeRouter.get(`${BASE}/articles`, async (c: C) => {
     .innerJoin(kejimeMembers, eq(kejimeArticleRequests.memberId, kejimeMembers.id))
     .where(and(...conds))
     .orderBy(desc(kejimeArticleRequests.createdAt)).all();
+  // LGTM 件数を request 単位で集計し、admin UI に「LGTM N/3」を出すための
+  // lgtmCount / lgtmThreshold を各行に付与する。対象 request だけに絞って count。
+  const requestIds = rows.map((r) => r.id);
+  const lgtmCountByRequest = new Map<string, number>();
+  if (requestIds.length > 0) {
+    const lgtmRows = await db.select({
+      requestId: kejimeArticleLgtms.requestId,
+      n: count(),
+    }).from(kejimeArticleLgtms)
+      .where(inArray(kejimeArticleLgtms.requestId, requestIds))
+      .groupBy(kejimeArticleLgtms.requestId).all();
+    for (const lr of lgtmRows) lgtmCountByRequest.set(lr.requestId, Number(lr.n));
+  }
   // PR11: memberDisplayName が slackUserId と一致 (= 未解決) なら Slack で resolve。
   const resolved = await resolveMemberNames(
     c.env,
@@ -194,6 +209,8 @@ kejimeRouter.get(`${BASE}/articles`, async (c: C) => {
   );
   return c.json(resolved.map(({ displayName, slackUserId: _u, ...rest }) => ({
     ...rest, memberDisplayName: displayName,
+    lgtmCount: lgtmCountByRequest.get(rest.id) ?? 0,
+    lgtmThreshold: KEJIME_LGTM_THRESHOLD,
   })));
 });
 

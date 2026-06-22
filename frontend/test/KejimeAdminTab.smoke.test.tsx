@@ -19,6 +19,7 @@ function installFetchSpy(opts?: {
     id: string; displayName: string; slackUserId: string;
     currentPoints: number; ramenCount: number; displayPoints: number;
   }>;
+  articles?: unknown[];
 }): FetchCall[] {
   const calls: FetchCall[] = [];
   const members = opts?.members ?? [
@@ -50,7 +51,7 @@ function installFetchSpy(opts?: {
         });
       }
       if (url.includes("/kejime/articles")) {
-        return new Response(JSON.stringify([]), {
+        return new Response(JSON.stringify(opts?.articles ?? []), {
           status: 200, headers: { "Content-Type": "application/json" },
         });
       }
@@ -126,5 +127,28 @@ describe("KejimeAdminTab edit-points smoke (PR15)", () => {
     await user.type(input, "-3");
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("button", { name: /保存/ })).toBeDisabled();
+  });
+});
+
+describe("KejimeAdminTab LGTM 件数表示 (A)", () => {
+  const article = {
+    id: "req1", memberId: "m1", memberDisplayName: "山田",
+    qiitaUrl: "https://qiita.com/x/items/0123456789abcdef0123",
+    bodyLength: 800, status: "pending", createdAt: "2026-06-01T00:00:00.000Z",
+    penaltyId: null, themeApproved: null, pointsToClear: null,
+    lgtmCount: 2, lgtmThreshold: 3,
+  };
+
+  it("申請待ち記事に「LGTM 2/3」が表示される", async () => {
+    installFetchSpy({ articles: [article] });
+    render(<KejimeAdminTab eventId={EVENT_ID} actionId={ACTION_ID} />);
+    expect(await screen.findByText("LGTM 2/3")).toBeInTheDocument();
+  });
+
+  it("閾値到達時は「LGTM 3/3」+「閾値到達」が表示される", async () => {
+    installFetchSpy({ articles: [{ ...article, lgtmCount: 3 }] });
+    render(<KejimeAdminTab eventId={EVENT_ID} actionId={ACTION_ID} />);
+    expect(await screen.findByText("LGTM 3/3")).toBeInTheDocument();
+    expect(screen.getByText(/閾値到達/)).toBeInTheDocument();
   });
 });
