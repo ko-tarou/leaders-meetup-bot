@@ -1,10 +1,15 @@
-import { useMemo, useState, type ReactNode } from "react";
-import type { EventAction } from "../../types";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { EventAction, Workspace } from "../../types";
 import { api } from "../../api";
 import { useToast } from "../ui/Toast";
+import { SingleChannelPicker } from "../ui/SingleChannelPicker";
 import { settingsFormStyles as s } from "../morning-standup/settingsFormStyles";
 
 // stale-pr-nudge アクション専用の最小設定タブ。
+//
+// 【非推奨】Feature ② で stale-nudge 設定は pr_review_list アクションの設定タブへ
+// 畳み込まれた。新規は pr_review_list の「停滞 PR リマインド」を使うこと。この
+// 専用アクションは既存登録の後方互換のためにのみ残している。
 //
 // このアクションを登録すると「PR レビュー一覧」に「📣 リマインド送信」ボタンが出る。
 // ボタンの押下で停滞 (config.staleHours 以上更新の無い) GitHub open PR を
@@ -54,12 +59,34 @@ export function StalePrNudgeSettingsForm({
     (initial.githubRepos ?? []).join("\n"),
   );
   const [channelId, setChannelId] = useState(initial.nudgeChannelId ?? "");
+  const [channelName, setChannelName] = useState<string>("");
   const [staleHours, setStaleHours] = useState(
     String(initial.staleHours ?? 48),
   );
   const [nudgeTime, setNudgeTime] = useState(initial.nudgeTime ?? "09:00");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<string>("");
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
+
+  // SingleChannelPicker に渡す workspace を取得 (1 件なら自動選択)。
+  useEffect(() => {
+    let cancelled = false;
+    api.workspaces
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        const ws = Array.isArray(list) ? list : [];
+        setWorkspaces(ws);
+        if (ws.length >= 1) setWorkspaceId(ws[0].id);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSave = async () => {
     setError(null);
@@ -74,7 +101,7 @@ export function StalePrNudgeSettingsForm({
     }
     const cid = channelId.trim();
     if (cid !== "" && !cid.startsWith("C")) {
-      setError("催促チャンネル ID は Slack のチャンネル ID (Cxxxx) を入力してください");
+      setError("催促チャンネルを選択し直してください");
       return;
     }
     const hours = Number(staleHours);
@@ -140,19 +167,39 @@ export function StalePrNudgeSettingsForm({
         </div>
       </Field>
 
-      <Field label="催促を投稿する共有チャンネル ID (Cxxxx)">
-        <input
-          type="text"
+      {workspaces !== null && workspaces.length >= 2 && (
+        <Field label="ワークスペース">
+          <select
+            value={workspaceId}
+            onChange={(e) => {
+              setWorkspaceId(e.target.value);
+              setChannelId("");
+              setChannelName("");
+            }}
+            disabled={saving}
+            aria-label="ワークスペース"
+            style={s.input}
+          >
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
+
+      <Field label="催促を投稿するチャンネル">
+        <SingleChannelPicker
           value={channelId}
-          onChange={(e) => setChannelId(e.target.value)}
-          placeholder="C0123456789"
+          channelName={channelName}
+          workspaceId={workspaceId}
+          onChange={(id, name) => {
+            setChannelId(id);
+            setChannelName(name);
+          }}
           disabled={saving}
-          aria-label="催促を投稿する共有チャンネル ID"
-          style={s.input}
         />
-        <div style={s.hint}>
-          Slack のチャンネルを開き「チャンネル詳細」の最下部に表示される ID をコピーしてください。
-        </div>
       </Field>
 
       <Field label="stale 判定時間 (時間)">

@@ -74,9 +74,35 @@ const styles = {
 //   - kind="ambiguous" : 複数 → 安全側で無効化し理由を tooltip 表示
 //     (どれに送るか UI 上で一意に決められないため。設定で 1 つに整理する想定)
 // 型 (StaleNudgeTarget) は PRReviewCard と共有 (定義はカード側)。
+//
+// nudge 設定は pr_review_list アクションの config に畳み込まれた (Feature ②)。
+// そのため送信先候補は次の 2 種:
+//   1) nudge 設定 (githubRepos 非空 かつ nudgeChannelId 設定済み) を持つ
+//      pr_review_list アクション (新方式・推奨)。
+//   2) 旧 stale_pr_nudge 専用アクション (後方互換・非推奨)。
+// 両方に該当するものを集め、ちょうど 1 つなら single、複数なら ambiguous。
+function hasNudgeConfig(config: string | null | undefined): boolean {
+  if (!config) return false;
+  try {
+    const o = JSON.parse(config) as {
+      githubRepos?: unknown;
+      nudgeChannelId?: unknown;
+    };
+    const repos = Array.isArray(o.githubRepos)
+      ? o.githubRepos.filter((r) => typeof r === "string" && r.trim())
+      : [];
+    return repos.length > 0 && typeof o.nudgeChannelId === "string" && !!o.nudgeChannelId.trim();
+  } catch {
+    return false;
+  }
+}
+
 function resolveStaleNudgeTarget(actions: EventAction[]): StaleNudgeTarget {
   const candidates = actions.filter(
-    (a) => a.actionType === "stale_pr_nudge" && a.enabled === 1,
+    (a) =>
+      a.enabled === 1 &&
+      ((a.actionType === "pr_review_list" && hasNudgeConfig(a.config)) ||
+        a.actionType === "stale_pr_nudge"),
   );
   if (candidates.length === 0) return { kind: "none" };
   if (candidates.length === 1) return { kind: "single", actionId: candidates[0].id };
