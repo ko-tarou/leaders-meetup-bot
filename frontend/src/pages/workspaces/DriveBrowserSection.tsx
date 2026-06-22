@@ -4,9 +4,9 @@
 //
 // 既存連携アカウントは drive.readonly scope 不足のため、初回は 403 scope_missing。
 // その場合は上の Gmail 連携の「+ Gmail を連携」から 1 回 再同意すれば解消する。
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api, APIError } from "../../api";
-import type { DriveFile, DriveFileContent } from "../../api/drive";
+import type { DriveFile, DriveFileContent, DriveUploadResult } from "../../api/drive";
 import { colors } from "../../styles/tokens";
 import { useIsMobile } from "../../hooks/useIsMobile";
 
@@ -46,6 +46,167 @@ function errorMessage(e: unknown): string {
     }
   }
   return String(e);
+}
+
+// Drive に CSV を Google Sheet としてアップロードする管理パネル。
+// - HTML file input で CSV を選ぶ (admin token は request() が自動付与)。
+// - 保存先フォルダは任意: /drive/list でフォルダ一覧を取得し picker で選ぶ。
+//   未選択ならマイドライブ直下 (parentId 省略) に作成する。
+// - 完了後、作成された Sheet の webViewLink をリンクで表示する。
+function DriveCsvUploadPanel() {
+  const [file, setFile] = useState<File | null>(null);
+  const [folders, setFolders] = useState<DriveFile[] | null>(null);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
+  const [parentId, setParentId] = useState<string>(""); // "" = マイドライブ直下
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [result, setResult] = useState<DriveUploadResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // フォルダ一覧 (マイドライブ直下のフォルダのみ picker 候補にする)。
+  const loadFolders = useCallback(async () => {
+    setFoldersError(null);
+    try {
+      const res = await api.drive.list({});
+      setFolders(res.files.filter((f) => f.isFolder));
+    } catch (e) {
+      setFoldersError(errorMessage(e));
+      setFolders([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFolders();
+  }, [loadFolders]);
+
+  async function handleUpload() {
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    setResult(null);
+    try {
+      const content = await file.text();
+      const res = await api.drive.upload({
+        name: file.name,
+        content,
+        asGoogleSheet: true,
+        parentId: parentId || undefined,
+      });
+      setResult(res);
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (e) {
+      setUploadError(errorMessage(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: "1rem",
+        border: `1px solid ${colors.border}`,
+        borderRadius: "0.5rem",
+        padding: "0.75rem",
+        background: colors.surface,
+      }}
+    >
+      <h3 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem" }}>
+        Drive に CSV をアップロード
+      </h3>
+      <p style={{ fontSize: "0.8rem", color: colors.textSecondary, marginTop: 0 }}>
+        CSV ファイルを選ぶと Google スプレッドシートに変換して Drive に保存します。保存先フォルダは任意です (未選択ならマイドライブ直下)。
+      </p>
+
+      <div style={{ display: "grid", gap: "0.5rem", maxWidth: "32rem" }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          aria-label="アップロードする CSV ファイル"
+          onChange={(e) => {
+            setResult(null);
+            setUploadError(null);
+            setFile(e.target.files?.[0] ?? null);
+          }}
+          style={{ fontSize: "0.85rem" }}
+        />
+
+        <label style={{ fontSize: "0.8rem", color: colors.textSecondary }}>
+          保存先フォルダ
+          <select
+            value={parentId}
+            aria-label="保存先フォルダ"
+            onChange={(e) => setParentId(e.target.value)}
+            disabled={folders === null}
+            style={{
+              display: "block",
+              marginTop: "0.25rem",
+              width: "100%",
+              padding: "0.4rem",
+              border: `1px solid ${colors.border}`,
+              borderRadius: "0.375rem",
+              fontSize: "0.85rem",
+            }}
+          >
+            <option value="">マイドライブ直下</option>
+            {(folders ?? []).map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {foldersError && (
+          <div style={{ fontSize: "0.78rem", color: colors.textMuted }}>
+            フォルダ一覧を取得できませんでした: {foldersError}
+          </div>
+        )}
+
+        <div>
+          <button
+            onClick={handleUpload}
+            disabled={!file || uploading}
+            style={{
+              background: !file || uploading ? colors.borderStrong : colors.primary,
+              color: colors.textInverse,
+              border: "none",
+              padding: "0.5rem 1rem",
+              borderRadius: "0.375rem",
+              fontWeight: "bold",
+              fontSize: "0.9rem",
+              cursor: !file || uploading ? "not-allowed" : "pointer",
+              minHeight: 40,
+            }}
+          >
+            {uploading ? "アップロード中..." : "Drive にアップロード"}
+          </button>
+        </div>
+
+        {uploadError && (
+          <div style={{ fontSize: "0.85rem", color: colors.danger }}>
+            アップロードに失敗しました: {uploadError}
+          </div>
+        )}
+        {result && (
+          <div style={{ fontSize: "0.85rem", color: colors.text }}>
+            作成しました: <strong>{result.name}</strong>{" "}
+            {result.webViewLink && (
+              <a
+                href={result.webViewLink}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: colors.primary }}
+              >
+                スプレッドシートを開く
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function DriveBrowserSection() {
@@ -165,6 +326,8 @@ export function DriveBrowserSection() {
       >
         連携した Google アカウントの Drive を閲覧します (read-only)。フォルダをクリックで中に入り、ファイルをクリックで中身を表示します。初回は Drive スコープの再同意が 1 回必要です。
       </p>
+
+      <DriveCsvUploadPanel />
 
       {open && (
         <div
