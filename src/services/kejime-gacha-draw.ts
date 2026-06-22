@@ -1,16 +1,18 @@
-// 朝勉強会けじめ制度: 遅刻ガチャの「本人が引く」インタラクティブ抽選。
+// 朝勉強会けじめ制度: 遅刻ガチャの「誰でも引ける」インタラクティブ抽選。
 //
-// 設計 (PR#315 改修):
+// 設計 (PR#315 改修 / 仕様訂正: 遅刻者本人に限らず誰でも引ける):
 //   - late 認定時は抽選せず penalty を status='pending' (未抽選) で作る。
 //     points=0 / required_chars=0 のプレースホルダ。member ポイントは未加算。
-//   - 本人が Slack の「ガチャを引く」ボタンを押すと drawPendingGacha が走る:
+//   - ステータス投稿の「ガチャを引く」ボタンを誰か (遅刻者本人とは限らない)
+//     が押すと drawPendingGacha が走る:
 //       1) サーバー側で crypto 乱数を使い 1〜3pt を抽選 (クライアント改ざん不可)。
 //       2) penalty を pending -> open へ atomic に遷移し points / required_chars を確定。
 //          UPDATE ... WHERE status='pending' の changes===1 でしか先に進まない
 //          (= 二重抽選防止。並行押下や連打でも 1 回しか確定しない)。
-//       3) 紐づく late の kejime_events に points_delta を書き込み、member の
-//          current_points / ramen_count を加算する。
+//       3) 紐づく late の kejime_events に points_delta を書き込み、遅刻者 member の
+//          current_points / ramen_count を加算する (ポイントは常に遅刻者本人に付く)。
 //   - 既に open (抽選済み) の penalty を引こうとしたら already_drawn を返す。
+//   - 押した人が誰であるかは抽選結果に影響しない (ポイントは penalty 所有者に付く)。
 
 import { drizzle } from "drizzle-orm/d1";
 import { and, asc, eq } from "drizzle-orm";
@@ -36,7 +38,7 @@ export type GachaDrawResult =
       displayPoints: number; // min(internal, 5)
       ramenCount: number;
     }
-  | { ok: false; reason: "not_found" | "already_drawn" | "forbidden" | "member_not_found" };
+  | { ok: false; reason: "not_found" | "already_drawn" | "member_not_found" };
 
 const DISPLAY_CAP = 5;
 
@@ -129,26 +131,29 @@ function parseConfigCharsPerPoint(raw: string | null | undefined): number {
 }
 
 /**
- * 本人 (slackUserId) が pending penalty のガチャを 1 回だけ引く。
+ * pending penalty のガチャを 1 回だけ引く。
+ *
+ * 仕様訂正: 遅刻者本人に限らず「誰でも」遅刻者のガチャを引ける。
+ * 押した人 (_actorSlackUserId) が誰かは抽選結果・付与先に影響しない。
+ * ポイントは常に penalty 所有者 (= 遅刻者 member) に加算される。
  *
  * - 抽選確率は tracker.config.latePointWeights (default 70/25/5)。
  * - charsPerPoint は tracker.config から解決し required_chars を凍結。
- * - slackUserId が penalty 所有者と一致しない場合は forbidden (他人の分は引けない)。
+ * - 二重抽選は pending->open の atomic 遷移 (changes===1) で防ぐ。
  *
  * D1Database を受け取り内部で drizzle を作る (既存 service の慣例に合わせる)。
+ * 第 3 引数は互換のため残すが、所有者照合には使わない (押下者ログ等の将来用)。
  */
 export async function drawPendingGacha(
-  db: D1Database, penaltyId: string, slackUserId: string,
+  db: D1Database, penaltyId: string, _actorSlackUserId?: string,
 ): Promise<GachaDrawResult> {
   const d1: D1 = drizzle(db);
   const pen = await d1.select().from(kejimePenalties)
     .where(eq(kejimePenalties.id, penaltyId)).get();
   if (!pen) return { ok: false, reason: "not_found" };
   if (pen.status !== "pending") return { ok: false, reason: "already_drawn" };
-  // 本人以外は引けない (Slack の user id で照合)。slackUserId 空は呼び出し側で弾く想定。
-  if (slackUserId && pen.slackUserId !== slackUserId) {
-    return { ok: false, reason: "forbidden" };
-  }
+  // 仕様訂正: 所有者照合は撤廃。遅刻者以外のメンバーでも引ける。
+  // 二重抽選は下の pending->open atomic 遷移 (WHERE status='pending') で防止する。
 
   // 抽選確率 / charsPerPoint は tracker action の config から解決する。
   const tracker = await d1.select().from(eventActions)

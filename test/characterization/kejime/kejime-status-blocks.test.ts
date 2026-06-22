@@ -123,7 +123,7 @@ describe("buildStatusBlocks: PR14 記事申請ボタン", () => {
   });
 });
 
-describe("buildStatusBlocks: 遅刻ガチャ「本人が引く」ボタン", () => {
+describe("buildStatusBlocks: 遅刻ガチャ「誰でも引ける」ボタン", () => {
   it("pendingGachas 0 件 → ガチャ section / ボタンは出ない", () => {
     const blocks = buildStatusBlocks(
       [{ displayName: "山田", currentPoints: 0, ramenCount: 0 }],
