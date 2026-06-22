@@ -204,12 +204,12 @@ interactionsRouter.post("/interactions", async (c) => {
       return c.json({ ok: true });
     }
 
-    // 朝勉強会けじめ制度 (PR#315 改修): 遅刻ガチャ「本人が引く」ボタン。
+    // 朝勉強会けじめ制度 (PR#315 改修 / 仕様訂正): 遅刻ガチャ「誰でも引ける」ボタン。
     // action_id = kejime_gacha_draw:<penaltyId>
     // → サーバー側で 1〜3pt を抽選 (crypto・改ざん不可)、pending -> open へ
-    //   atomic 遷移 (二重抽選防止)。本人以外が押したら ephemeral で拒否。
-    //   結果は簡単な演出 (ドラムロール -> リビール) で本人に ephemeral 表示し、
-    //   確定後に当日ステータスを最新化する。
+    //   atomic 遷移 (二重抽選防止)。遅刻者本人に限らず誰でも押せる。
+    //   結果は簡単な演出 (ドラムロール -> リビール) で押した人に ephemeral 表示し、
+    //   確定後に当日ステータスを最新化する。ポイントは遅刻者本人に加算される。
     if (action.action_id?.startsWith("kejime_gacha_draw:")) {
       const penaltyId = action.action_id.slice("kejime_gacha_draw:".length)
         || (action.value as string | undefined) || "";
@@ -233,11 +233,9 @@ interactionsRouter.post("/interactions", async (c) => {
                   `現在 ${result.displayPoints}pt。記事を書いて消化しましょう。`,
               ).catch(() => undefined);
             } else {
-              const msg = result.reason === "forbidden"
-                ? "このガチャは本人だけが引けます。"
-                : result.reason === "already_drawn"
-                  ? "このガチャは既に抽選済みです。"
-                  : "ガチャ対象が見つかりませんでした。";
+              const msg = result.reason === "already_drawn"
+                ? "このガチャは既に抽選済みです。"
+                : "ガチャ対象が見つかりませんでした。";
               await client.postEphemeral(channelId, userId, msg).catch(() => undefined);
             }
           }
