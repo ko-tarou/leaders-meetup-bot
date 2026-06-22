@@ -81,7 +81,14 @@ const styles = {
 //      pr_review_list アクション (新方式・推奨)。
 //   2) 旧 stale_pr_nudge 専用アクション (後方互換・非推奨)。
 // 両方に該当するものを集め、ちょうど 1 つなら single、複数なら ambiguous。
-function hasNudgeConfig(config: string | null | undefined): boolean {
+//
+// 重要: 旧 stale_pr_nudge アクションは PR#322 の畳み込み後「null channel の no-op」
+// として残置されることがある (enabled=1 のまま nudgeChannelId=null)。これを
+// actionType だけで候補に含めると、有効な pr_review_list と合わせて 2 件になり
+// ambiguous 判定でボタンが無効化される。BE の parseStalePrNudgeConfig も null
+// channel を no-op 扱いするため、FE でも hasNudgeConfig を両 actionType に等しく
+// 適用して「実際に送信可能な設定を持つもの」だけを候補にする (export: 単体テスト用)。
+export function hasNudgeConfig(config: string | null | undefined): boolean {
   if (!config) return false;
   try {
     const o = JSON.parse(config) as {
@@ -97,12 +104,18 @@ function hasNudgeConfig(config: string | null | undefined): boolean {
   }
 }
 
-function resolveStaleNudgeTarget(actions: EventAction[]): StaleNudgeTarget {
+export function resolveStaleNudgeTarget(
+  actions: EventAction[],
+): StaleNudgeTarget {
   const candidates = actions.filter(
     (a) =>
       a.enabled === 1 &&
-      ((a.actionType === "pr_review_list" && hasNudgeConfig(a.config)) ||
-        a.actionType === "stale_pr_nudge"),
+      (a.actionType === "pr_review_list" ||
+        a.actionType === "stale_pr_nudge") &&
+      // 新方式 (pr_review_list) / 旧方式 (stale_pr_nudge) のどちらでも、実際に
+      // 送信可能な nudge 設定 (repos 非空 + channel 設定済み) を持つものだけを
+      // 候補にする。null channel の no-op 旧アクションを除外して誤 ambiguous を防ぐ。
+      hasNudgeConfig(a.config),
   );
   if (candidates.length === 0) return { kind: "none" };
   if (candidates.length === 1) return { kind: "single", actionId: candidates[0].id };
