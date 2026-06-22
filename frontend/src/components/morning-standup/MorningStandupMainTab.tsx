@@ -5,6 +5,7 @@ import {
 import type { EventAction } from "../../types";
 import { request } from "../../api/client";
 import { colors } from "../../styles/tokens";
+import { MorningSessionsSection } from "./MorningSessionsSection";
 
 // 003 朝勉強会けじめ制度 PR10: morning_standup action のメインタブ。
 // 上部: 今日 (or 指定日) の出席状況テーブル + 手動 attend / 取消ボタン。
@@ -115,6 +116,8 @@ export function MorningStandupMainTab({ eventId, actionId, action }: {
   return (
     <div style={{ display: "grid", gap: "1.5rem" }}>
       {error && <div style={s.error}>エラー: {error}</div>}
+
+      <MorningSessionsSection eventId={eventId} actionId={actionId} />
 
       <section>
         <div style={s.dateRow}>

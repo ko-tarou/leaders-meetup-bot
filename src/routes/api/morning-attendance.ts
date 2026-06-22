@@ -5,7 +5,7 @@ import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   eventActions, kejimeEvents, kejimeMembers, morningAttendance,
-  slackRoleMembers,
+  morningSessions, slackRoleMembers,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
 import { getUserNames } from "../../services/slack-names";
@@ -241,5 +241,104 @@ morningAttendanceRouter.delete(`${BASE}/:id`, async (c: C) => {
     return c.json({ error: "attendance not found" }, 404);
   }
   await db.delete(morningAttendance).where(eq(morningAttendance.id, id));
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// 回 (session) スケジュール管理 API (Feature ①)。
+// 各回 = { session_no, date, theme, content }。記事 / 出席をこの回に紐付ける。
+// 同 morning_standup action 配下。adminAuth で自動保護される。
+// ---------------------------------------------------------------------------
+const SESSIONS = `${BASE}/sessions`;
+
+// 一覧 (session_no 昇順)。
+morningAttendanceRouter.get(SESSIONS, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const rows = await db.select().from(morningSessions)
+    .where(eq(morningSessions.eventActionId, r.action.id)).all();
+  rows.sort((a, b) => a.sessionNo - b.sessionNo);
+  return c.json(rows);
+});
+
+// 作成。session_no (>=1) と date (YYYY-MM-DD) は必須、theme/content は任意。
+morningAttendanceRouter.post(SESSIONS, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  type Body = { sessionNo?: unknown; date?: unknown; theme?: unknown; content?: unknown };
+  const body = await c.req.json<Body>().catch(() => ({}) as Body);
+  const sessionNo =
+    typeof body.sessionNo === "number" ? body.sessionNo : Number(body.sessionNo);
+  if (!Number.isInteger(sessionNo) || sessionNo < 1) {
+    return c.json({ error: "sessionNo must be a positive integer" }, 400);
+  }
+  const date = typeof body.date === "string" ? body.date.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ error: "date must be YYYY-MM-DD" }, 400);
+  }
+  const theme = typeof body.theme === "string" ? body.theme.trim() : "";
+  const content =
+    typeof body.content === "string" && body.content.trim()
+      ? body.content.trim()
+      : null;
+  const now = new Date().toISOString();
+  try {
+    const id = crypto.randomUUID();
+    await db.insert(morningSessions).values({
+      id, eventActionId: r.action.id, sessionNo, date, theme, content,
+      createdAt: now, updatedAt: now,
+    });
+    return c.json({ id, sessionNo, date, theme, content }, 201);
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) {
+      return c.json({ error: "session_no already exists" }, 409);
+    }
+    throw e;
+  }
+});
+
+// 更新 (date / theme / content)。
+morningAttendanceRouter.put(`${SESSIONS}/:id`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const id = c.req.param("id") as string;
+  const row = await db.select().from(morningSessions)
+    .where(eq(morningSessions.id, id)).get();
+  if (!row || row.eventActionId !== r.action.id) {
+    return c.json({ error: "session not found" }, 404);
+  }
+  type Body = { date?: unknown; theme?: unknown; content?: unknown };
+  const body = await c.req.json<Body>().catch(() => ({}) as Body);
+  const updates: Partial<typeof row> = { updatedAt: new Date().toISOString() };
+  if (typeof body.date === "string") {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date.trim())) {
+      return c.json({ error: "date must be YYYY-MM-DD" }, 400);
+    }
+    updates.date = body.date.trim();
+  }
+  if (typeof body.theme === "string") updates.theme = body.theme.trim();
+  if (typeof body.content === "string") {
+    updates.content = body.content.trim() || null;
+  }
+  await db.update(morningSessions).set(updates)
+    .where(eq(morningSessions.id, id));
+  return c.json({ ok: true });
+});
+
+// 削除。紐付く article/attendance の session_id は NULL のまま残る (FK 無し)。
+morningAttendanceRouter.delete(`${SESSIONS}/:id`, async (c: C) => {
+  const db = drizzle(c.env.DB);
+  const r = await findAction(db, c.req.param("actionId") as string);
+  if ("error" in r) return c.json({ error: r.error }, r.status);
+  const id = c.req.param("id") as string;
+  const row = await db.select().from(morningSessions)
+    .where(eq(morningSessions.id, id)).get();
+  if (!row || row.eventActionId !== r.action.id) {
+    return c.json({ error: "session not found" }, 404);
+  }
+  await db.delete(morningSessions).where(eq(morningSessions.id, id));
   return c.json({ ok: true });
 });

@@ -5,7 +5,8 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
-  eventActions, kejimeArticleRequests, kejimeEvents, kejimeMembers, kejimePenalties,
+  eventActions, kejimeArticleLgtms, kejimeArticleRequests, kejimeEvents,
+  kejimeMembers, kejimePenalties, morningSessions,
 } from "../db/schema";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import {
@@ -15,9 +16,22 @@ import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
 import { postOrUpdateKejimeStatus } from "./kejime-status-post";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
+import { mrkdwnSection, plainText } from "../domain/slack-blocks/builders";
 
 type D1 = ReturnType<typeof drizzle>;
-type Poster = { postMessage: (ch: string, t: string) => Promise<unknown> };
+// blocks 付き投稿に対応するため optional blocks を許容 (SlackClient と互換)。
+type Poster = {
+  postMessage: (ch: string, t: string, blocks?: unknown[]) => Promise<unknown>;
+};
+
+// けじめ記事承認のしきい値 (= 承認に必要な LGTM 数)。
+// 旧リアクション方式の「3 リアクション以上で承認」をそのまま踏襲する。
+export const KEJIME_LGTM_THRESHOLD = 3;
+
+// レビュアー (朝活メンバー) 向けの確認リマインド文。
+// AI ではなく人手で「記事内容がその回の内容に沿うか」も併せて確認してもらう。
+export const REVIEWER_CONTENT_CHECK_REMINDER =
+  ":mag: *レビュアーのみなさんへ*: 分量だけでなく、記事の内容がその日の勉強会テーマ・内容に沿っているかも確認のうえ LGTM してください。";
 export type ArticleMessageTemplates = {
   approved?: string;
   rejectedShort?: string;
@@ -74,6 +88,49 @@ function pickTemplate(
 
 const ARTICLE_REACTIONS = new Set(["+1", "thumbsup", "いいね", "raised_hands"]);
 const URL_RE = /https?:\/\/[^\s<>]+/;
+
+/**
+ * その回 (session) を解決する。記事提出日 (JST) と同じ date の morning_sessions が
+ * あればその回に紐付ける。複数あれば session_no の大きい (新しい) 回を採る。
+ * 見つからなければ null (= 紐付け無し・後方互換)。
+ */
+async function resolveSessionId(
+  d1: D1, actionId: string, ymd: string,
+): Promise<{ id: string; sessionNo: number; theme: string; content: string | null } | null> {
+  const row = await d1.select({
+    id: morningSessions.id, sessionNo: morningSessions.sessionNo,
+    theme: morningSessions.theme, content: morningSessions.content,
+  }).from(morningSessions).where(and(
+    eq(morningSessions.eventActionId, actionId),
+    eq(morningSessions.date, ymd),
+  )).orderBy(sql`${morningSessions.sessionNo} DESC`).get();
+  return row ?? null;
+}
+
+/**
+ * pending 記事の notice 用 blocks を組み立てる。
+ * 本文 + レビュアー向け内容確認リマインド + LGTM ボタンを並べる。
+ * action_id = kejime_article_lgtm:<requestId>。閾値到達でボタンから承認する。
+ */
+function pendingArticleBlocks(
+  body: string, requestId: string, sessionLabel: string,
+): Block[] {
+  const blocks: Block[] = [mrkdwnSection(body)];
+  if (sessionLabel) blocks.push(mrkdwnSection(sessionLabel));
+  blocks.push(mrkdwnSection(REVIEWER_CONTENT_CHECK_REMINDER));
+  blocks.push({
+    type: "actions",
+    elements: [{
+      type: "button",
+      text: plainText(`:+1: LGTM (承認には ${KEJIME_LGTM_THRESHOLD} 件必要)`),
+      action_id: `kejime_article_lgtm:${requestId}`,
+      value: requestId,
+      style: "primary",
+    }],
+  });
+  return blocks;
+}
+type Block = Record<string, unknown>;
 
 export type KejimeMessageEvent = {
   type: string; subtype?: string | null; channel?: string;
@@ -305,13 +362,29 @@ async function processQiitaSubmissionInner(
       );
     }
   }
+  // 提出日のテーマ「回 (session)」を解決し、記事に紐付ける (見つからなければ null)。
+  const session = await resolveSessionId(d1, tr.actionId, getJstNow().ymd);
+  const requestId = crypto.randomUUID();
+
   // postMessage の戻り値から Bot 受領メッセージの ts を取得し notice_ts として保存。
-  // notice_ts はリアクション承認照合に使う。fail-soft: ts が取れなくても INSERT する。
-  const posted = await slack.postMessage(channelId,
-    args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`) as { ts?: string } | null;
+  // notice_ts は照合に使う。fail-soft: ts が取れなくても INSERT する。
+  // pending のときは LGTM ボタン + レビュアー向け内容確認リマインドを blocks で付ける。
+  const text = args.threadTs ? notice : `<@${args.slackUserId}> ${notice}`;
+  let posted: { ts?: string } | null;
+  if (status === "pending") {
+    const sessionLabel = session
+      ? `:date: 対象の回: *第${session.sessionNo}回* (${session.theme})` +
+        (session.content ? `\nその日の内容: ${session.content}` : "")
+      : "";
+    posted = await slack.postMessage(
+      channelId, text, pendingArticleBlocks(text, requestId, sessionLabel),
+    ) as { ts?: string } | null;
+  } else {
+    posted = await slack.postMessage(channelId, text) as { ts?: string } | null;
+  }
   const noticeTs = posted?.ts ?? null;
   await d1.insert(kejimeArticleRequests).values({
-    id: crypto.randomUUID(), eventActionId: tr.actionId, memberId,
+    id: requestId, eventActionId: tr.actionId, memberId,
     qiitaUrl: args.url, bodyLength: length, status,
     // pending のときだけ「この記事で消す pt 数」を固定保存する。
     // 承認時にこの値だけ減算する (申請後にポイントが動いても矛盾しない)。
@@ -320,6 +393,7 @@ async function processQiitaSubmissionInner(
     penaltyId: status === "pending" && penalty ? penalty.id : null,
     // テーマ準拠は admin 手動承認が基本線なので、申請時点は未承認 (null)。
     themeApproved: null,
+    sessionId: session?.id ?? null,
     threadTs: args.threadTs ?? null, noticeTs, channelId,
     createdAt: new Date().toISOString(),
   });
@@ -334,44 +408,29 @@ async function processQiitaSubmissionInner(
   return { status, length };
 }
 
-export async function handleKejimeReactionAdded(
-  db: D1Database, slack: Poster, event: KejimeReactionEvent,
+/**
+ * pending 記事 1 本を承認に確定する共通処理 (ボタン経路・リアクション経路で共有)。
+ * - penalty 紐付けがあり theme_approved != 1 ならテーマ承認待ちを通知して終了。
+ * - そうでなければポイント減算・kejime_events 記録・penalty cleared・承認通知・
+ *   status post 更新まで行う。
+ * 呼び出し側で「閾値到達」を確認済みであることが前提。
+ */
+async function approveArticleRequest(
+  db: D1Database, d1: D1, slack: Poster, tr: Tracker,
+  req: typeof kejimeArticleRequests.$inferSelect,
+  decidedBy: string, channelId: string,
 ): Promise<void> {
-  if (!event.reaction || !ARTICLE_REACTIONS.has(event.reaction)) return;
-  if (!event.user || !event.item?.channel || !event.item?.ts) return;
-  const d1 = drizzle(db);
-  const tr = await findTrackerByChannel(d1, event.item.channel); if (!tr) return;
-  // notice_ts で照合する。チャンネル経由・モーダル経由の両方で Bot 受領メッセージ ts
-  // が保存されるため、モーダル申請 (threadTs=null) でも正しくマッチする。
-  const req = await d1.select().from(kejimeArticleRequests).where(and(
-    eq(kejimeArticleRequests.eventActionId, tr.actionId),
-    eq(kejimeArticleRequests.noticeTs, event.item.ts),
-    eq(kejimeArticleRequests.status, "pending"),
-  )).get();
-  if (!req) return;
-  // 3リアクション以上で承認（ロール制限・自己除外なし）。
-  // Slack reactions.get で現在のカウントを取得し、3未満ならまだ足りないのでスキップ。
-  const reactionsRes = await (slack as unknown as { callApi: (m: string, b: Record<string, unknown>) => Promise<unknown> })
-    .callApi("reactions.get", {
-      channel: event.item.channel,
-      timestamp: event.item.ts,
-      full: true,
-    }).catch(() => null) as { message?: { reactions?: { name: string; count: number }[] } } | null;
-  const total = (reactionsRes?.message?.reactions ?? [])
-    .filter((r) => ARTICLE_REACTIONS.has(r.name))
-    .reduce((sum, r) => sum + r.count, 0);
-  if (total < 3) return;
   const author = await d1.select().from(kejimeMembers)
     .where(eq(kejimeMembers.id, req.memberId)).get();
   if (!author) return;
 
   // イベント単位ペナルティ: この記事が penalty を対象にしている場合、テーマ準拠は
-  // admin の手動承認が基本線。文字数 (リアクション = 勉強会チームの量的承認) を満たしても
-  // theme_approved=1 になるまでは penalty を消さない。リアクションだけでクリアできるのは
+  // admin の手動承認が基本線。LGTM (= 勉強会チームの量的承認) を満たしても
+  // theme_approved=1 になるまでは penalty を消さない。クリアできるのは
   // (a) penalty 紐付けが無い旧来フロー、または (b) 既に admin がテーマ承認済みの場合のみ。
   if (req.penaltyId && req.themeApproved !== 1) {
     await slack.postMessage(
-      event.item.channel,
+      channelId,
       `<@${author.slackUserId}> 文字数は確認できました。テーマ準拠は管理者の承認待ちです` +
         ` (管理画面で「テーマに沿うか」を承認するとポイントが消えます)。`,
     );
@@ -386,13 +445,18 @@ export async function handleKejimeReactionAdded(
   const delta = -Math.max(clear, 0);
   const { internalAfter, ramenBumped } = bumpPointsAndRamen(author.currentPoints, delta);
   const now = new Date().toISOString();
-  await d1.update(kejimeArticleRequests).set({
-    status: "approved", decidedBy: event.user, decidedAt: now,
-  }).where(eq(kejimeArticleRequests.id, req.id));
+  // 二重承認防止: status='pending' のときだけ approved に遷移できた worker のみ続行。
+  const transitioned = await d1.update(kejimeArticleRequests).set({
+    status: "approved", decidedBy, decidedAt: now,
+  }).where(and(
+    eq(kejimeArticleRequests.id, req.id),
+    eq(kejimeArticleRequests.status, "pending"),
+  )).returning({ id: kejimeArticleRequests.id });
+  if (transitioned.length === 0) return;
   await d1.insert(kejimeEvents).values({
     id: crypto.randomUUID(), memberId: author.id, type: "article",
     pointsDelta: delta, ramenDelta: ramenBumped, ref: req.qiitaUrl,
-    decidedBy: event.user, occurredAt: now,
+    decidedBy, occurredAt: now,
   });
   await d1.update(kejimeMembers).set({
     currentPoints: internalAfter,
@@ -419,9 +483,88 @@ export async function handleKejimeReactionAdded(
       cleared: -delta,
     },
   );
-  await slack.postMessage(event.item.channel, approvedNotice);
+  await slack.postMessage(channelId, approvedNotice);
   // PR16: 承認でポイントが減ったので status post を update する。fail-soft。
   await postOrUpdateKejimeStatus(
     db, slack as unknown as SlackClient, tr.actionId, getJstNow().ymd,
   ).catch((e) => console.warn("kejime_status_post hook (article approve):", e));
+}
+
+/**
+ * けじめ記事 LGTM ボタン押下ハンドラ (リアクション方式からの移行先)。
+ * action_id = kejime_article_lgtm:<requestId>。
+ * - 同一ユーザーの再押下はトグルで LGTM を取り消す (誤操作対応)。
+ * - LGTM 件数が KEJIME_LGTM_THRESHOLD に達した時点で記事を承認する。
+ */
+export async function handleKejimeArticleLgtm(
+  db: D1Database, slack: Poster,
+  args: { requestId: string; slackUserId: string; channelId: string },
+): Promise<void> {
+  const d1 = drizzle(db);
+  const req = await d1.select().from(kejimeArticleRequests)
+    .where(eq(kejimeArticleRequests.id, args.requestId)).get();
+  if (!req || req.status !== "pending") return;
+  const tr = await findTrackerById(d1, req.eventActionId);
+  if (!tr) return;
+  const channelId = req.channelId ?? args.channelId ?? tr.channelId;
+
+  // トグル: 既に押していれば取り消す。新規なら INSERT。UNIQUE で二重押下を防止。
+  const existing = await d1.select().from(kejimeArticleLgtms).where(and(
+    eq(kejimeArticleLgtms.requestId, args.requestId),
+    eq(kejimeArticleLgtms.slackUserId, args.slackUserId),
+  )).get();
+  if (existing) {
+    await d1.delete(kejimeArticleLgtms)
+      .where(eq(kejimeArticleLgtms.id, existing.id));
+    return;
+  }
+  try {
+    await d1.insert(kejimeArticleLgtms).values({
+      id: crypto.randomUUID(), requestId: args.requestId,
+      slackUserId: args.slackUserId, createdAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    // UNIQUE 違反 = 同時押下の競合。LGTM は記録済みなので無視して件数判定へ進む。
+    if (!String(e).includes("UNIQUE")) throw e;
+  }
+
+  const lgtms = await d1.select().from(kejimeArticleLgtms)
+    .where(eq(kejimeArticleLgtms.requestId, args.requestId)).all();
+  if (lgtms.length < KEJIME_LGTM_THRESHOLD) return;
+  await approveArticleRequest(db, d1, slack, tr, req, args.slackUserId, channelId);
+}
+
+/**
+ * 後方互換: リアクション (:+1: 等) による承認経路。
+ * LGTM は PR でボタン方式へ移行したが、既存運用 (リアクションを付けて承認) を
+ * 壊さないため残す。閾値 (KEJIME_LGTM_THRESHOLD) はボタンと共通。
+ */
+export async function handleKejimeReactionAdded(
+  db: D1Database, slack: Poster, event: KejimeReactionEvent,
+): Promise<void> {
+  if (!event.reaction || !ARTICLE_REACTIONS.has(event.reaction)) return;
+  if (!event.user || !event.item?.channel || !event.item?.ts) return;
+  const d1 = drizzle(db);
+  const tr = await findTrackerByChannel(d1, event.item.channel); if (!tr) return;
+  // notice_ts で照合する。チャンネル経由・モーダル経由の両方で Bot 受領メッセージ ts
+  // が保存されるため、モーダル申請 (threadTs=null) でも正しくマッチする。
+  const req = await d1.select().from(kejimeArticleRequests).where(and(
+    eq(kejimeArticleRequests.eventActionId, tr.actionId),
+    eq(kejimeArticleRequests.noticeTs, event.item.ts),
+    eq(kejimeArticleRequests.status, "pending"),
+  )).get();
+  if (!req) return;
+  // KEJIME_LGTM_THRESHOLD リアクション以上で承認（ロール制限・自己除外なし）。
+  // Slack reactions.get で現在のカウントを取得し、未達ならスキップ。
+  const reactionsRes = await (slack as unknown as { callApi: (m: string, b: Record<string, unknown>) => Promise<unknown> })
+    .callApi("reactions.get", {
+      channel: event.item.channel,
+      timestamp: event.item.ts,
+      full: true,
+    }).catch(() => null) as { message?: { reactions?: { name: string; count: number }[] } } | null;
+  const total = (reactionsRes?.message?.reactions ?? [])
+    .filter((r) => ARTICLE_REACTIONS.has(r.name))
+    .reduce((sum, r) => sum + r.count, 0);
+  if (total < KEJIME_LGTM_THRESHOLD) return;
+  await approveArticleRequest(db, d1, slack, tr, req, event.user, event.item.channel);
 }

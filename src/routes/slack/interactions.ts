@@ -8,7 +8,10 @@ import {
   type AttendanceChoice,
 } from "../../services/attendance-check";
 import { handleMorningAttend } from "../../services/morning-standup";
-import { processQiitaArticleSubmission } from "../../services/kejime-article-flow";
+import {
+  handleKejimeArticleLgtm,
+  processQiitaArticleSubmission,
+} from "../../services/kejime-article-flow";
 import { buildKejimeArticleModal } from "../../services/kejime-article-modal";
 import { drawPendingGacha } from "../../services/kejime-gacha-draw";
 import { postOrUpdateKejimeStatus } from "../../services/kejime-status-post";
@@ -173,6 +176,29 @@ interactionsRouter.post("/interactions", async (c) => {
           }
         } catch (e) {
           console.error("Failed to open kejime article modal:", e);
+        }
+      })());
+      return c.json({ ok: true });
+    }
+
+    // けじめ記事 LGTM ボタン (リアクション承認からの移行先)。
+    // action_id = kejime_article_lgtm:<requestId>
+    // → トグルで LGTM を加減し、閾値到達で記事を承認する。waitUntil で非同期処理。
+    if (action.action_id?.startsWith("kejime_article_lgtm:")) {
+      const requestId =
+        action.action_id.slice("kejime_article_lgtm:".length) ||
+        (action.value as string | undefined) || "";
+      const userId = payload.user?.id;
+      const channelId = payload.channel?.id;
+      if (!requestId || !userId || !channelId) return c.json({ ok: true });
+      c.executionCtx.waitUntil((async () => {
+        try {
+          const client = getSlackClient(c);
+          await handleKejimeArticleLgtm(c.env.DB, client, {
+            requestId, slackUserId: userId, channelId,
+          });
+        } catch (e) {
+          console.error("Failed to handle kejime_article_lgtm:", e);
         }
       })());
       return c.json({ ok: true });

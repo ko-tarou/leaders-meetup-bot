@@ -893,6 +893,38 @@ export const kejimeEvents = sqliteTable(
   ],
 );
 
+// 朝勉強会 (morning_standup) の「回 (session)」記録 (migration 0068)。
+// 1 morning_standup アクション : N session。各回は { 回番号, 開催日, テーマ,
+// その日の内容 } を持ち、出席 / けじめ記事をこの回に紐付ける。レビュアー
+// (朝活メンバー) が「記事内容がその回の内容に沿うか」を人手で照合するための台帳。
+// (event_action_id, session_no) UNIQUE で回番号の重複を防ぐ。
+export const morningSessions = sqliteTable(
+  "morning_sessions",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    // 第N回の N。アクション内で一意。
+    sessionNo: integer("session_no").notNull(),
+    // 開催日 (JST YYYY-MM-DD)。
+    date: text("date").notNull(),
+    // その回のテーマ (例: バックエンド)。空文字可。
+    theme: text("theme").notNull().default(""),
+    // その日の内容 (任意・自由記述)。記事内容照合の基準になる。
+    content: text("content"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    index("idx_morning_sessions_action").on(t.eventActionId),
+    uniqueIndex("uq_morning_sessions_action_no").on(
+      t.eventActionId,
+      t.sessionNo,
+    ),
+  ],
+);
+
 // date は YYYY-MM-DD (JST)。
 export const morningAttendance = sqliteTable(
   "morning_attendance",
@@ -905,6 +937,8 @@ export const morningAttendance = sqliteTable(
     slackUserId: text("slack_user_id").notNull(),
     status: text("status").notNull(),
     messageTs: text("message_ts"),
+    // migration 0068: どの回 (morning_sessions.id) の出席か。NULL = 紐付け無し (後方互換)。
+    sessionId: text("session_id"),
     recordedAt: text("recorded_at").notNull(),
   },
   (t) => [
@@ -942,6 +976,9 @@ export const kejimeArticleRequests = sqliteTable(
     // null/0 = 未承認 (テーマ確認待ち)、1 = admin がテーマ準拠を承認済み。
     // 文字数 OK でもこれが 1 になるまで自動承認 (リアクション) ではクリアしない。
     themeApproved: integer("theme_approved"),
+    // migration 0068: この記事がどの回 (morning_sessions.id) のものか。
+    // NULL = 紐付け無し (後方互換)。レビュアーが回の内容と照合する手掛かり。
+    sessionId: text("session_id"),
     threadTs: text("thread_ts"),
     // migration 0063: Bot の受領メッセージ (notice) の ts。
     // リアクション承認はこの ts で照合する。
@@ -957,6 +994,28 @@ export const kejimeArticleRequests = sqliteTable(
     index("idx_kejime_article_requests_event_action_id").on(t.eventActionId),
     index("idx_kejime_article_requests_status").on(t.status),
     index("kejime_article_requests_notice_ts_idx").on(t.noticeTs),
+  ],
+);
+
+// けじめ記事 LGTM (migration 0068): リアクション承認をボタン承認へ移行する受け皿。
+// 1 記事 (request_id) : N LGTM。(request_id, slack_user_id) UNIQUE で二重投票を防ぐ。
+// LGTM 件数が閾値 (既定 3) に達した記事を承認する。
+export const kejimeArticleLgtms = sqliteTable(
+  "kejime_article_lgtms",
+  {
+    id: text("id").primaryKey(),
+    requestId: text("request_id")
+      .notNull()
+      .references(() => kejimeArticleRequests.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_kejime_article_lgtms_request_user").on(
+      t.requestId,
+      t.slackUserId,
+    ),
+    index("idx_kejime_article_lgtms_request").on(t.requestId),
   ],
 );
 
