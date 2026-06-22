@@ -58,6 +58,12 @@ function installFetchSpy(opts?: {
       const body = init?.body == null ? undefined : String(init.body);
       calls.push({ url, method, body });
 
+      // 回 (session) スケジュール GET は配列を返す (Feature ①)。
+      if (url.includes("/morning-attendance/sessions") && method === "GET") {
+        return new Response(JSON.stringify([]), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.includes("/morning-attendance/stats")) {
         return new Response(
           JSON.stringify({ from: "2026-05-13", to: "2026-05-19", days: 7, members: statsMembers }),
