@@ -39,7 +39,7 @@ type ArticleRow = {
   // 旧呼び出し (テスト等) では未指定可。未指定の行はボタンを出さない。
   requestId?: string;
 };
-// 未抽選 (pending) の遅刻イベント。本人が「ガチャを引く」ボタンで抽選する。
+// 未抽選 (pending) の遅刻イベント。誰でも「ガチャを引く」ボタンで抽選できる。
 type PendingGacha = {
   penaltyId: string;
   slackUserId: string;
@@ -146,13 +146,14 @@ export function buildStatusBlocks(
     });
   }
 
-  // 🎲 未抽選ガチャ: 本人が「ガチャを引く」を押すまでポイント未確定。
+  // 🎲 未抽選ガチャ: 誰かが「ガチャを引く」を押すまでポイント未確定。
+  // 仕様訂正: 遅刻者本人に限らず誰でも遅刻者のガチャを引ける。
   // penalty ごとに 1 行 (誰の・いつの遅刻か) + ガチャボタンを並べる。
   // Slack の actions block は最大 5 要素なので、6 件目以降は別 block に分ける。
   const pending = pendingGachas ?? [];
   if (pending.length > 0) {
     blocks.push(mrkdwnSection(
-      [":game_die: *遅刻ガチャ (未抽選)* — 本人がボタンを押して 1〜3pt を引いてください"]
+      [":game_die: *遅刻ガチャ (未抽選)* — 誰でもボタンを押して 1〜3pt を引けます (ポイントは遅刻者本人に付きます)"]
         .concat(pending.map(
           (g) => `  • <@${g.slackUserId}> (${g.date}) のガチャ`,
         )).join("\n"),
@@ -339,7 +340,7 @@ async function buildLatestStatusBlocks(
     new Set(lateRows.map((r) => r.slackUserId)),
   );
 
-  // 🎲 未抽選 (pending) の遅刻イベント = 本人がガチャを引く対象。
+  // 🎲 未抽選 (pending) の遅刻イベント = 誰でもガチャを引ける対象。
   // 当日分に限らず未抽選の penalty を全部出す (引き忘れを溜めない)。
   const pendingRows = members.length === 0 ? [] : await d1.select({
     penaltyId: kejimePenalties.id,
