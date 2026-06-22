@@ -36,7 +36,7 @@
 //   - 1 PR の post 失敗で他 PR を止めない (dedupKey は completed にしない)。
 
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { eventActions, githubUserMappings, scheduledJobs } from "../db/schema";
 import { getSlackClientForChannel } from "./workspace";
 import { getJstNow } from "./time-utils";
@@ -53,6 +53,12 @@ export type StalePrNudgeConfig = {
 
 const DEFAULT_STALE_HOURS = 48;
 const DEFAULT_NUDGE_TIME = "09:00";
+
+// stale-nudge の config を持ちうる action 種別。
+// 新方式: pr_review_list アクションの config に nudge 設定を畳み込む (推奨)。
+// 旧方式: 専用 stale_pr_nudge アクション (後方互換のため残置・非推奨)。
+// どちらも config を parseStalePrNudgeConfig で解釈し、満たさなければ no-op。
+export const NUDGE_ACTION_TYPES = ["pr_review_list", "stale_pr_nudge"] as const;
 
 // 5 分 cron + 軽い遅延を吸収するため [scheduled, scheduled + 9 分) を窓とする
 // (weekly-reminder と同一)。
@@ -243,12 +249,15 @@ export async function processStalePrNudges(
   const ymdCompact = now.ymd.replace(/-/g, "");
   const dow = jstDayOfWeek();
 
+  // pr_review_list (新方式) と stale_pr_nudge (後方互換) の両方を走査する。
+  // config が nudge 設定 (repos / channel) を満たさない pr_review_list は
+  // parseStalePrNudgeConfig が null を返すので自然に skip される。
   const actions = await d1
     .select()
     .from(eventActions)
     .where(
       and(
-        eq(eventActions.actionType, "stale_pr_nudge"),
+        inArray(eventActions.actionType, [...NUDGE_ACTION_TYPES]),
         eq(eventActions.enabled, 1),
       ),
     )
@@ -312,7 +321,8 @@ export async function nudgeActionById(
   if (!action || action.eventId !== eventId) {
     return { ok: false, error: "action_not_found" };
   }
-  if (action.actionType !== "stale_pr_nudge") {
+  // pr_review_list (新方式) / stale_pr_nudge (後方互換) のどちらでも受け付ける。
+  if (!(NUDGE_ACTION_TYPES as readonly string[]).includes(action.actionType)) {
     return { ok: false, error: "not_stale_pr_nudge" };
   }
   const config = parseStalePrNudgeConfig(action.config);
