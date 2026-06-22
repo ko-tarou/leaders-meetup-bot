@@ -4,10 +4,20 @@ import { api } from "../api";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { colors } from "../styles/tokens";
 
-// sponsor_application 公開フォーム (個人スポンサー前提・0065)。
-// 項目: お名前(氏名・必須) / 所属(任意) / メール(必須) / ご協賛金額(必須) /
-// 応援メッセージ・コメント(任意)。企業前提の会社名/担当者/期間/用途は廃止。
+// sponsor_application 公開フォーム (個人スポンサー前提・0065 / 0069)。
+// 項目: お名前(氏名・必須) / 所属(任意) / メール(必須) /
+// 当日来られますか?(任意) / 応援メッセージ・コメント(任意)。
+// 協賛金額は一律 5000 円固定 (0069) で、入力欄は廃止し固定表示する。
+// 企業前提の会社名/担当者/期間/用途は廃止。
 // 認証不要。event 情報は公開エンドポイント /api/sponsor/:eventId/event で取得する。
+
+const FLAT_AMOUNT = 5000;
+type AttendanceOnDay = "coming" | "not_coming" | "undecided";
+const ATTENDANCE_OPTIONS: { value: AttendanceOnDay; label: string }[] = [
+  { value: "coming", label: "来る" },
+  { value: "not_coming", label: "来ない" },
+  { value: "undecided", label: "未定" },
+];
 
 type PublicSponsorEvent = {
   id: string;
@@ -25,7 +35,7 @@ export function PublicSponsorPage() {
   const [name, setName] = useState("");
   const [affiliation, setAffiliation] = useState("");
   const [email, setEmail] = useState("");
-  const [amount, setAmount] = useState("");
+  const [attendanceOnDay, setAttendanceOnDay] = useState<AttendanceOnDay | "">("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +67,6 @@ export function PublicSponsorPage() {
       setError("メールアドレスを入力してください");
       return;
     }
-    const amountNum = Number(amount);
-    if (!Number.isInteger(amountNum) || amountNum < 1) {
-      setError("ご協賛金額は 1 以上の整数で入力してください");
-      return;
-    }
     setError(null);
     setSubmitting(true);
     try {
@@ -69,7 +74,7 @@ export function PublicSponsorPage() {
         name: name.trim(),
         affiliation: affiliation.trim() || undefined,
         email: email.trim(),
-        amount: amountNum,
+        attendanceOnDay: attendanceOnDay || undefined,
         message: message.trim() || undefined,
       });
       navigate(`/sponsor/${eventId}/thanks`);
@@ -177,16 +182,59 @@ export function PublicSponsorPage() {
             style={inputStyle}
           />
         </Field>
-        <Field label="ご協賛金額（円） *" hint="半角数字でご記入ください">
-          <input
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            required
-            min={1}
-            step={1}
-            style={inputStyle}
-          />
+        <Field label="ご協賛金額" hint="個人スポンサーは一律の金額です">
+          <div
+            style={{
+              ...inputStyle,
+              display: "flex",
+              alignItems: "center",
+              background: colors.surface,
+              fontWeight: "bold",
+            }}
+          >
+            {FLAT_AMOUNT.toLocaleString()} 円
+          </div>
+        </Field>
+        <Field label="当日来られますか？（任意）">
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+            {ATTENDANCE_OPTIONS.map((o) => (
+              <label
+                key={o.value}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.375rem",
+                  cursor: "pointer",
+                  fontSize: "0.95rem",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="attendanceOnDay"
+                  value={o.value}
+                  checked={attendanceOnDay === o.value}
+                  onChange={() => setAttendanceOnDay(o.value)}
+                />
+                {o.label}
+              </label>
+            ))}
+            {attendanceOnDay && (
+              <button
+                type="button"
+                onClick={() => setAttendanceOnDay("")}
+                style={{
+                  border: "none",
+                  background: "none",
+                  color: colors.textSecondary,
+                  cursor: "pointer",
+                  fontSize: "0.85rem",
+                  textDecoration: "underline",
+                }}
+              >
+                選択を解除
+              </button>
+            )}
+          </div>
         </Field>
         <Field
           label="応援メッセージ・コメント（任意）"

@@ -412,6 +412,11 @@ function SponsorDetailModal({
             {formatAmount(application.amount)}
           </div>
         </Section>
+        <Section label="当日来られますか？">
+          <div style={{ fontSize: "0.875rem" }}>
+            {attendanceLabel(application.attendanceOnDay)}
+          </div>
+        </Section>
         <Section label="応援メッセージ・コメント">
           <div style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
             {application.message || "（未記入）"}
@@ -515,4 +520,20 @@ function btnStyle(color: string, isMobile = false): CSSProperties {
 
 function formatAmount(amount: number): string {
   return `${amount.toLocaleString("ja-JP")} 円`;
+}
+
+// 当日来場アンケート (0069) の表示ラベル。未回答 / 旧データは未記入扱い。
+function attendanceLabel(
+  v: "coming" | "not_coming" | "undecided" | null,
+): string {
+  switch (v) {
+    case "coming":
+      return "来る";
+    case "not_coming":
+      return "来ない";
+    case "undecided":
+      return "未定";
+    default:
+      return "（未回答）";
+  }
 }
