@@ -12,10 +12,17 @@ type EventRow = { id: string; type: string; pointsDelta: number; ramenDelta: num
 type Article = { id: string; memberId: string; memberDisplayName: string;
   qiitaUrl: string; bodyLength: number | null; status: string; createdAt: string;
   // イベント単位ペナルティ連携: 対象 penalty / テーマ承認状態 / 消費 pt。
-  penaltyId: string | null; themeApproved: number | null; pointsToClear: number | null };
+  penaltyId: string | null; themeApproved: number | null; pointsToClear: number | null;
+  // LGTM 承認進捗: 集まった LGTM 件数 / 承認に必要な閾値 (既定 3)。
+  lgtmCount?: number; lgtmThreshold?: number };
 type Penalty = { id: string; memberDisplayName: string; slackUserId: string;
   date: string; theme: string; points: number; requiredChars: number;
   status: string; clearedAt: string | null };
+
+// LGTM 件数が閾値 (既定 3) に達しているか。達していれば承認進行中の表示にする。
+function lgtmReached(a: { lgtmCount?: number; lgtmThreshold?: number }): boolean {
+  return (a.lgtmCount ?? 0) >= (a.lgtmThreshold ?? 3);
+}
 
 function Section({ title, empty, isEmpty, children }: {
   title: string; empty: string; isEmpty: boolean; children: ReactNode;
@@ -188,6 +195,12 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
                     {pen && ` / 対象: ${pen.date} ${pen.theme || "(テーマ未設定)"} (要 ${pen.requiredChars}字)`}
                     {a.themeApproved === 1 && " / テーマ承認済"}
                   </div>
+                  <div style={s.meta}>
+                    <span style={lgtmReached(a) ? s.lgtmDone : s.lgtmBadge}>
+                      LGTM {a.lgtmCount ?? 0}/{a.lgtmThreshold ?? 3}
+                    </span>
+                    {lgtmReached(a) && " 閾値到達"}
+                  </div>
                 </div>
                 <button className="btn btn-primary btn-sm" disabled={busy === `a-${a.id}`}
                   onClick={() => post("/article-manual-approve", { articleRequestId: a.id },
@@ -283,4 +296,10 @@ const s: Record<string, CSSProperties> = {
   badge: { padding: "0.125rem 0.375rem", background: colors.primarySubtle,
     color: colors.primaryHover, borderRadius: "0.25rem",
     fontSize: "0.75rem", fontWeight: 500 },
+  lgtmBadge: { padding: "0.125rem 0.375rem", background: colors.surface,
+    color: colors.textSecondary, border: `1px solid ${colors.border}`,
+    borderRadius: "0.25rem", fontSize: "0.75rem", fontWeight: 600 },
+  lgtmDone: { padding: "0.125rem 0.375rem", background: colors.primarySubtle,
+    color: colors.primaryHover, borderRadius: "0.25rem",
+    fontSize: "0.75rem", fontWeight: 700 },
 };
