@@ -358,19 +358,20 @@ describe("遅刻ガチャ「本人が引く」(drawPendingGacha)", () => {
     expect(ev[0].pointsDelta).toBe(1);
   });
 
-  it("他人は引けない (forbidden) / 本人なら引ける", async () => {
+  it("遅刻者以外 (他人) でもガチャを引ける (仕様訂正)", async () => {
     forceGachaR(0.1);
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio({ roleMembers: ["U1"], attendedUsers: [] });
     await processLateJudgment(testD1());
     const pen = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
+    // 遅刻者 U1 ではない別ユーザーが押しても抽選が成立する。
     const other = await drawPendingGacha(testD1(), pen!.id, "U-OTHER");
-    expect(other.ok).toBe(false);
-    if (!other.ok) expect(other.reason).toBe("forbidden");
-    // 本人なら引ける。
-    const mine = await drawPendingGacha(testD1(), pen!.id, "U1");
-    expect(mine.ok).toBe(true);
+    expect(other.ok).toBe(true);
+    // 一度引いたら 2 回目は (誰が押しても) already_drawn (二重抽選防止は維持)。
+    const again = await drawPendingGacha(testD1(), pen!.id, "U1");
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.reason).toBe("already_drawn");
   });
 });
 

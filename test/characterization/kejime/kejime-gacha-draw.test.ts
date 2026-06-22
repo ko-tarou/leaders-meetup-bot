@@ -1,9 +1,10 @@
 /**
- * 朝勉強会けじめ制度 (PR#315 改修): 遅刻ガチャ「本人が引く」(drawPendingGacha)。
+ * 朝勉強会けじめ制度 (PR#315 改修 / 仕様訂正): 遅刻ガチャ「誰でも引ける」(drawPendingGacha)。
  *
- * - pending penalty を本人が引くと 1〜3pt 確定 + pending->open 遷移 + ポイント加算。
+ * - pending penalty を引くと 1〜3pt 確定 + pending->open 遷移 + ポイント加算。
  * - 二重抽選防止 (連打しても 1 回だけ確定)。
- * - 本人以外は forbidden。存在しない penalty は not_found。
+ * - 遅刻者本人に限らず誰でも引ける (ポイントは遅刻者本人に付く)。
+ * - 存在しない penalty は not_found。
  * - 既に open (抽選済み) を引くと already_drawn。
  * - required_chars = points x charsPerPoint (×1000 デフォルト)。
  */
@@ -118,18 +119,18 @@ describe("drawPendingGacha: ガード", () => {
     expect(m?.currentPoints).toBe(1); // 1pt のみ
   });
 
-  it("本人以外 → forbidden (ポイントは動かない)", async () => {
-    forceGachaR(0.1);
-    const { penaltyId, memberId } = await setup();
+  it("遅刻者以外 (他人) でも引ける → ポイントは遅刻者本人に付く", async () => {
+    forceGachaR(0.1); // 1pt
+    const { penaltyId, memberId } = await setup(); // 遅刻者 = U1
+    // U1 ではない別メンバーが押しても抽選が成立する (仕様訂正)。
     const r = await drawPendingGacha(testD1(), penaltyId, "U-OTHER");
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("forbidden");
+    expect(r.ok).toBe(true);
     const pen = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.id, penaltyId)).get();
-    expect(pen?.status).toBe("pending");
+    expect(pen?.status).toBe("open"); // 抽選済みへ遷移
     const m = await testDb().select().from(kejimeMembers)
       .where(eq(kejimeMembers.id, memberId)).get();
-    expect(m?.currentPoints).toBe(0);
+    expect(m?.currentPoints).toBe(1); // ポイントは遅刻者本人 (U1) に付く
   });
 
   it("存在しない penalty → not_found", async () => {
