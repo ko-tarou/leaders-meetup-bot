@@ -16,7 +16,7 @@ import { fetchQiitaBodyLength, parseQiitaUrl } from "./qiita-validator";
 import { postOrUpdateKejimeStatus } from "./kejime-status-post";
 import type { SlackClient } from "./slack-api";
 import { getJstNow } from "./time-utils";
-import { mrkdwnSection, plainText } from "../domain/slack-blocks/builders";
+import { mrkdwnSection } from "../domain/slack-blocks/builders";
 
 type D1 = ReturnType<typeof drizzle>;
 // blocks 付き投稿に対応するため optional blocks を許容 (SlackClient と互換)。
@@ -109,25 +109,28 @@ async function resolveSessionId(
 
 /**
  * pending 記事の notice 用 blocks を組み立てる。
- * 本文 + レビュアー向け内容確認リマインド + LGTM ボタンを並べる。
- * action_id = kejime_article_lgtm:<requestId>。閾値到達でボタンから承認する。
+ * 本文 + レビュアー向け内容確認リマインド + 「LGTM はステータス投稿から」案内を並べる。
+ *
+ * BUGFIX: 以前はこの申請通知メッセージ自体に LGTM ボタンを付けていた。しかし
+ * 申請通知はチャンネルに 1 回 post されたきり再投稿されないため、チャンネルが
+ * 流れると申請通知 (とその LGTM ボタン) は上にスクロールして埋もれてしまう。
+ * 一方で「朝活けじめステータス」メッセージは変動のたびに delete+repost されて
+ * 常にチャンネル最下部に出る (buildStatusBlocks が同じ requestId の LGTM ボタンを
+ * 内包する)。LGTM ボタンの正典をステータス投稿側に一本化し、申請通知側には
+ * 「承認はステータス投稿の LGTM ボタンから」という案内文だけ残す。これにより
+ * 「古い申請通知に取り残された LGTM ボタンを押してしまう」問題を解消する。
  */
 function pendingArticleBlocks(
-  body: string, requestId: string, sessionLabel: string,
+  body: string, _requestId: string, sessionLabel: string,
 ): Block[] {
   const blocks: Block[] = [mrkdwnSection(body)];
   if (sessionLabel) blocks.push(mrkdwnSection(sessionLabel));
   blocks.push(mrkdwnSection(REVIEWER_CONTENT_CHECK_REMINDER));
-  blocks.push({
-    type: "actions",
-    elements: [{
-      type: "button",
-      text: plainText(`:+1: LGTM (承認には ${KEJIME_LGTM_THRESHOLD} 件必要)`),
-      action_id: `kejime_article_lgtm:${requestId}`,
-      value: requestId,
-      style: "primary",
-    }],
-  });
+  blocks.push(mrkdwnSection(
+    `:point_down: *承認 (LGTM) はチャンネル最下部の「朝活けじめステータス」投稿の` +
+      ` LGTM ボタンから行ってください* (${KEJIME_LGTM_THRESHOLD} 件で承認)。` +
+      `ステータス投稿は常に最新が最下部に再掲されます。`,
+  ));
   return blocks;
 }
 type Block = Record<string, unknown>;
