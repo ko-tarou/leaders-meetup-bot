@@ -29,6 +29,7 @@ import {
   isWeekday,
   makeDedupKey,
   buildNudgeText,
+  buildMention,
 } from "../../../src/services/stale-pr-nudge";
 import {
   setSlackClientProvider,
@@ -246,15 +247,35 @@ describe("makeDedupKey", () => {
   });
 });
 
-describe("buildNudgeText", () => {
-  it("メンションありは @ 付きで催促 + URL を改行で付ける", () => {
-    expect(buildNudgeText(["<@U1>", "@github:foo"], "My PR", "http://x/1")).toBe(
-      "<@U1> @github:foo このPRレビューお願いします: My PR\nhttp://x/1",
+describe("buildMention", () => {
+  it("mapping 有り → <@SlackID> (実メンション)", () => {
+    expect(buildMention("octocat", "U-OCTO")).toBe("<@U-OCTO>");
+  });
+  it("mapping 無し → GitHub プロフィールリンク (誤メンションしない)", () => {
+    expect(buildMention("octocat", null)).toBe(
+      "<https://github.com/octocat|@octocat>",
+    );
+    expect(buildMention("octocat", undefined)).toBe(
+      "<https://github.com/octocat|@octocat>",
     );
   });
-  it("メンション無しは (レビュアー未割当)", () => {
+});
+
+describe("buildNudgeText", () => {
+  it("メンションありは先頭に並べて催促 + URL を改行で付ける", () => {
+    expect(
+      buildNudgeText(
+        ["<@U1>", "<https://github.com/foo|@foo>"],
+        "My PR",
+        "http://x/1",
+      ),
+    ).toBe(
+      "<@U1> <https://github.com/foo|@foo> このPRレビューお願いします: My PR\nhttp://x/1",
+    );
+  });
+  it("メンション無し (未割当) は <!channel> (@channel) を先頭に置く", () => {
     expect(buildNudgeText([], "T", "http://x")).toBe(
-      "(レビュアー未割当) このPRレビューお願いします: T\nhttp://x",
+      "<!channel> このPRレビューお願いします: T\nhttp://x",
     );
   });
 });
@@ -294,14 +315,74 @@ describe("processStalePrNudges: 対象抽出 / 窓判定", () => {
     );
   });
 
-  it("mapping 未登録レビュアーは @github:<login> フォールバック (誤メンションしない)", async () => {
+  it("mapping 未登録レビュアーは GitHub リンク fallback (誤メンションしない)", async () => {
     const { posts } = setupSlackSpy();
     stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
     await seedAction(cfg());
     const res = await processStalePrNudges(testD1(), env);
     expect(res).toEqual({ nudged: 1 });
-    expect(posts[0].text).toContain("@github:octocat");
+    expect(posts[0].text).toContain("<https://github.com/octocat|@octocat>");
+    // 実メンション (<@...>) や @channel は飛ばさない (誤通知回避)。
     expect(posts[0].text).not.toContain("<@");
+    expect(posts[0].text).not.toContain("<!channel>");
+  });
+
+  it("FIX2: reviewer も assignee も居ない未割当 PR は <!channel> で催促", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({ requested_reviewers: [], assignees: [] }),
+      ],
+    });
+    await seedAction(cfg());
+    const res = await processStalePrNudges(testD1(), env);
+    expect(res).toEqual({ nudged: 1 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].text).toContain("<!channel>");
+  });
+
+  it("FIX1: assignee も対象に含め mapping 解決して実メンションする", async () => {
+    const { posts } = setupSlackSpy();
+    await testDb().insert(githubUserMappings).values({
+      githubUsername: "assignee1",
+      slackUserId: "U-ASSIGN",
+      displayName: "Assignee One",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({ requested_reviewers: [], assignees: [{ login: "assignee1" }] }),
+      ],
+    });
+    await seedAction(cfg());
+    const res = await processStalePrNudges(testD1(), env);
+    expect(res).toEqual({ nudged: 1 });
+    expect(posts[0].text).toContain("<@U-ASSIGN>");
+    expect(posts[0].text).not.toContain("<!channel>");
+  });
+
+  it("reviewer と assignee に同一 login が居ても 1 メンションに畳む", async () => {
+    const { posts } = setupSlackSpy();
+    await testDb().insert(githubUserMappings).values({
+      githubUsername: "octocat",
+      slackUserId: "U-OCTO",
+      displayName: "Octo",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({
+          requested_reviewers: [{ login: "octocat" }],
+          assignees: [{ login: "octocat" }],
+        }),
+      ],
+    });
+    await seedAction(cfg());
+    await processStalePrNudges(testD1(), env);
+    const occurrences = posts[0].text.split("<@U-OCTO>").length - 1;
+    expect(occurrences).toBe(1);
   });
 
   it("土曜 (週末) → 走らない", async () => {

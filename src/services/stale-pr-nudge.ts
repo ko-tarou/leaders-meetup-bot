@@ -13,7 +13,10 @@
 //   - public repo 前提で未認証でも動く (60 req/hour)。env.GITHUB_TOKEN があれば
 //     Authorization ヘッダを付けて private 対応 + rate limit 緩和 (5000 req/hour)。
 //   - GitHub→Slack 解決は github_user_mappings (githubUsername → slackUserId)。
-//     未登録は `@github:<login>` のプレーン表示にフォールバック (誤メンションしない)。
+//     登録済みは `<@slackUserId>` で実メンション (本人へ通知)。未登録は
+//     GitHub プロフィールリンク表示にフォールバック (誤メンションしない)。
+//   - reviewer も assignee も居ない未割当 PR は `<!channel>` (@channel) で
+//     チャンネル全体へ通知する (担当不在を放置しない)。
 //
 // stale 判定:
 //   - PR.updated_at が config.staleHours (既定 48h) 以上前なら stale。
@@ -161,17 +164,38 @@ export function makeDedupKey(
 }
 
 /**
+ * GitHub login を Slack メンション文字列へ解決する純粋関数。
+ * - mapping (githubUsername -> slackUserId) があれば `<@SlackID>` を返す。
+ *   Slack の `chat.postMessage` は text フィールドの `<@ID>` を実メンション
+ *   (mrkdwn) として解釈し、本人へ通知が飛ぶ。
+ * - mapping が無ければ GitHub プロフィールへの「リンク」を返す
+ *   (`<https://github.com/<login>|@login>`)。これも通知は飛ばないが、
+ *   素の `@github:login` プレーンテキストより視認性が高く、
+ *   誤った Slack ユーザーへ通知しない (安全) を保ちつつ degrade する。
+ */
+export function buildMention(
+  login: string,
+  slackUserId: string | null | undefined,
+): string {
+  if (slackUserId) return `<@${slackUserId}>`;
+  return `<https://github.com/${login}|@${login}>`;
+}
+
+/**
  * 催促メッセージ本文を組み立てる。
- * - mapping 解決済みレビュアーは `<@SlackID>` (アクティブ通知 = mention 抑制しない)。
- * - 未解決 (mapping 無し) レビュアーは `@github:<login>` プレーン表示
- *   (誤った Slack ユーザーに通知しないため)。
+ * - reviewer/assignee が居る場合は解決済みメンション群を先頭に置く
+ *   (`<@SlackID>` は実通知、未 mapping は GitHub リンク表示)。
+ * - reviewer も assignee も居ない (未割当) 場合は `<!channel>` (@channel) を
+ *   先頭に置き、チャンネル全員へ通知する (FIX 2: 担当不在を放置しない)。
+ *
+ * 戻り値は Slack mrkdwn。`<@ID>` / `<!channel>` が実メンションとして描画される。
  */
 export function buildNudgeText(
   mentions: string[],
   prTitle: string,
   prUrl: string,
 ): string {
-  const who = mentions.length > 0 ? mentions.join(" ") : "(レビュアー未割当)";
+  const who = mentions.length > 0 ? mentions.join(" ") : "<!channel>";
   return `${who} このPRレビューお願いします: ${prTitle}\n${prUrl}`;
 }
 
@@ -185,6 +209,7 @@ export type GHPullRequest = {
   title: string;
   updated_at: string;
   requested_reviewers?: GHUser[];
+  assignees?: GHUser[];
 };
 
 function ghHeaders(env: Env): Record<string, string> {
@@ -219,7 +244,7 @@ export async function fetchOpenPRs(
 /**
  * GitHub login → Slack mention 文字列。
  * - github_user_mappings に登録があれば `<@slackUserId>` (= 実通知)。
- * - 無ければ `@github:<login>` プレーン表示 (誤メンション回避)。
+ * - 無ければ GitHub プロフィールリンク表示 (誤メンション回避しつつ視認性確保)。
  */
 async function resolveMention(env: Env, login: string): Promise<string> {
   const db = drizzle(env.DB);
@@ -228,7 +253,7 @@ async function resolveMention(env: Env, login: string): Promise<string> {
     .from(githubUserMappings)
     .where(eq(githubUserMappings.githubUsername, login))
     .get();
-  return mapping?.slackUserId ? `<@${mapping.slackUserId}>` : `@github:${login}`;
+  return buildMention(login, mapping?.slackUserId);
 }
 
 // === main ===
@@ -380,11 +405,20 @@ async function nudgeOneAction(
       }
 
       try {
-        const reviewers = pr.requested_reviewers ?? [];
+        // requested_reviewers と assignees を「対象者」として束ね、login で
+        // 重複排除する (同一人物が両方に居るケースを 1 メンションに畳む)。
+        // どちらも空なら mentions=[] となり、buildNudgeText が <!channel> へ
+        // フォールバックする (FIX 2: 未割当 PR はチャンネル全体へ通知)。
+        const targets = [
+          ...(pr.requested_reviewers ?? []),
+          ...(pr.assignees ?? []),
+        ];
+        const seen = new Set<string>();
         const mentions: string[] = [];
-        for (const r of reviewers) {
-          if (!r?.login) continue;
-          mentions.push(await resolveMention(env, r.login));
+        for (const u of targets) {
+          if (!u?.login || seen.has(u.login)) continue;
+          seen.add(u.login);
+          mentions.push(await resolveMention(env, u.login));
         }
         const text = buildNudgeText(mentions, pr.title, pr.html_url);
         await client.postMessage(config.nudgeChannelId, text);
