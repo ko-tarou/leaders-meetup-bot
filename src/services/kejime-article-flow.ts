@@ -413,9 +413,11 @@ async function processQiitaSubmissionInner(
 
 /**
  * pending 記事 1 本を承認に確定する共通処理 (ボタン経路・リアクション経路で共有)。
- * - penalty 紐付けがあり theme_approved != 1 ならテーマ承認待ちを通知して終了。
- * - そうでなければポイント減算・kejime_events 記録・penalty cleared・承認通知・
- *   status post 更新まで行う。
+ * - LGTM (= 勉強会チームの量的承認) が閾値に達した時点で、テーマ承認などの追加
+ *   ゲートを挟まず即・最終承認する。ポイント減算・kejime_events 記録・penalty
+ *   cleared・承認通知・status post 更新までを一度に行う。
+ * - penalty 紐付けの有無に関わらず、追加の admin テーマ承認は不要。承認時に
+ *   theme_approved=1 を併せてセットし、管理画面の表示と整合させる。
  * 呼び出し側で「閾値到達」を確認済みであることが前提。
  */
 async function approveArticleRequest(
@@ -427,18 +429,10 @@ async function approveArticleRequest(
     .where(eq(kejimeMembers.id, req.memberId)).get();
   if (!author) return;
 
-  // イベント単位ペナルティ: この記事が penalty を対象にしている場合、テーマ準拠は
-  // admin の手動承認が基本線。LGTM (= 勉強会チームの量的承認) を満たしても
-  // theme_approved=1 になるまでは penalty を消さない。クリアできるのは
-  // (a) penalty 紐付けが無い旧来フロー、または (b) 既に admin がテーマ承認済みの場合のみ。
-  if (req.penaltyId && req.themeApproved !== 1) {
-    await slack.postMessage(
-      channelId,
-      `<@${author.slackUserId}> 文字数は確認できました。テーマ準拠は管理者の承認待ちです` +
-        ` (管理画面で「テーマに沿うか」を承認するとポイントが消えます)。`,
-    );
-    return;
-  }
+  // 仕様変更: LGTM 3 到達 = 即・最終承認。以前はここに「penalty 紐付けがあり
+  // theme_approved != 1 なら admin のテーマ承認待ち」という追加ゲートがあったが、
+  // 「LGTM を 3 つもらったらそのまま承認してよい」という運用に合わせて撤去した。
+  // penalty があってもこのまま下のクリア処理へ進む (theme_approved も 1 にする)。
 
   // この記事 1 本で消すポイント数 = 申請時に固定した pointsToClear。
   // 旧データ (points_to_clear が null) は従来どおり 1pt 消費にフォールバック。
@@ -449,8 +443,10 @@ async function approveArticleRequest(
   const { internalAfter, ramenBumped } = bumpPointsAndRamen(author.currentPoints, delta);
   const now = new Date().toISOString();
   // 二重承認防止: status='pending' のときだけ approved に遷移できた worker のみ続行。
+  // LGTM3 到達 = テーマ承認も満たしたとみなし theme_approved=1 を併記する
+  // (admin 手動承認経路・管理画面表示と整合させる)。
   const transitioned = await d1.update(kejimeArticleRequests).set({
-    status: "approved", decidedBy, decidedAt: now,
+    status: "approved", themeApproved: 1, decidedBy, decidedAt: now,
   }).where(and(
     eq(kejimeArticleRequests.id, req.id),
     eq(kejimeArticleRequests.status, "pending"),

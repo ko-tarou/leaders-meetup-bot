@@ -9,7 +9,7 @@
  * - pending でない request -> null (確認表示なし)
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   handleKejimeArticleLgtm,
   KEJIME_LGTM_THRESHOLD,
@@ -17,6 +17,7 @@ import {
 import { testD1, testDb } from "../../helpers/db";
 import {
   eventActions, kejimeArticleLgtms, kejimeArticleRequests, kejimeMembers,
+  kejimePenalties,
 } from "../../../src/db/schema";
 import { makeEvent, makeEventAction } from "../../helpers/factory";
 import { MockSlackClient } from "../../mocks/slack";
@@ -53,6 +54,7 @@ async function setup() {
 beforeEach(async () => {
   const db = testDb();
   await db.delete(kejimeArticleLgtms);
+  await db.delete(kejimePenalties);
   await db.delete(kejimeArticleRequests);
   await db.delete(kejimeMembers);
   await db.delete(eventActions);
@@ -108,6 +110,64 @@ describe("handleKejimeArticleLgtm: トグルと件数返却", () => {
     const req = await testDb().select().from(kejimeArticleRequests)
       .where(eq(kejimeArticleRequests.id, requestId)).get();
     expect(req?.status).toBe("approved");
+  });
+
+  it("penalty 紐付け + テーマ未承認でも LGTM3 で即承認・penalty cleared (テーマゲートなし)", async () => {
+    const ev = await makeEvent();
+    const tracker = await makeEventAction(ev.id, {
+      actionType: "kejime_tracker", enabled: 1,
+      config: JSON.stringify({
+        schemaVersion: 1, kejimeChannelId: KEJIME_CH, roleId: "role-lgtm",
+        charsPerPoint: 500,
+      }),
+    });
+    const memberId = crypto.randomUUID();
+    const nowIso = new Date().toISOString();
+    await testDb().insert(kejimeMembers).values({
+      id: memberId, eventActionId: tracker.id, slackUserId: "U-AUTHOR",
+      displayName: "Author", currentPoints: 1, ramenCount: 0,
+      createdAt: nowIso, updatedAt: nowIso,
+    });
+    const penaltyId = crypto.randomUUID();
+    await testDb().insert(kejimePenalties).values({
+      id: penaltyId, eventActionId: tracker.id, memberId,
+      slackUserId: "U-AUTHOR", date: "2026-05-18", theme: "ハードウェア",
+      points: 1, requiredChars: 500, status: "open", createdAt: nowIso,
+    });
+    const requestId = crypto.randomUUID();
+    await testDb().insert(kejimeArticleRequests).values({
+      id: requestId, eventActionId: tracker.id, memberId,
+      qiitaUrl: "https://qiita.com/x/items/0123456789abcdef0123",
+      bodyLength: 600, status: "pending", channelId: KEJIME_CH,
+      penaltyId, pointsToClear: 1, themeApproved: null,
+      createdAt: nowIso,
+    });
+
+    const slack = new MockSlackClient();
+    slack.setResponse("postMessage", { ok: true, ts: "notice-x" });
+    for (const u of ["U-1", "U-2", "U-3"]) {
+      await handleKejimeArticleLgtm(testD1(), slack, {
+        requestId, slackUserId: u, channelId: KEJIME_CH,
+      });
+    }
+
+    // テーマ承認を挟まず即承認: request=approved, theme_approved=1。
+    const req = await testDb().select().from(kejimeArticleRequests)
+      .where(eq(kejimeArticleRequests.id, requestId)).get();
+    expect(req?.status).toBe("approved");
+    expect(req?.themeApproved).toBe(1);
+    // penalty が cleared になる。
+    const pen = await testDb().select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, penaltyId)).get();
+    expect(pen?.status).toBe("cleared");
+    expect(pen?.clearedByRequestId).toBe(requestId);
+    // ポイントも 1 消費。
+    const m = await testDb().select().from(kejimeMembers)
+      .where(and(
+        eq(kejimeMembers.eventActionId, tracker.id),
+        eq(kejimeMembers.slackUserId, "U-AUTHOR"),
+      )).get();
+    expect(m?.currentPoints).toBe(0);
   });
 
   it("pending でない request -> null (確認表示なし)", async () => {
