@@ -176,8 +176,8 @@ describe("記事提出 → 最も古い open penalty を対象", () => {
   });
 });
 
-describe("リアクション承認: テーマ手動承認ゲート", () => {
-  it("penalty 紐付け + テーマ未承認 → 3いいねでも penalty は消えない (admin 待ち)", async () => {
+describe("リアクション承認: LGTM3 即承認 (テーマ承認ゲートなし)", () => {
+  it("penalty 紐付け + テーマ未承認でも 3いいねで penalty を cleared にする (即承認)", async () => {
     freezeJst(MON, "08:00");
     const { tracker } = await setupTrio();
     await processLateJudgment(testD1());
@@ -193,6 +193,8 @@ describe("リアクション承認: テーマ手動承認ゲート", () => {
     const req = await testDb().select().from(kejimeArticleRequests)
       .where(eq(kejimeArticleRequests.status, "pending")).get();
     expect(req?.penaltyId).toBeTruthy();
+    // 申請時点ではテーマ未承認 (null)。
+    expect(req?.themeApproved).toBeNull();
 
     // 3 いいね相当のリアクションが付いた状態を返す。
     slack.setResponse("callApi:reactions.get", {
@@ -204,14 +206,23 @@ describe("リアクション承認: テーマ手動承認ゲート", () => {
       item: { type: "message", channel: KEJIME_CH, ts: req!.noticeTs! },
     });
 
-    // penalty は open のまま (テーマ未承認なのでクリアされない)。
+    // 仕様変更: テーマ承認ゲートを撤去したので 3いいねで penalty が cleared になる。
     const pen = await testDb().select().from(kejimePenalties)
       .where(eq(kejimePenalties.eventActionId, tracker.id)).get();
-    expect(pen?.status).toBe("open");
-    // request も pending のまま (approved にしていない)。
+    expect(pen?.status).toBe("cleared");
+    expect(pen?.clearedByRequestId).toBe(req!.id);
+    // request は approved に遷移し、theme_approved も 1 に併記される。
     const reqAfter = await testDb().select().from(kejimeArticleRequests)
       .where(eq(kejimeArticleRequests.id, req!.id)).get();
-    expect(reqAfter?.status).toBe("pending");
+    expect(reqAfter?.status).toBe("approved");
+    expect(reqAfter?.themeApproved).toBe(1);
+    // ポイントも 1 消費 (1pt penalty)。
+    const m = await testDb().select().from(kejimeMembers)
+      .where(and(
+        eq(kejimeMembers.eventActionId, tracker.id),
+        eq(kejimeMembers.slackUserId, "U1"),
+      )).get();
+    expect(m?.currentPoints).toBe(0);
   });
 
   it("テーマ承認済み (theme_approved=1) なら 3いいねで penalty を cleared にする", async () => {
