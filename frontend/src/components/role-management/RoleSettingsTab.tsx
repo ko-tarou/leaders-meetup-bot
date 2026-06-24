@@ -12,7 +12,14 @@ import { colors } from "../../styles/tokens";
 // 「無効化」「削除」のボタンは ActionDetailPage の generic settings 領域で
 // 自動描画されるので、このコンポーネントは workspace 編集 UI のみに責務を絞る。
 
-type Config = { workspaceId?: string; autoInviteEnabled?: boolean };
+type Config = {
+  workspaceId?: string;
+  autoInviteEnabled?: boolean;
+  // role-management-shared-events: 共有元 action へ alias している場合に入る。
+  // この場合 workspace は共有元側で設定するため、ここでは編集 UI を出さない
+  // (誤って保存すると sharedFromActionId が消えて共有が切れるため)。
+  sharedFromActionId?: string;
+};
 
 function parseConfig(raw: string): Config {
   try {
@@ -87,6 +94,20 @@ export function RoleSettingsTab({ eventId, action, onSaved }: Props) {
 
   if (loading) {
     return <div style={{ padding: "1rem" }}>読み込み中...</div>;
+  }
+
+  // 共有モード: 共有元のロール管理を参照しているため、このイベント側では
+  // workspace を編集させない (編集すると共有リンクが切れる)。
+  if (initial.sharedFromActionId) {
+    return (
+      <div>
+        <div style={s.info}>
+          このイベントは別イベントのロール管理を共有しています。ロール定義・
+          メンバー・チャンネル・ワークスペース設定はすべて共有元で管理されます。
+          ここで変更する項目はありません。
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -187,6 +208,13 @@ const s: Record<string, CSSProperties> = {
     padding: "0.75rem",
     color: colors.warning,
     background: colors.warningSubtle,
+    borderRadius: "0.25rem",
+    fontSize: "0.875rem",
+  },
+  info: {
+    padding: "0.75rem",
+    color: colors.primaryHover,
+    background: colors.primarySubtle,
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
   },

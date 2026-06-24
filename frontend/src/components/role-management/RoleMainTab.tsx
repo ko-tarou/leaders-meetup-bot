@@ -10,7 +10,7 @@ import { colors } from "../../styles/tokens";
 // 編集系の操作 (作成・編集・割当) は「ロール」タブに集約し、
 // このタブは「現状俯瞰」だけに責務を絞る。
 
-type Config = { workspaceId?: string };
+type Config = { workspaceId?: string; sharedFromActionId?: string };
 
 function parseConfig(raw: string): Config {
   try {
@@ -29,6 +29,9 @@ type Props = {
 export function RoleMainTab({ eventId, action }: Props) {
   const cfg = parseConfig(action.config);
   const workspaceId = cfg.workspaceId;
+  // 共有モード: 別イベントのロール管理を参照しているため、workspace 未設定
+  // 警告は出さない (workspace は共有元側で設定済み)。
+  const isShared = !!cfg.sharedFromActionId;
   const [roles, setRoles] = useState<SlackRole[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +56,14 @@ export function RoleMainTab({ eventId, action }: Props) {
 
   return (
     <div>
-      {!workspaceId && (
+      {isShared && (
+        <div style={s.info}>
+          このイベントは別イベントのロール管理を共有しています。下のロール一覧は
+          共有元と同じデータで、ここでの追加・割当・同期は共有元にも反映されます。
+        </div>
+      )}
+
+      {!workspaceId && !isShared && (
         <div style={s.warn}>
           ワークスペースが未設定です。「その他設定」タブから登録してください。
           未設定のままだとメンバー名簿取得・同期が動作しません。
@@ -110,6 +120,14 @@ const s: Record<string, CSSProperties> = {
     marginBottom: "1rem",
     color: colors.warning,
     background: colors.warningSubtle,
+    borderRadius: "0.25rem",
+    fontSize: "0.875rem",
+  },
+  info: {
+    padding: "0.75rem",
+    marginBottom: "1rem",
+    color: colors.primaryHover,
+    background: colors.primarySubtle,
     borderRadius: "0.25rem",
     fontSize: "0.875rem",
   },
