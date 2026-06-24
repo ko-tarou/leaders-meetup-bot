@@ -61,8 +61,41 @@ export const rolesRouter = new Hono<{ Bindings: Env }>();
 // ----------------------------------------------------------------------------
 
 /**
+ * action.config から sharedFromActionId を読み出す。
+ *
+ * 複数イベントで「同じロール管理を共有」するための alias リンク。
+ * 朝活会 / 交流会 / チーム開発 / Hackit / リーダー雑談会 の role_management
+ * action が config.sharedFromActionId に「共有元」(DevelopersHub運営) の
+ * action id を持つことで、ロール定義 / メンバー割当 / チャンネル / sync を
+ * すべて共有元の 1 データセットに集約する。データは複製せず参照を張るだけ。
+ */
+export function readSharedFromActionId(config: string): string | null {
+  try {
+    const parsed = JSON.parse(config || "{}");
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as Record<string, unknown>).sharedFromActionId === "string"
+    ) {
+      const id = (parsed as { sharedFromActionId: string }).sharedFromActionId;
+      return id.trim() ? id : null;
+    }
+  } catch {
+    /* fallthrough */
+  }
+  return null;
+}
+
+/**
  * (eventId, actionId) ペアの妥当性を確認し action を返す。
  * actionType = 'role_management' に限定する。
+ *
+ * 共有 (sharedFromActionId):
+ *   alias action の config に sharedFromActionId があれば、エイリアス自身の
+ *   (eventId / actionType) を検証した上で「共有元 action」を解決して返す。
+ *   返す action は共有元なので、以降の roles/members/channels/sync/workspace
+ *   は共有元の 1 データセットを読み書きする。共有元も role_management で
+ *   なければならない (多段リダイレクトは 1 段に制限し循環を防ぐ)。
  */
 async function findRoleManagementAction(
   db: ReturnType<typeof drizzle>,
@@ -80,6 +113,28 @@ async function findRoleManagementAction(
   if (action.actionType !== "role_management") {
     return { error: "action is not role_management", status: 400 as const };
   }
+
+  // 共有元へのリダイレクト (1 段のみ)。
+  const sharedFromActionId = readSharedFromActionId(action.config);
+  if (sharedFromActionId) {
+    const source = await db
+      .select()
+      .from(eventActions)
+      .where(eq(eventActions.id, sharedFromActionId))
+      .get();
+    if (!source) {
+      return { error: "shared source action not found", status: 404 as const };
+    }
+    if (source.actionType !== "role_management") {
+      return {
+        error: "shared source is not role_management",
+        status: 400 as const,
+      };
+    }
+    // 共有元自身がさらに共有していても 1 段で打ち切る (循環/多段防止)。
+    return { action: source };
+  }
+
   return { action };
 }
 
@@ -124,10 +179,11 @@ rolesRouter.get(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
 
     const rows = await db
       .select()
@@ -170,15 +226,16 @@ rolesRouter.post(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const body = await c.req.json<{
       name?: string;
       description?: string;
       parentRoleId?: string;
     }>();
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
 
     if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
       return c.json({ error: "name is required" }, 400);
@@ -213,7 +270,7 @@ rolesRouter.put(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
     const body = await c.req.json<{
       name?: string;
@@ -221,8 +278,9 @@ rolesRouter.put(
       parentRoleId?: string | null;
     }>();
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -284,11 +342,12 @@ rolesRouter.delete(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -308,11 +367,12 @@ rolesRouter.get(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -334,12 +394,13 @@ rolesRouter.post(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
     const body = await c.req.json<{ slackUserIds?: unknown }>();
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -400,12 +461,13 @@ rolesRouter.delete(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
     const slackUserId = c.req.param("slackUserId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -449,11 +511,12 @@ rolesRouter.get(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -475,12 +538,13 @@ rolesRouter.post(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
     const body = await c.req.json<{ channelIds?: unknown }>();
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -521,12 +585,13 @@ rolesRouter.delete(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
     const roleId = c.req.param("roleId");
     const channelId = c.req.param("channelId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
     const roleFound = await findRoleInAction(db, actionId, roleId);
     if ("error" in roleFound)
       return c.json({ error: roleFound.error }, roleFound.status);
@@ -563,10 +628,11 @@ rolesRouter.get(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
 
     const workspaceId = readWorkspaceId(found.action);
     if (!workspaceId) {
@@ -618,10 +684,11 @@ rolesRouter.get(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
 
     try {
       const diff = await computeSyncDiff(c.env, found.action);
@@ -656,10 +723,11 @@ rolesRouter.post(
   async (c) => {
     const db = drizzle(c.env.DB);
     const eventId = c.req.param("eventId");
-    const actionId = c.req.param("actionId");
+    const actionIdParam = c.req.param("actionId");
 
-    const found = await findRoleManagementAction(db, eventId, actionId);
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
 
     // body は optional。Content-Type 未設定 / body 空でも 400 にしない。
     let operations: SyncOperation[] | undefined;
