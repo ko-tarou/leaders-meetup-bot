@@ -128,6 +128,7 @@ export function RoleAutoAssignSettings({
   const [cfg, setCfg] = useState<RoleAutoAssignConfig>(initialCfg);
   const [showSettings, setShowSettings] = useState(false);
   const [savingCfg, setSavingCfg] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [rmActions, setRmActions] = useState<EventAction[] | null>(null);
   const [roles, setRoles] = useState<SlackRole[] | null>(null);
 
@@ -245,6 +246,36 @@ export function RoleAutoAssignSettings({
       ...c,
       devRole: { ...c.devRole, [k]: toggleInList(c.devRole[k], roleId) },
     }));
+
+  // 「出した人を必ず付与」ロール (運営) の選択 toggle。activity と同じ
+  // 親子ゲーティング規則を流用する (親未選択で子だけ選択を防ぐ)。
+  const toggleAlwaysAssign = (roleId: string) =>
+    setCfg((c) => ({
+      ...c,
+      alwaysAssignRoleIds: toggleInList(c.alwaysAssignRoleIds, roleId),
+    }));
+
+  // 既存参加届の運営ロール一括バックフィル。保存済み config に対して走る
+  // ので、設定変更後はまず「保存」してから実行する旨を文言で促す。
+  const handleBackfill = async () => {
+    setBackfilling(true);
+    try {
+      const res = await api.participation.backfillRoles(eventId);
+      if (!res.enabled) {
+        toast.error(
+          "ロール自動割当が無効です。有効化して保存してから実行してください。",
+        );
+        return;
+      }
+      toast.success(
+        `バックフィル完了: ${res.assigned} 件付与 (走査 ${res.scanned} / 未解決 ${res.skippedUnresolved} / 却下 ${res.skippedRejected})`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "バックフィルに失敗しました");
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   const handleSaveCfg = async () => {
     // role_management が 1 件だけならその id を確定的に採用する。
@@ -405,6 +436,37 @@ export function RoleAutoAssignSettings({
                   </div>
                 ))}
               </div>
+
+              <div style={s.mapSection}>
+                <div style={s.mapSectionTitle}>
+                  提出者へ必ず付与 (回答に依らず)
+                </div>
+                <label style={s.mapToggleRow}>
+                  <input
+                    type="checkbox"
+                    checked={cfg.alwaysAssignStaff}
+                    onChange={(e) =>
+                      setCfg((c) => ({
+                        ...c,
+                        alwaysAssignStaff: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    参加届を出した人を、希望活動の回答に関係なく必ず付与する
+                  </span>
+                </label>
+                {cfg.alwaysAssignStaff && (
+                  <div style={s.mapMapping}>
+                    <span style={s.mapKey}>付与ロール</span>
+                    <RoleMultiSelect
+                      roles={roles}
+                      selected={cfg.alwaysAssignRoleIds}
+                      onToggle={toggleAlwaysAssign}
+                    />
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -415,6 +477,15 @@ export function RoleAutoAssignSettings({
           )}
 
           <div style={s.mapActions}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void handleBackfill()}
+              disabled={backfilling || savingCfg}
+              title="保存済み設定に基づき、既存の参加届提出者へロールを冪等に一括付与します"
+            >
+              {backfilling ? "実行中..." : "既存提出者へ一括付与"}
+            </Button>
             <Button
               size="sm"
               onClick={() => void handleSaveCfg()}
@@ -527,5 +598,10 @@ const s: Record<string, CSSProperties> = {
     borderRadius: 4,
     fontSize: "0.8rem",
   },
-  mapActions: { display: "flex", justifyContent: "flex-end" },
+  mapActions: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: "0.5rem",
+    flexWrap: "wrap",
+  },
 };
