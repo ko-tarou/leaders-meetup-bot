@@ -39,6 +39,13 @@ export type RoleAutoAssignConfig = {
   workspaceId: string;
   activity: Record<"event" | "dev" | "both", string[]>;
   devRole: Record<DevRoleKey, string[]>;
+  // 参加届を「出した人」を回答内容に依らず必ず付与するロール (例: 運営)。
+  // alwaysAssignStaff === true のときだけ alwaysAssignRoleIds を
+  // desiredActivity の値に関係なく付与対象へ無条件に加える (冪等)。
+  // 既定は false / [] なので、未設定 config は従来と byte-identical な
+  // 振る舞い (この 2 フィールドが無い = 何も足さない) を保つ。
+  alwaysAssignStaff: boolean;
+  alwaysAssignRoleIds: string[];
 };
 
 /** 自動割当に必要な参加届フィールドだけの軽量型 (devRoles は JSON 配列文字列)。 */
@@ -102,6 +109,11 @@ export function readRoleAutoAssignConfig(
       workspaceId: o.workspaceId,
       activity: fill(a, ["event", "dev", "both"] as const),
       devRole: fill(d, DEV_ROLE_KEYS),
+      // 後方互換: 未設定 / 型不一致は false / [] (= 従来振る舞い)。
+      alwaysAssignStaff: o.alwaysAssignStaff === true,
+      alwaysAssignRoleIds: isStringArray(o.alwaysAssignRoleIds)
+        ? (o.alwaysAssignRoleIds as string[])
+        : [],
     };
   } catch {
     return undefined;
@@ -118,11 +130,21 @@ export function computeTargetRoleIds(
   config: RoleAutoAssignConfig,
   form: RoleAutoAssignFormLike,
 ): string[] {
+  const out = new Set<string>();
+
+  // 「出した人」を回答内容に依らず必ず付与するロール (例: 運営)。
+  // alwaysAssignStaff が有効なら desiredActivity が null / 不正でも
+  // alwaysAssignRoleIds を無条件に加える (回答に欠けても運営に入れる)。
+  // 既定 (false / []) では何も足さないので従来振る舞いは不変。
+  if (config.alwaysAssignStaff) {
+    for (const id of config.alwaysAssignRoleIds) out.add(id);
+  }
+
   const activity = form.desiredActivity;
   if (activity !== "event" && activity !== "dev" && activity !== "both") {
-    return [];
+    // desiredActivity が不正でも、alwaysAssign 分は付与する (out に残す)。
+    return [...out];
   }
-  const out = new Set<string>();
   for (const id of config.activity[activity]) out.add(id);
 
   if (activity === "dev" || activity === "both") {
