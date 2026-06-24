@@ -26,6 +26,11 @@ export type RoleAutoAssignConfig = {
   workspaceId: string;
   activity: Record<ActivityKey, string[]>;
   devRole: Record<DevRoleKey, string[]>;
+  // 参加届を「出した人」を回答内容に依らず必ず付与するロール (例: 運営)。
+  // alwaysAssignStaff 有効時、desiredActivity が未設定/不正でも
+  // alwaysAssignRoleIds を無条件に付与する (BE 仕様と一対一)。
+  alwaysAssignStaff: boolean;
+  alwaysAssignRoleIds: string[];
 };
 
 export function emptyMap<K extends string>(
@@ -81,6 +86,8 @@ export function readRoleAutoAssign(action: EventAction): RoleAutoAssignConfig {
       },
       emptyMap(DEV_ROLE_KEYS),
     ),
+    alwaysAssignStaff: raw.alwaysAssignStaff === true,
+    alwaysAssignRoleIds: strArr(raw.alwaysAssignRoleIds),
   };
 }
 

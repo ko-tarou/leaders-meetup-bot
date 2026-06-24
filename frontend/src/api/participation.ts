@@ -54,4 +54,19 @@ export const participation = {
       `/orgs/${eventId}/participation-forms/${id}/slack-user`,
       { method: "PATCH", body: JSON.stringify({ slackUserId }) },
     ),
+  /**
+   * admin: 既存参加届の運営ロール一括バックフィル。解決済み・非却下の
+   * 全フォームに冪等付与し、走査/付与/スキップ件数を返す。
+   */
+  backfillRoles: (eventId: string) =>
+    request<{
+      ok: boolean;
+      enabled: boolean;
+      scanned: number;
+      assigned: number;
+      skippedUnresolved: number;
+      skippedRejected: number;
+    }>(`/orgs/${eventId}/participation-forms/backfill-roles`, {
+      method: "POST",
+    }),
 };

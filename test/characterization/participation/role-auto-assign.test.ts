@@ -293,7 +293,45 @@ describe("readRoleAutoAssignConfig (現状固定)", () => {
         ios: [],
         infra: [],
       },
+      // 未設定 config は alwaysAssign 系を既定 (false / []) で補う。
+      alwaysAssignStaff: false,
+      alwaysAssignRoleIds: [],
     });
+  });
+
+  it("alwaysAssignStaff / alwaysAssignRoleIds を読む (型不一致は false / [])", () => {
+    const cfg = readRoleAutoAssignConfig(
+      JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: "act-1",
+          workspaceId: "ws-1",
+          activity: {},
+          devRole: {},
+          alwaysAssignStaff: true,
+          alwaysAssignRoleIds: ["staff-role", 3],
+        },
+      }),
+    );
+    expect(cfg?.alwaysAssignStaff).toBe(true);
+    // string[] でない (混在配列) は [] に正規化される。
+    expect(cfg?.alwaysAssignRoleIds).toEqual([]);
+
+    const cfg2 = readRoleAutoAssignConfig(
+      JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: "act-1",
+          workspaceId: "ws-1",
+          activity: {},
+          devRole: {},
+          alwaysAssignStaff: true,
+          alwaysAssignRoleIds: ["staff-role"],
+        },
+      }),
+    );
+    expect(cfg2?.alwaysAssignStaff).toBe(true);
+    expect(cfg2?.alwaysAssignRoleIds).toEqual(["staff-role"]);
   });
 });
 
@@ -318,6 +356,9 @@ describe("computeTargetRoleIds (現状固定)", () => {
       ios: ["r-ios"],
       infra: ["r-infra"],
     },
+    // 既定 (無効) 構成。alwaysAssign 系は下の専用 describe で別途検証する。
+    alwaysAssignStaff: false,
+    alwaysAssignRoleIds: [],
   };
 
   function form(over: Partial<{ desiredActivity: string | null; devRoles: string }>) {
@@ -395,6 +436,54 @@ describe("computeTargetRoleIds (現状固定)", () => {
         form({ desiredActivity: "dev", devRoles: "[1,2]" }),
       ),
     ).toEqual(["dev-role"]);
+  });
+
+  // alwaysAssignStaff: 参加届を「出した人」を回答に依らず必ず付与する。
+  describe("alwaysAssignStaff (運営を無条件付与)", () => {
+    const staffConfig: RoleAutoAssignConfig = {
+      ...baseConfig,
+      alwaysAssignStaff: true,
+      alwaysAssignRoleIds: ["staff-role"],
+    };
+
+    it("desiredActivity が null でも alwaysAssignRoleIds を付与する", () => {
+      expect(
+        computeTargetRoleIds(staffConfig, form({ desiredActivity: null })),
+      ).toEqual(["staff-role"]);
+    });
+
+    it("desiredActivity が不正でも alwaysAssignRoleIds を付与する", () => {
+      expect(
+        computeTargetRoleIds(staffConfig, form({ desiredActivity: "other" })),
+      ).toEqual(["staff-role"]);
+    });
+
+    it("activity 由来ロールと alwaysAssign が重複しても Set で 1 回", () => {
+      const cfg: RoleAutoAssignConfig = {
+        ...staffConfig,
+        alwaysAssignRoleIds: ["evt-role"],
+      };
+      expect(
+        computeTargetRoleIds(cfg, form({ desiredActivity: "event" })),
+      ).toEqual(["evt-role"]);
+    });
+
+    it("alwaysAssign と activity 双方を合算する (alwaysAssign が先頭)", () => {
+      expect(
+        computeTargetRoleIds(staffConfig, form({ desiredActivity: "event" })),
+      ).toEqual(["staff-role", "evt-role"]);
+    });
+
+    it("alwaysAssignStaff=false なら alwaysAssignRoleIds は無視 (従来通り)", () => {
+      const cfg: RoleAutoAssignConfig = {
+        ...baseConfig,
+        alwaysAssignStaff: false,
+        alwaysAssignRoleIds: ["staff-role"],
+      };
+      expect(
+        computeTargetRoleIds(cfg, form({ desiredActivity: null })),
+      ).toEqual([]);
+    });
   });
 });
 

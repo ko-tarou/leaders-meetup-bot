@@ -598,3 +598,103 @@ participationRouter.patch(
     return c.json({ ok: true, slackUserId, assignedRoleIds });
   },
 );
+
+// ---------------------------------------------------------------------------
+// admin: 既存参加届の運営ロール一括バックフィル。
+//   当該 event の参加届のうち status != 'rejected' かつ slack_user_id 解決済み
+//   の各行に applyRoleAssignment を適用する (冪等)。config.roleAutoAssign が
+//   無効 / 未設定なら何もしない。alwaysAssignStaff 有効時は desiredActivity に
+//   依らず運営ロールが付与される。既に運営に入っている人は applyRoleAssignment
+//   内の「既存 (roleId, user) skip」で二重追加されない。
+//   各行で確定した assignedRoleIds を participation_forms に保存し直す。
+//   集計 (走査数 / 付与適用数 / 未解決スキップ数) を返す。
+// x-admin-token 必須 (/orgs/* は admin auth 配下)。
+// ---------------------------------------------------------------------------
+participationRouter.post(
+  "/orgs/:eventId/participation-forms/backfill-roles",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+
+    const event = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId))
+      .get();
+    if (!event) return c.json({ error: "event not found" }, 404);
+
+    const config = await getMemberApplicationConfig(db, eventId);
+    const cfg = readRoleAutoAssignConfig(config);
+    if (!cfg || !cfg.enabled) {
+      // config 無効 → 何もせず 0 件で返す (冪等・no-op)。
+      return c.json({
+        ok: true,
+        enabled: false,
+        scanned: 0,
+        assigned: 0,
+        skippedUnresolved: 0,
+        skippedRejected: 0,
+      });
+    }
+
+    const rows = await getParticipationFormRepository().listByEventId(
+      db,
+      eventId,
+    );
+
+    let scanned = 0;
+    let assigned = 0;
+    let skippedUnresolved = 0;
+    let skippedRejected = 0;
+
+    for (const form of rows) {
+      scanned++;
+      if (form.status === "rejected") {
+        skippedRejected++;
+        continue;
+      }
+      if (!form.slackUserId) {
+        // 未解決 → 付与不能。手動紐付け待ち (backfill 対象外)。
+        skippedUnresolved++;
+        continue;
+      }
+      // fail-soft: 1 行の失敗で全体を止めない。
+      try {
+        const { assignedRoleIds } = await applyRoleAssignment(c.env, {
+          memberApplicationActionConfig: config,
+          form: {
+            id: form.id,
+            slackUserId: form.slackUserId,
+            desiredActivity: form.desiredActivity,
+            devRoles: form.devRoles,
+            status: "submitted",
+          },
+        });
+        if (assignedRoleIds.length > 0) {
+          await getParticipationFormRepository().updateById(db, form.id, {
+            assignedRoleIds: JSON.stringify(assignedRoleIds),
+          });
+          assigned++;
+        }
+      } catch (e) {
+        console.error(
+          `[participation] backfill role hook error for form ${form.id}:`,
+          e,
+        );
+      }
+    }
+
+    console.log(
+      `[participation] backfill-roles event=${eventId} scanned=${scanned} assigned=${assigned} skippedUnresolved=${skippedUnresolved} skippedRejected=${skippedRejected}`,
+    );
+
+    return c.json({
+      ok: true,
+      enabled: true,
+      scanned,
+      assigned,
+      skippedUnresolved,
+      skippedRejected,
+    });
+  },
+);

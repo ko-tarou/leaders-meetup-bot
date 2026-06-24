@@ -1123,3 +1123,157 @@ describe("PATCH /orgs/.../:id/slack-user (現状固定 / 手動紐付け)", () =
     expect(members).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// POST /orgs/.../participation-forms/backfill-roles
+// ---------------------------------------------------------------------------
+describe("POST /orgs/.../backfill-roles (運営ロール一括バックフィル)", () => {
+  async function backfill(eventId: string) {
+    return app().request(
+      `/orgs/${eventId}/participation-forms/backfill-roles`,
+      { method: "POST" },
+      env,
+    );
+  }
+
+  it("不在 event → 404", async () => {
+    const res = await backfill("ghost-event");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "event not found" });
+  });
+
+  it("config 無効 → no-op (enabled:false, 0 件)", async () => {
+    const ev = await makeEvent();
+    await makeParticipationForm(ev.id, { slackUserId: "U1" });
+    const res = await backfill(ev.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      enabled: false,
+      scanned: 0,
+      assigned: 0,
+      skippedUnresolved: 0,
+      skippedRejected: 0,
+    });
+  });
+
+  async function seedRoleConfig(
+    eventId: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(eventId, {
+      actionType: "role_management",
+    });
+    const staff = await makeSlackRole(roleAction.id, { name: "運営" });
+    await makeEventAction(eventId, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: { event: [staff.id], dev: [staff.id], both: [staff.id] },
+          devRole: {},
+          ...extra,
+        },
+      }),
+    });
+    return { staff };
+  }
+
+  it("解決済み/非却下のみ付与。却下・未解決はスキップ (冪等)", async () => {
+    const ev = await makeEvent();
+    const { staff } = await seedRoleConfig(ev.id);
+
+    // 付与対象: 解決済み・非却下・activity=event。
+    await makeParticipationForm(ev.id, {
+      slackUserId: "U-A",
+      status: "submitted",
+      desiredActivity: "event",
+    });
+    // 却下 → スキップ。
+    await makeParticipationForm(ev.id, {
+      slackUserId: "U-B",
+      status: "rejected",
+      desiredActivity: "event",
+    });
+    // 未解決 (slackUserId null) → スキップ。
+    await makeParticipationForm(ev.id, {
+      slackUserId: null,
+      status: "submitted",
+      desiredActivity: "event",
+    });
+
+    const res = await backfill(ev.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      enabled: true,
+      scanned: 3,
+      assigned: 1,
+      skippedUnresolved: 1,
+      skippedRejected: 1,
+    });
+
+    const members = await testDb()
+      .select()
+      .from(slackRoleMembers)
+      .where(eq(slackRoleMembers.roleId, staff.id))
+      .all();
+    expect(members.map((m) => m.slackUserId).sort()).toEqual(["U-A"]);
+
+    // 2 回目: 冪等 (二重追加されない)。
+    const res2 = await backfill(ev.id);
+    expect((await res2.json()) as unknown).toMatchObject({ assigned: 1 });
+    const members2 = await testDb()
+      .select()
+      .from(slackRoleMembers)
+      .where(eq(slackRoleMembers.roleId, staff.id))
+      .all();
+    expect(members2).toHaveLength(1);
+  });
+
+  it("alwaysAssignStaff: desiredActivity 未設定でも運営を付与する", async () => {
+    const ev = await makeEvent();
+    // staff role を取得するため先に seed → その id を alwaysAssignRoleIds に使う。
+    const { row: ws } = await makeEncryptedWorkspace();
+    const roleAction = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    const staff = await makeSlackRole(roleAction.id, { name: "運営" });
+    await makeEventAction(ev.id, {
+      actionType: "member_application",
+      config: JSON.stringify({
+        roleAutoAssign: {
+          enabled: true,
+          roleManagementActionId: roleAction.id,
+          workspaceId: ws.id,
+          activity: {},
+          devRole: {},
+          alwaysAssignStaff: true,
+          alwaysAssignRoleIds: [staff.id],
+        },
+      }),
+    });
+
+    // desiredActivity null でも alwaysAssign で運営に入る。
+    await makeParticipationForm(ev.id, {
+      slackUserId: "U-NULL",
+      status: "submitted",
+      desiredActivity: null,
+    });
+
+    const res = await backfill(ev.id);
+    expect((await res.json()) as unknown).toMatchObject({
+      enabled: true,
+      assigned: 1,
+    });
+    const members = await testDb()
+      .select()
+      .from(slackRoleMembers)
+      .where(eq(slackRoleMembers.roleId, staff.id))
+      .all();
+    expect(members.map((m) => m.slackUserId)).toEqual(["U-NULL"]);
+  });
+});
