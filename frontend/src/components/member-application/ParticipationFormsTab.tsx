@@ -56,6 +56,13 @@ function label(map: Record<string, string>, value: string | null): string {
   return map[value] ?? value;
 }
 
+// 一覧の表示モード。
+// - table: 新メンバー入会の参加届を「表形式」で一覧（横スクロール対応）。
+//   多数の提出を上から下へスキャンしやすい既定ビュー。
+// - card: 1 提出 = 1 カードの詳細ビュー（Slack 手動紐付け行など、行内編集が
+//   必要な操作はこちら）。従来実装をそのまま温存（非破壊）。
+type ViewMode = "table" | "card";
+
 export function ParticipationFormsTab({ eventId, action }: Props) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -63,6 +70,8 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 「表形式で見やすく」を満たすため table を既定にする。
+  const [view, setView] = useState<ViewMode>("table");
 
   // RoleAutoAssignSettings が解決する値 (一覧表示で利用)。
   const [rmActionId, setRmActionId] = useState("");
@@ -209,7 +218,29 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
         onResolved={handleResolved}
       />
 
-      <h3 style={s.h3}>参加届 ({forms.length}件)</h3>
+      <div style={s.h3Row}>
+        <h3 style={s.h3}>参加届 ({forms.length}件)</h3>
+        {forms.length > 0 && (
+          <div style={s.viewToggle} role="group" aria-label="表示切替">
+            <button
+              type="button"
+              style={view === "table" ? s.toggleBtnActive : s.toggleBtn}
+              aria-pressed={view === "table"}
+              onClick={() => setView("table")}
+            >
+              表
+            </button>
+            <button
+              type="button"
+              style={view === "card" ? s.toggleBtnActive : s.toggleBtn}
+              aria-pressed={view === "card"}
+              onClick={() => setView("card")}
+            >
+              カード
+            </button>
+          </div>
+        )}
+      </div>
 
       {error && (
         <div role="alert" style={s.error}>
@@ -227,6 +258,127 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
             onClick: handleCopy,
           }}
         />
+      ) : view === "table" ? (
+        <div style={s.tableWrap}>
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={s.th}>氏名</th>
+                <th style={s.th}>状態</th>
+                <th style={s.th}>Slack表示名</th>
+                <th style={s.th}>学籍番号</th>
+                <th style={s.th}>学科</th>
+                <th style={s.th}>学年</th>
+                <th style={s.th}>メール</th>
+                <th style={s.th}>希望する活動</th>
+                <th style={s.th}>希望役職</th>
+                <th style={s.th}>付与ロール</th>
+                <th style={s.th}>提出日時</th>
+                <th style={s.th}>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {forms.map((f) => {
+                const linked = f.applicationId !== null;
+                const rejected = f.status === "rejected";
+                const busy = busyId === f.id;
+                const roleLabels = f.devRoles
+                  .map((r) => DEV_ROLE_LABEL[r] ?? r)
+                  .filter((r) => r.length > 0);
+                const assignedNames = f.assignedRoleIds
+                  .map((id) => roleNameById.get(id) ?? id)
+                  .filter((n) => n.length > 0);
+                const td = rejected ? { ...s.td, ...s.tdRejected } : s.td;
+                return (
+                  <tr key={f.id}>
+                    <td style={{ ...td, ...s.tdName }}>{display(f.name)}</td>
+                    <td style={td}>
+                      <div style={s.cellBadges}>
+                        {rejected && (
+                          <span style={s.badgeRejected}>却下済み</span>
+                        )}
+                        {f.slackUserId ? (
+                          <span style={s.badgeLinked}>Slack済</span>
+                        ) : (
+                          <span style={s.badgeUnresolved}>未解決</span>
+                        )}
+                        <span style={linked ? s.badgeLinked : s.badgeDirect}>
+                          {linked ? "応募紐付" : "直接応募"}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={td}>{display(f.slackName)}</td>
+                    <td style={td}>{display(f.studentId)}</td>
+                    <td style={td}>{display(f.department)}</td>
+                    <td style={td}>{label(GRADE_LABEL, f.grade)}</td>
+                    <td style={{ ...td, ...s.tdEmail }}>{display(f.email)}</td>
+                    <td style={td}>{label(ACTIVITY_LABEL, f.desiredActivity)}</td>
+                    <td style={td}>
+                      {roleLabels.length === 0 ? (
+                        EMPTY
+                      ) : (
+                        <div style={s.chips}>
+                          {roleLabels.map((r) => (
+                            <span key={r} style={s.chip}>
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td style={td}>
+                      {assignedNames.length === 0 ? (
+                        EMPTY
+                      ) : (
+                        <div style={s.chips}>
+                          {assignedNames.map((r) => (
+                            <span key={r} style={s.chipRole}>
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...td, ...s.tdDate }}>
+                      {new Date(f.submittedAt).toLocaleString("ja-JP")}
+                    </td>
+                    <td style={td}>
+                      <div style={s.cellActions}>
+                        {rejected ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => handleUnreject(f)}
+                          >
+                            却下解除
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busy}
+                            onClick={() => handleReject(f)}
+                          >
+                            却下
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={busy}
+                          onClick={() => handleDelete(f)}
+                        >
+                          削除
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div style={s.list}>
           {forms.map((f) => {
@@ -414,7 +566,80 @@ const s: Record<string, CSSProperties> = {
     background: colors.background,
     color: colors.text,
   },
-  h3: { margin: "0 0 0.75rem", fontSize: "1rem" },
+  h3Row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "0.5rem",
+    marginBottom: "0.75rem",
+    flexWrap: "wrap",
+  },
+  h3: { margin: 0, fontSize: "1rem" },
+  viewToggle: {
+    display: "inline-flex",
+    border: `1px solid ${colors.borderStrong}`,
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  toggleBtn: {
+    padding: "0.25rem 0.75rem",
+    fontSize: "0.8rem",
+    border: "none",
+    background: colors.background,
+    color: colors.textSecondary,
+    cursor: "pointer",
+  },
+  toggleBtnActive: {
+    padding: "0.25rem 0.75rem",
+    fontSize: "0.8rem",
+    border: "none",
+    background: colors.primary,
+    color: colors.textInverse,
+    cursor: "pointer",
+    fontWeight: 600,
+  },
+  tableWrap: {
+    overflowX: "auto",
+    border: `1px solid ${colors.border}`,
+    borderRadius: 8,
+  },
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: "0.85rem",
+  },
+  th: {
+    textAlign: "left",
+    padding: "0.5rem 0.75rem",
+    whiteSpace: "nowrap",
+    borderBottom: `1px solid ${colors.borderStrong}`,
+    background: colors.surface,
+    color: colors.textSecondary,
+    fontSize: "0.78rem",
+    fontWeight: 700,
+  },
+  td: {
+    padding: "0.5rem 0.75rem",
+    borderBottom: `1px solid ${colors.border}`,
+    verticalAlign: "middle",
+    whiteSpace: "nowrap",
+    color: colors.text,
+  },
+  tdRejected: { opacity: 0.55 },
+  tdName: { fontWeight: 600 },
+  tdEmail: { fontFamily: "monospace", fontSize: "0.8rem" },
+  tdDate: { color: colors.textMuted, fontSize: "0.78rem" },
+  cellBadges: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.25rem",
+    flexWrap: "wrap",
+  },
+  cellActions: {
+    display: "flex",
+    gap: "0.375rem",
+    justifyContent: "flex-end",
+  },
   list: { display: "flex", flexDirection: "column", gap: "0.75rem" },
   card: {
     padding: "0.875rem 1rem",
