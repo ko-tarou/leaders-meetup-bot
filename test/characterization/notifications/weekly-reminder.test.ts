@@ -86,9 +86,15 @@ describe("processWeeklyReminders: 対象抽出 (現状固定)", () => {
     const post = slack.callsOf("postMessage");
     expect(post).toHaveLength(1);
     // CHARACTERIZATION: weekly-reminder は postMessage(channel, message) を
-    // 2 引数で呼ぶが、MockSlackClient は [channel, text, blocks] を記録するため
-    // blocks は undefined。本番では SlackClient.postMessage の blocks 省略時挙動。
-    expect(post[0].args).toEqual(["C-TEAM", "週次リマインドです", undefined]);
+    // 2 引数で呼ぶが、MockSlackClient は [channel, text, blocks, threadTs] を
+    // 記録するため blocks/threadTs は undefined。本番では SlackClient.postMessage
+    // の blocks/thread_ts 省略時挙動 (= トップレベル投稿)。
+    expect(post[0].args).toEqual([
+      "C-TEAM",
+      "週次リマインドです",
+      undefined,
+      undefined,
+    ]);
   });
 
   it("action.enabled=0 → 走査されず fired:0", async () => {
@@ -387,10 +393,11 @@ describe("processWeeklyReminders: config パース (現状固定)", () => {
     const res = await runWith(cfg);
     expect(res).toEqual({ fired: 1 });
     // CHARACTERIZATION: message 未指定は "" として postMessage される
-    // (blocks 引数は省略のため undefined)。
+    // (blocks / threadTs 引数は省略のため undefined)。
     expect(slack.callsOf("postMessage")[0].args).toEqual([
       "C-EMPTY",
       "",
+      undefined,
       undefined,
     ]);
   });

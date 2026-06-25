@@ -39,8 +39,16 @@ export class SlackClient implements SlackPort {
     channel: string,
     text: string,
     blocks?: unknown[],
+    threadTs?: string,
   ): Promise<SlackResponse> {
-    return this.callApi("chat.postMessage", { channel, text, blocks });
+    // thread_ts を渡すと既存メッセージのスレッドに返信する。
+    // 未指定 (undefined) のときは従来どおりトップレベル投稿 (= byte-identical)。
+    return this.callApi("chat.postMessage", {
+      channel,
+      text,
+      blocks,
+      thread_ts: threadTs,
+    });
   }
 
   async updateMessage(
