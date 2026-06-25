@@ -218,7 +218,10 @@ export type SyncOperation = {
 
 /**
  * computeSyncDiff の結果を Slack に適用する。
- * - invite は bulk 1 回 (Slack 側で 1000 ユーザーまで comma-separated 可)
+ * - invite は bulk 1 回 (Slack 側で 1000 ユーザーまで comma-separated 可)。
+ *   bulk が失敗した場合は 1 user ずつ個別 invite に fallback し、健全な user を
+ *   救済しつつ問題のある user だけを per-user error (userId 付き) として残す
+ *   (= Slack の invite が all-or-nothing なため「1 人のせいで全員失敗」を防ぐ)。
  * - kick は 1 user ごと API call
  * 失敗は errors[] に集約し、成功カウントは別途返す。
  *
@@ -273,19 +276,51 @@ export async function executeSync(
       continue;
     }
     if (doInvite && ch.toInvite.length > 0) {
+      // bulk invite (conversations.invite に comma 区切りで全員渡す) は Slack 側で
+      // 「全員 invite できる」ことを要求する all-or-nothing 操作。1 人でも
+      // user_not_found / cant_invite 等で弾かれると、その channel の invite は
+      // **全員失敗** する (=「1 人のせいで全員 invite できない」事故の根本原因)。
+      //
+      // 対策: bulk 失敗時は 1 user ずつ個別 invite に fallback し、健全な user は
+      // 救済しつつ、問題のある user だけを per-user error として理由付きで残す。
+      // already_in_channel は成功扱い (期待 member が既に居る = 正常)。
       const res = await slack.conversationsInviteBulk(
         ch.channelId,
         ch.toInvite,
       );
       if (res.ok) {
         invited += ch.toInvite.length;
+      } else if (ch.toInvite.length === 1) {
+        // 1 人だけなら fallback しても同じ結果なので、そのまま per-user error に。
+        const userId = ch.toInvite[0];
+        const err = res.error ?? "unknown";
+        if (err === "already_in_channel") {
+          invited += 1;
+        } else {
+          errors.push({
+            channelId: ch.channelId,
+            action: "invite",
+            userId,
+            error: err,
+          });
+        }
       } else {
-        errors.push({
-          channelId: ch.channelId,
-          action: "invite",
-          users: ch.toInvite,
-          error: res.error ?? "unknown",
-        });
+        // 複数人で bulk が失敗 → 1 人ずつ個別 invite で誰が原因かを切り分ける。
+        for (const userId of ch.toInvite) {
+          const one = await slack.conversationsInviteBulk(ch.channelId, [
+            userId,
+          ]);
+          if (one.ok || one.error === "already_in_channel") {
+            invited += 1;
+          } else {
+            errors.push({
+              channelId: ch.channelId,
+              action: "invite",
+              userId,
+              error: one.error ?? "unknown",
+            });
+          }
+        }
       }
     }
     if (doKick) {

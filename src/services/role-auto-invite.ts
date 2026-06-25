@@ -1,18 +1,31 @@
 /**
- * Sprint role-auto-invite:
- *   role_management アクションのうち config.autoInviteEnabled === true の
- *   ものを、毎朝 9:00 JST に「invite だけ」自動実行する cron handler。
+ * role 自動 Diff 同期 (毎朝):
+ *   有効な role_management アクションを、毎朝 9:00 JST に「Diff を取って
+ *   完全一致するよう invite」自動実行する cron handler。
+ *   (管理画面の「Diff を計算」→「invite 実行」と同等の処理を全自動化)
+ *
+ * 対象判定:
+ *   - 既定で「自前の workspaceId を config に持つ」全 enabled アクションを対象とする
+ *     (= 毎朝の自動同期を全ロール管理に効かせる)。
+ *   - sharedFromActionId 由来で自前 workspaceId を持たないアクションは skip
+ *     (computeSyncDiff が workspaceId 必須で throw するため。共有元が同期する)。
+ *   - config.autoInviteEnabled === false を明示したアクションだけ opt-out できる。
  *
  * 設計判断:
  *   - kick は絶対に実行しない（誤って channel から削除する事故を防ぐ）。
  *     executeSync 呼び出し時に operations[].kick = false を明示する。
+ *     「完全一致」は不足ユーザーの invite を指し、過剰削除 (kick) は行わない
+ *     (既存の no-kick 方針を踏襲)。
  *   - 既存の computeSyncDiff / executeSync をそのまま再利用する
- *     （sync ロジックは role-sync.ts の 1 箇所に集約）。
+ *     （sync ロジックは role-sync.ts の 1 箇所に集約）。invite が all-or-nothing
+ *     で失敗しても executeSync 側の per-user fallback で健全な user は救済される。
  *   - 1 日 1 回保証は scheduled_jobs.dedupKey (UNIQUE) で担保する。
  *     INSERT 成功 = この cron tick が今日の処理担当。
  *     INSERT 失敗 (UNIQUE 違反) = 既に他 tick で処理済み。
  *   - cron は 5 分粒度なので 9 分の fire window を取って 1 tick だけが反応する。
  *   - fail-soft: 1 action の失敗で他を止めない。エラーは console.error にだけ残す。
+ *     invite できない user (アカウント無し等) は per-user error として log に残り、
+ *     他の user の同期は止めない。
  */
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq } from "drizzle-orm";
@@ -45,11 +58,23 @@ type AutoInviteConfig = {
   autoInviteEnabled?: unknown;
 };
 
-function isAutoInviteEnabled(rawConfig: string | null | undefined): boolean {
+/**
+ * このアクションを毎朝の自動 Diff 同期の対象にするか判定する。
+ *
+ * - 自前の workspaceId (string) を持たない → false
+ *   (sharedFromActionId 由来など。computeSyncDiff が throw するため対象外)
+ * - config.autoInviteEnabled === false が明示されている → false (opt-out)
+ * - それ以外 (workspaceId を持つ) → true (既定で全ロール管理を自動同期)
+ */
+function shouldAutoSync(rawConfig: string | null | undefined): boolean {
   if (!rawConfig) return false;
   try {
     const parsed = JSON.parse(rawConfig) as AutoInviteConfig;
-    return parsed?.autoInviteEnabled === true;
+    if (typeof parsed?.workspaceId !== "string" || parsed.workspaceId === "") {
+      return false;
+    }
+    if (parsed.autoInviteEnabled === false) return false;
+    return true;
   } catch {
     return false;
   }
@@ -84,7 +109,7 @@ export async function processRoleAutoInvites(
   let totalInvited = 0;
 
   for (const action of actions) {
-    if (!isAutoInviteEnabled(action.config)) continue;
+    if (!shouldAutoSync(action.config)) continue;
 
     const dedupKey = `role_auto_invite:${action.id}:${ymdCompact}`;
 
