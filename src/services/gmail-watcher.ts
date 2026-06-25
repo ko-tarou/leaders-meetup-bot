@@ -86,6 +86,11 @@ export type WatcherRule = {
   // 厳密な「bot 送信メールへの返信」検出ではなく、subject prefix or ヘッダで判定する
   // 軽量実装 (kota との合意済み)。
   replyOnly?: boolean;
+  // Sprint 29: ON のとき、Slack 親通知のスレッドにメール本文の全文を返信する (案A)。
+  // 既定 false / undefined = 従来挙動 (本文取得もスレ返信もしない)。
+  // プライバシー: 通知チャンネルにアクセスできる人だけが本文を読める前提で運用する
+  //   (kota の明示判断済み)。誤爆・将来のメンバー増加に備え rule 毎トグルにしている。
+  postBodyToThread?: boolean;
 };
 
 export type WatcherConfig = {
@@ -119,13 +124,21 @@ type GmailListResponse = {
 };
 
 type GmailHeader = { name?: string; value?: string };
+// Sprint 29: format=full の payload は再帰的な MIME ツリー。
+// 本文抽出のため parts / body.data / mimeType を読む。
+type GmailPayloadPart = {
+  mimeType?: string;
+  headers?: GmailHeader[];
+  body?: { data?: string; size?: number };
+  parts?: GmailPayloadPart[];
+};
 type GmailMessageMetadata = {
   id: string;
   threadId?: string;
   labelIds?: string[];
   snippet?: string;
   internalDate?: string; // ms timestamp (string)
-  payload?: { headers?: GmailHeader[] };
+  payload?: GmailPayloadPart;
 };
 
 export async function processGmailWatchers(env: Env): Promise<{
@@ -197,6 +210,10 @@ async function processOneAccount(
   const listJson = (await listRes.json()) as GmailListResponse;
   const ids = (listJson.messages ?? []).map((m) => m.id).filter(Boolean);
 
+  // Sprint 29: この account の rule のどれかが postBodyToThread=true なら
+  // format=full で本文を取得する必要がある。1 つも無ければ従来どおり metadata。
+  const needsBody = accountNeedsBody(cfg);
+
   let matchedLocal = 0;
   let notifiedLocal = 0;
 
@@ -222,11 +239,11 @@ async function processOneAccount(
       continue;
     }
 
-    // detail (metadata only) 取得
-    let detailRes = await fetchGmailMessage(accessToken, messageId);
+    // detail 取得 (本文が要る account のみ format=full)
+    let detailRes = await fetchGmailMessage(accessToken, messageId, needsBody);
     if (detailRes.status === 401) {
       accessToken = await refreshAccessToken(env, row);
-      detailRes = await fetchGmailMessage(accessToken, messageId);
+      detailRes = await fetchGmailMessage(accessToken, messageId, needsBody);
     }
     if (!detailRes.ok) {
       // 1 件失敗で全体を止めない。next message へ。
@@ -351,14 +368,22 @@ async function fetchGmailList(accessToken: string): Promise<Response> {
 async function fetchGmailMessage(
   accessToken: string,
   messageId: string,
+  fullBody: boolean = false,
 ): Promise<Response> {
   // Sprint 28: replyOnly 判定のため In-Reply-To ヘッダを取得する。
   // metadataHeaders は OR で複数指定可能。既存 rule にも全件取得しておく
   // (追加コストはほぼゼロ、payload size は数十 bytes 増のみ)。
-  const url =
-    `${GMAIL_LIST_URL}/${encodeURIComponent(messageId)}?format=metadata` +
-    `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date` +
-    `&metadataHeaders=In-Reply-To`;
+  //
+  // Sprint 29: postBodyToThread rule が 1 つでもある account では format=full に
+  // 切り替え、payload.parts から本文を抽出する (案A: 本文全文をスレ返信)。
+  // format=full は metadataHeaders を受け付けない (全ヘッダが返る) ので、
+  // full のときは header 指定を付けない。本文取得しない account は従来どおり
+  // metadata のままで余計な転送量を増やさない。
+  const url = fullBody
+    ? `${GMAIL_LIST_URL}/${encodeURIComponent(messageId)}?format=full`
+    : `${GMAIL_LIST_URL}/${encodeURIComponent(messageId)}?format=metadata` +
+      `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date` +
+      `&metadataHeaders=In-Reply-To`;
   return fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -372,6 +397,9 @@ type MessageMeta = {
   snippet: string;
   // Sprint 28: replyOnly 判定で使う。空文字なら「ヘッダなし」。
   inReplyTo: string;
+  // Sprint 29: format=full で取得したメール本文 (plain text)。
+  // metadata 取得時 or 抽出失敗時は空文字。
+  body: string;
 };
 
 function extractMessageMeta(msg: GmailMessageMetadata): MessageMeta {
@@ -394,7 +422,71 @@ function extractMessageMeta(msg: GmailMessageMetadata): MessageMeta {
     // Gmail の snippet は HTML entity decoded されていないが、表示用なのでそのまま使う。
     snippet: msg.snippet ?? "",
     inReplyTo: getHeader("In-Reply-To"),
+    body: extractMessageBody(msg.payload),
   };
+}
+
+// === 本文抽出 (Sprint 29) ===
+
+/**
+ * Gmail payload (MIME ツリー) から本文を plain text として取り出す。
+ *   1. text/plain part を優先 (再帰的に最初に見つかったもの)
+ *   2. 無ければ text/html part を取り、簡易的に HTML タグを除去してテキスト化
+ *   3. どちらも無ければ空文字
+ * payload が undefined (= format=metadata) のときも空文字を返す。
+ */
+export function extractMessageBody(payload?: GmailPayloadPart): string {
+  if (!payload) return "";
+  const plain = findPart(payload, "text/plain");
+  if (plain) return decodeBase64UrlText(plain).trim();
+  const html = findPart(payload, "text/html");
+  if (html) return htmlToPlainText(decodeBase64UrlText(html)).trim();
+  return "";
+}
+
+// MIME ツリーを深さ優先で辿り、指定 mimeType かつ body.data を持つ最初の part を返す。
+function findPart(
+  part: GmailPayloadPart,
+  mimeType: string,
+): GmailPayloadPart | null {
+  if ((part.mimeType ?? "").toLowerCase() === mimeType && part.body?.data) {
+    return part;
+  }
+  for (const child of part.parts ?? []) {
+    const found = findPart(child, mimeType);
+    if (found) return found;
+  }
+  return null;
+}
+
+// Gmail の body.data は base64url (padding 無し)。UTF-8 として decode する。
+function decodeBase64UrlText(part: GmailPayloadPart): string {
+  const data = part.body?.data ?? "";
+  if (!data) return "";
+  try {
+    const std = data.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(std);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
+// 簡易 HTML -> plain text。完全な HTML パーサではなく、
+// Slack 通知に十分な「タグ除去 + 改行整形 + 主要 entity 復号」を行う。
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<\s*(br|\/p|\/div|\/li|\/tr|\/h[1-6])\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 // === キーワード match ===
@@ -461,7 +553,21 @@ export function pickMatchingRule(
   return null;
 }
 
+// Sprint 29: この config に postBodyToThread=true の rule (elseRule 含む) が
+// 1 つでもあれば true。true のとき account の message を format=full で取得する。
+export function accountNeedsBody(cfg: WatcherConfig): boolean {
+  if (cfg.rules.some((r) => r.postBodyToThread)) return true;
+  if (cfg.elseRule?.postBodyToThread) return true;
+  return false;
+}
+
 // === Slack 通知 ===
+
+// Slack の 1 メッセージあたりの text 上限はおよそ 4000 文字。
+// スレ返信を複数に分割するときの 1 チャンクの最大長 (余裕を見て 3800)。
+const SLACK_THREAD_CHUNK = 3800;
+// スレッドに投稿する分割メッセージの最大数。これを超える本文は末尾を truncate する。
+const SLACK_THREAD_MAX_CHUNKS = 5;
 
 async function sendSlackNotification(
   env: Env,
@@ -520,11 +626,74 @@ async function sendSlackNotification(
       console.error("[gmail-watcher] postMessage failed:", res);
       return false;
     }
+
+    // Sprint 29 (案A): postBodyToThread=true なら、親通知の ts を thread_ts に
+    // 使ってメール本文の全文をスレッドに返信する。本文取得 (format=full) は
+    // accountNeedsBody でガード済みなので、ここでは meta.body の有無だけ見る。
+    // スレ返信の失敗は親通知の成否に影響させない (fail-soft)。
+    if (rule.postBodyToThread) {
+      const parentTs = typeof res.ts === "string" ? res.ts : "";
+      if (parentTs) {
+        await postBodyToThread(slack, rule.channelId, parentTs, meta.body);
+      } else {
+        console.warn(
+          "[gmail-watcher] postBodyToThread: parent ts missing; skip body reply",
+        );
+      }
+    }
     return true;
   } catch (e) {
     console.error("[gmail-watcher] sendSlackNotification error:", e);
     return false;
   }
+}
+
+// Sprint 29: メール本文をスレッドに返信する。
+//   - 本文が空なら「(本文なし)」を 1 件返信 (通知だけ来てスレが空、を防ぐ)。
+//   - Slack の ~4000 文字上限に配慮し SLACK_THREAD_CHUNK で分割。
+//   - SLACK_THREAD_MAX_CHUNKS を超える本文は末尾を truncate し「(以下省略)」を付す。
+//   - コードブロックでは囲まない (体裁ルール: 日本語本文をコードブロックに入れない)。
+export async function postBodyToThread(
+  slack: { postMessage: SlackPostFn },
+  channelId: string,
+  threadTs: string,
+  body: string,
+): Promise<void> {
+  const chunks = splitBodyForThread(body);
+  for (const chunk of chunks) {
+    const res = await slack.postMessage(channelId, chunk, undefined, threadTs);
+    if (!res.ok) {
+      console.error("[gmail-watcher] thread body postMessage failed:", res);
+      // 1 チャンク失敗で残りを止める (順序が崩れた断片を撒かない)。
+      return;
+    }
+  }
+}
+
+type SlackPostFn = (
+  channel: string,
+  text: string,
+  blocks?: unknown[],
+  threadTs?: string,
+) => Promise<{ ok: boolean; [k: string]: unknown }>;
+
+// 本文を Slack スレ返信用に分割する。空なら「(本文なし)」1 件。
+export function splitBodyForThread(body: string): string[] {
+  const trimmed = (body ?? "").trim();
+  if (!trimmed) return ["(本文なし)"];
+  const chunks: string[] = [];
+  let rest = trimmed;
+  while (rest.length > 0 && chunks.length < SLACK_THREAD_MAX_CHUNKS) {
+    chunks.push(rest.slice(0, SLACK_THREAD_CHUNK));
+    rest = rest.slice(SLACK_THREAD_CHUNK);
+  }
+  // 上限チャンク数で収まらず本文が残った場合は末尾 chunk に省略マークを付す。
+  if (rest.length > 0) {
+    const last = chunks.length - 1;
+    const room = SLACK_THREAD_CHUNK - "\n(以下省略)".length;
+    chunks[last] = chunks[last].slice(0, room) + "\n(以下省略)";
+  }
+  return chunks;
 }
 
 // Sprint 27: 自動返信ボタン用 Block Kit。
@@ -678,6 +847,9 @@ function normalizeRule(raw: unknown): WatcherRule | null {
     // Sprint 28: 既存 rule は replyOnly キー自体が無いので undefined のまま
     // (= 後方互換)。boolean 以外は undefined に正規化する。
     replyOnly: typeof r.replyOnly === "boolean" ? r.replyOnly : undefined,
+    // Sprint 29: 本文全文をスレッドに返信するフラグ。既存 rule は undefined のまま。
+    postBodyToThread:
+      typeof r.postBodyToThread === "boolean" ? r.postBodyToThread : undefined,
   };
 }
 
