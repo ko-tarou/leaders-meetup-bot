@@ -31,6 +31,7 @@ export interface SlackPort {
     channel: string,
     text: string,
     blocks?: unknown[],
+    threadTs?: string,
   ): Promise<SlackResponse>;
 
   updateMessage(

@@ -58,6 +58,9 @@ export type GmailWatcherRule = {
   // true なら subject が "Re:" で始まる、または In-Reply-To ヘッダがある
   // メールだけ Slack 通知する。既存 rule は undefined のままで旧挙動を保つ。
   replyOnly?: boolean;
+  // Sprint 29: ON のとき Slack 親通知のスレッドにメール本文の全文を返信する (案A)。
+  // 既定 false。通知チャンネルにアクセスできる人だけが本文を読める前提で運用する。
+  postBodyToThread?: boolean;
 };
 
 export type GmailWatcherConfig = {

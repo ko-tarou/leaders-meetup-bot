@@ -66,8 +66,9 @@ export class MockSlackClient {
     channel: string,
     text: string,
     blocks?: unknown[],
+    threadTs?: string,
   ): Promise<SlackResponse> {
-    return this.record("postMessage", [channel, text, blocks]);
+    return this.record("postMessage", [channel, text, blocks, threadTs]);
   }
 
   async updateMessage(

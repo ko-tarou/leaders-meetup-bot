@@ -612,6 +612,27 @@ function RuleCard(props: RuleCardProps) {
             </div>
           </div>
 
+          {/* Sprint 29: メール本文の全文をスレッドに投稿するフラグ (案A)。
+              既定 OFF。誤爆防止のため rule 毎に明示 ON する運用。 */}
+          <div style={styles.field}>
+            <label style={styles.toggleRow}>
+              <input
+                type="checkbox"
+                checked={!!rule.postBodyToThread}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange({ postBodyToThread: e.target.checked })
+                }
+              />
+              <span>メール本文の全文を通知スレッドに投稿する</span>
+            </label>
+            <div style={styles.metaSmall}>
+              ON にすると、通知メッセージのスレッドにメール本文の全文を返信します。
+              このチャンネルを見られる人だけが本文を読める前提で運用してください
+              （長文は約3800文字ごとに分割し、上限を超える分は末尾を省略します）。
+            </div>
+          </div>
+
 
           <div style={styles.field}>
             <label style={styles.label}>通知先ワークスペース</label>
