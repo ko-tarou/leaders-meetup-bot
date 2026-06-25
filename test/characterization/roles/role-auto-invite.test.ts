@@ -8,7 +8,8 @@
  * 固定対象:
  *  - fire window 判定: 9:00 JST ちょうど / 9:08 JST (窓内) / 9:09 JST (窓外) /
  *      8:59 JST (窓外) → 即 { processed:0, invited:0 } で Slack 非接触
- *  - autoInviteEnabled の判定: true のみ対象 / false・欠損・不正 JSON は skip
+ *  - 対象判定 shouldAutoSync: workspaceId を持てば既定で対象 /
+ *      autoInviteEnabled:false で opt-out / workspaceId なし・不正 JSON は skip
  *  - dedupKey 生成 (`role_auto_invite:<actionId>:<YYYYMMDD>`) と
  *      二重実行防止 (scheduled_jobs UNIQUE → 2 回目 tick は skip)
  *  - kick が常に false (operations[].kick=false で executeSync を呼ぶ)
@@ -212,17 +213,19 @@ describe("processRoleAutoInvites: fire window (現状固定)", () => {
 // ---------------------------------------------------------------------------
 // autoInviteEnabled の判定
 // ---------------------------------------------------------------------------
-describe("processRoleAutoInvites: autoInviteEnabled 判定 (現状固定)", () => {
-  it("autoInviteEnabled 欠損 → skip (processed:0)", async () => {
+describe("processRoleAutoInvites: 対象判定 shouldAutoSync (既定 ON)", () => {
+  it("workspaceId あり / autoInviteEnabled 欠損 → 既定で対象 (processed:1)", async () => {
     freezeJst("09:00");
     const { row: ws } = await makeEncryptedWorkspace();
-    await seedAutoInviteAction({ workspaceId: ws.id }); // autoInviteEnabled なし
+    await seedAutoInviteAction({ workspaceId: ws.id }); // フラグなし = 既定 ON
     stubSlackForSync([]);
     const r = await processRoleAutoInvites(makeEnv());
-    expect(r).toEqual({ processed: 0, invited: 0 });
+    // 毎朝の自動 Diff 同期は workspaceId を持つ全アクションが既定で対象。
+    expect(r.processed).toBe(1);
+    expect(r.invited).toBe(1);
   });
 
-  it("autoInviteEnabled:false → skip", async () => {
+  it("autoInviteEnabled:false → opt-out で skip", async () => {
     freezeJst("09:00");
     const { row: ws } = await makeEncryptedWorkspace();
     await seedAutoInviteAction({
@@ -234,17 +237,34 @@ describe("processRoleAutoInvites: autoInviteEnabled 判定 (現状固定)", () =
     expect(r).toEqual({ processed: 0, invited: 0 });
   });
 
-  it("autoInviteEnabled が truthy だが boolean true でない (1) → skip", async () => {
+  it("autoInviteEnabled が false 以外の値 (1) → 対象 (opt-out は === false のみ)", async () => {
     freezeJst("09:00");
     const { row: ws } = await makeEncryptedWorkspace();
     await seedAutoInviteAction({ workspaceId: ws.id, autoInviteEnabled: 1 });
     stubSlackForSync([]);
     const r = await processRoleAutoInvites(makeEnv());
-    // CHARACTERIZATION: `=== true` 厳密比較なので 1 は無効。
-    expect(r).toEqual({ processed: 0, invited: 0 });
+    expect(r.processed).toBe(1);
   });
 
-  it("config が不正 JSON → skip (isAutoInviteEnabled catch)", async () => {
+  it("workspaceId なし (sharedFromActionId 由来など) → skip", async () => {
+    freezeJst("09:00");
+    const ev = await makeEvent();
+    // 自前 workspaceId を持たない共有アクション相当。
+    const action = await makeEventAction(ev.id, {
+      actionType: "role_management",
+      enabled: 1,
+      config: JSON.stringify({ sharedFromActionId: "src-action" }),
+    });
+    const role = await makeSlackRole(action.id, { name: "R" });
+    await makeSlackRoleMember(role.id, "U1");
+    const authSpy = vi.spyOn(MockSlackClient.prototype, "authTest");
+    const r = await processRoleAutoInvites(makeEnv());
+    expect(r).toEqual({ processed: 0, invited: 0 });
+    // computeSyncDiff に到達しない (Slack 非接触)。
+    expect(authSpy).not.toHaveBeenCalled();
+  });
+
+  it("config が不正 JSON → skip (shouldAutoSync catch)", async () => {
     freezeJst("09:00");
     const ev = await makeEvent();
     await makeEventAction(ev.id, {
