@@ -127,7 +127,10 @@ kejimeRouter.post(`${BASE}/exemption`, async (c: C) => {
 });
 
 // PR6: 激辛リセット。ramen_count を 0 に戻し、kejime_events に履歴を残す。
-// current_points (internal) は触らない (仕様メモ: 5pt 蓄積はそのまま、激辛のみ消す)。
+// 激辛ラーメンを 1 杯食べる = 5pt 消費。消化した ramen 1 杯につき current_points を
+// 5 ずつ減算し (下限 0)、超過分は残す (例: 7pt/ramen1 -> 2pt、6pt/ramen1 -> 1pt、
+// 12pt/ramen2 -> 2pt)。これで「5pt 到達でラーメン、食べたら 5pt 消費・端数は持ち越し」
+// になる。減算後は ramen_count = floor(current_points/5) の不変条件が保たれる。
 kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   const db = drizzle(c.env.DB);
   const r = await findAction(db, c.req.param("actionId") as string);
@@ -142,19 +145,22 @@ kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   }
   if (member.ramenCount === 0) return c.json({ error: "ramen already zero" }, 400);
   const prev = member.ramenCount;
+  const nextPoints = Math.max(0, member.currentPoints - 5 * prev);
+  const pointsDelta = nextPoints - member.currentPoints;
   const now = new Date().toISOString();
   const ev: typeof kejimeEvents.$inferInsert = {
     id: crypto.randomUUID(), memberId, type: "ramen_reset",
-    pointsDelta: 0, ramenDelta: -prev, note: body.note?.trim() || null,
+    pointsDelta, ramenDelta: -prev, note: body.note?.trim() || null,
     decidedBy: "admin", occurredAt: now,
   };
   await db.insert(kejimeEvents).values(ev);
-  await db.update(kejimeMembers).set({ ramenCount: 0, updatedAt: now })
-    .where(eq(kejimeMembers.id, memberId));
+  await db.update(kejimeMembers).set({
+    currentPoints: nextPoints, ramenCount: 0, updatedAt: now,
+  }).where(eq(kejimeMembers.id, memberId));
   await triggerStatusUpdate(c.env, r.action.id);
   return c.json({ ok: true, event: ev, member: {
-    ...member, ramenCount: 0,
-    displayPoints: Math.min(member.currentPoints, CAP), updatedAt: now,
+    ...member, currentPoints: nextPoints, ramenCount: 0,
+    displayPoints: Math.min(nextPoints, CAP), updatedAt: now,
   } }, 201);
 });
 

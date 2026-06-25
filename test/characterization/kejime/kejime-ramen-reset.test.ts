@@ -4,7 +4,8 @@
  * 仕様確認:
  * - ramen_count = 0 にリセット (どんな値でも 0 に)
  * - kejime_events INSERT (type='ramen_reset', ramen_delta=-prev, decidedBy='admin')
- * - current_points (internal) は触らない
+ * - 激辛ラーメン 1 杯 = 5pt 消費。消化した ramen 1 杯につき current_points を 5 減算
+ *   (下限 0)、超過分は残す (7/ramen1 -> 2、6/ramen1 -> 1、12/ramen2 -> 2)
  * - 既に 0 → 400
  * - adminAuth 401
  */
@@ -70,21 +71,61 @@ function reset(eventId: string, actionId: string, body: object, withToken = true
 }
 
 describe("POST /kejime/ramen-reset", () => {
-  it("ramen_count を 0 にリセットし event を記録", async () => {
+  it("ramen_count を 0 にリセットし、消化分 (5pt x ramen) を消費して超過分を残す", async () => {
     const { ev, tracker, memberId } = await setup({ points: 12, ramen: 2 });
     const res = await reset(ev.id, tracker.id, { memberId, note: "admin reset" });
     expect(res.status).toBe(201);
     const db = testDb();
     const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, memberId)).get();
     expect(m?.ramenCount).toBe(0);
-    expect(m?.currentPoints).toBe(12); // internal_points は変わらない
+    expect(m?.currentPoints).toBe(2); // 12 - 5*2 = 2 (超過分が残る)
     const all = await db.select().from(kejimeEvents).all();
     expect(all).toHaveLength(1);
     expect(all[0].type).toBe("ramen_reset");
     expect(all[0].ramenDelta).toBe(-2);
-    expect(all[0].pointsDelta).toBe(0);
+    expect(all[0].pointsDelta).toBe(-10);
     expect(all[0].decidedBy).toBe("admin");
     expect(all[0].note).toBe("admin reset");
+  });
+
+  it("7pt / ramen 1 -> 超過分 2pt が残る", async () => {
+    const { ev, tracker, memberId } = await setup({ points: 7, ramen: 1 });
+    const res = await reset(ev.id, tracker.id, { memberId });
+    expect(res.status).toBe(201);
+    const db = testDb();
+    const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, memberId)).get();
+    expect(m?.ramenCount).toBe(0);
+    expect(m?.currentPoints).toBe(2);
+    const ev0 = (await db.select().from(kejimeEvents).all())[0];
+    expect(ev0.pointsDelta).toBe(-5);
+    expect(ev0.ramenDelta).toBe(-1);
+  });
+
+  it("6pt / ramen 1 -> 超過分 1pt が残る", async () => {
+    const { ev, tracker, memberId } = await setup({ points: 6, ramen: 1 });
+    const res = await reset(ev.id, tracker.id, { memberId });
+    expect(res.status).toBe(201);
+    const db = testDb();
+    const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, memberId)).get();
+    expect(m?.currentPoints).toBe(1);
+  });
+
+  it("丁度 5pt / ramen 1 -> 0pt (端数なし)", async () => {
+    const { ev, tracker, memberId } = await setup({ points: 5, ramen: 1 });
+    const res = await reset(ev.id, tracker.id, { memberId });
+    expect(res.status).toBe(201);
+    const db = testDb();
+    const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, memberId)).get();
+    expect(m?.currentPoints).toBe(0);
+  });
+
+  it("current_points < 5*ramen でも下限 0 でクランプ", async () => {
+    const { ev, tracker, memberId } = await setup({ points: 3, ramen: 1 });
+    const res = await reset(ev.id, tracker.id, { memberId });
+    expect(res.status).toBe(201);
+    const db = testDb();
+    const m = await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, memberId)).get();
+    expect(m?.currentPoints).toBe(0); // max(0, 3 - 5) = 0
   });
 
   it("ramen_count が既に 0 → 400", async () => {
