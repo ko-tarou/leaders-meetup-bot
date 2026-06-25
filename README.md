@@ -75,3 +75,28 @@ npx wrangler secret put GITHUB_TOKEN
 ```
 curl -X POST http://localhost:8787/api/orgs/EVENT_ID/actions/ACTION_ID/stale-pr-nudge/send -H "x-admin-token: ADMIN_TOKEN"
 ```
+
+## Slack 読み取り API (Claude 連携 / read-only)
+
+Claude（および任意の認証済みクライアント）が HTTP 経由で Slack チャンネルの会話を**読むだけ**の admin API。投稿・編集・削除は一切しない（`conversations.list` / `conversations.history` / `users.info` のみを叩く read-only）。他の `/api/*` と同じ `x-admin-token`（`ADMIN_TOKEN`）で保護され、トークン無し / 不正は 401 を返す。
+
+エンドポイント:
+
+- `GET /api/slack/channels` — bot が参加中のチャンネル一覧。レスポンス `{ "channels": [{ "id": "C...", "name": "general" }] }`。
+- `GET /api/slack/history?channel=<id|name>&limit=<n>&oldest=<ts?>` — 直近メッセージを**時系列（古い -> 新しい）**で返す。`channel` はチャンネル ID でも名前でも可（名前は内部で ID 解決。先頭 `#` 可）。`limit` は既定 50・上限 200。`oldest` は任意の Unix 秒（この時刻より新しいメッセージのみ）。レスポンス `{ "channel": "C...", "messages": [{ "ts": "1700000000.000100", "user": "<表示名 or user_id>", "text": "...", "hasThread": true }] }`。`hasThread` は `reply_count>0` か `thread_ts` を持つ場合に true。
+
+必要 scope（`src/routes/oauth.ts` の `REQUIRED_SCOPES` に付与済み）: `channels:read` / `groups:read`（list）、`channels:history` / `groups:history`（history）、`users:read`（表示名解決）。bot 未参加チャンネルは Slack が `not_in_channel` を返すため 502（`error: "slack_error"`）。
+
+### Claude が Slack を読む手順
+
+トークン値はコードにも応答にも**絶対に出さない**。環境変数名 `ADMIN_TOKEN` のみを参照する。手元では token をファイルに置き、呼び出し前に `$ADMIN_TOKEN` へ読み込む運用を推奨（例: `~/.config/devhubops/admin-token` に保存して `export ADMIN_TOKEN="$(cat ~/.config/devhubops/admin-token)"`）。
+
+本番（`devhub-ops.akokoa1221.workers.dev`）に対する呼び出し例:
+
+```
+export ADMIN_TOKEN="$(cat ~/.config/devhubops/admin-token)"
+curl -s -H "x-admin-token: $ADMIN_TOKEN" "https://devhub-ops.akokoa1221.workers.dev/api/slack/channels"
+curl -s -H "x-admin-token: $ADMIN_TOKEN" "https://devhub-ops.akokoa1221.workers.dev/api/slack/history?channel=CHANNEL&limit=50"
+```
+
+`channel` にはチャンネル ID（`C...`）か、bot が参加中のチャンネル名を指定する。

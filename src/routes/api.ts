@@ -28,6 +28,7 @@ import { stalePrNudgeRouter } from "./api/stale-pr-nudge";
 import { sponsorRouter } from "./api/sponsor";
 import { sheetsRouter } from "./api/sheets";
 import { driveRouter } from "./api/drive";
+import { slackReadRouter } from "./api/slack-read";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -153,5 +154,8 @@ api.route("/", sheetsRouter);
 // /drive/file/:id/content)。gmail_accounts の OAuth credential を再利用。
 // adminAuth で保護される。
 api.route("/", driveRouter);
+// read-only Slack API (Claude 連携): Slack チャンネルの会話を読むだけの admin API
+// (GET /slack/channels, GET /slack/history)。adminAuth で保護される (read-only / 投稿しない)。
+api.route("/", slackReadRouter);
 
 export { api };
