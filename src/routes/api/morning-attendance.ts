@@ -4,7 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
-  eventActions, kejimeEvents, kejimeMembers, morningAttendance,
+  eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   morningSessions, slackRoleMembers,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
@@ -225,6 +225,16 @@ morningAttendanceRouter.post(`${BASE}`, async (c: C) => {
         }).where(eq(kejimeMembers.id, member.id));
         revoked = { lateEventId: lateEv.id, memberId: member.id };
       }
+      // 「実は出席だった」訂正では、まだ未抽選 (status='pending') の遅刻ガチャ
+      // penalty も取り消す。これをしないと欠席→出席に直した人にも「ガチャを引く」
+      // ボタンが出続けてしまう (status post / 本人の /devhub kejime gacha 両方)。
+      // 既に本人がガチャを引いた (open) / 記事で消化済み (cleared) のものは触らない。
+      await db.update(kejimePenalties).set({ status: "cleared", clearedAt: now })
+        .where(and(
+          eq(kejimePenalties.memberId, member.id),
+          eq(kejimePenalties.date, date),
+          eq(kejimePenalties.status, "pending"),
+        ));
     }
   }
   return c.json({ ok: true, revoked }, 201);
