@@ -22,9 +22,10 @@ import {
   makeEvent, makeEventAction, makeSlackRole, makeSlackRoleMember,
 } from "../../helpers/factory";
 import {
-  eventActions, kejimeEvents, kejimeMembers, morningAttendance,
+  eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   slackRoleMembers, slackRoles,
 } from "../../../src/db/schema";
+import { listMyPendingGachas } from "../../../src/services/kejime-gacha-draw";
 
 const TOKEN = "test-admin-token";
 const env = makeEnv();
@@ -43,6 +44,7 @@ beforeEach(async () => {
   // JST 2026-05-19 (火) を today 基準にする。
   vi.setSystemTime(new Date("2026-05-19T00:00:00.000+09:00"));
   const db = testDb();
+  await db.delete(kejimePenalties);
   await db.delete(kejimeEvents);
   await db.delete(kejimeMembers);
   await db.delete(morningAttendance);
@@ -257,6 +259,81 @@ describe("POST /morning-attendance (手動 attend)", () => {
     const m = await db.select().from(kejimeMembers)
       .where(eq(kejimeMembers.id, "km-u1")).get();
     expect(m?.currentPoints).toBe(0);
+  });
+
+  it("欠席→出席に直したら未抽選ガチャ (pending penalty) を取り消す (ガチャボタン非表示)", async () => {
+    const { ev, morning, tracker } = await setupBasic({
+      roleMembers: ["U1"],
+      attended: [{ user: "U1", date: "2026-05-18", status: "late" }],
+    });
+    const db = testDb();
+    await db.insert(kejimeMembers).values({
+      id: "km-u1", eventActionId: tracker.id, slackUserId: "U1",
+      displayName: "U1", currentPoints: 1, ramenCount: 0,
+      createdAt: "x", updatedAt: "x",
+    });
+    await db.insert(kejimeEvents).values({
+      id: "ke-late", memberId: "km-u1", type: "late", pointsDelta: 1, ramenDelta: 0,
+      note: "auto: 2026-05-18", occurredAt: "2026-05-18T23:00:00.000Z",
+    });
+    await db.insert(kejimePenalties).values({
+      id: "pen-u1", eventActionId: tracker.id, memberId: "km-u1", slackUserId: "U1",
+      date: "2026-05-18", theme: "Androidの日", themeKey: "mon",
+      points: 0, requiredChars: 0, status: "pending",
+      lateEventId: "ke-late", createdAt: "2026-05-18T23:00:00.000Z",
+    });
+    // 修正前: 本人にガチャが見えている。
+    expect((await listMyPendingGachas(env.DB, "U1")).map((g) => g.penaltyId))
+      .toEqual(["pen-u1"]);
+
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1" }) },
+    );
+    expect(res.status).toBe(201);
+    // penalty は cleared になり、本人のガチャ一覧から消える。
+    const pen = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, "pen-u1")).get();
+    expect(pen?.status).toBe("cleared");
+    expect(pen?.clearedAt).toBeTruthy();
+    expect(await listMyPendingGachas(env.DB, "U1")).toEqual([]);
+  });
+
+  it("別日の pending penalty は残す (訂正した日だけ取り消す)", async () => {
+    const { ev, morning, tracker } = await setupBasic({
+      roleMembers: ["U1"],
+      attended: [{ user: "U1", date: "2026-05-18", status: "late" }],
+    });
+    const db = testDb();
+    await db.insert(kejimeMembers).values({
+      id: "km-u1", eventActionId: tracker.id, slackUserId: "U1",
+      displayName: "U1", currentPoints: 2, ramenCount: 0,
+      createdAt: "x", updatedAt: "x",
+    });
+    await db.insert(kejimeEvents).values({
+      id: "ke-late", memberId: "km-u1", type: "late", pointsDelta: 1, ramenDelta: 0,
+      note: "auto: 2026-05-18", occurredAt: "2026-05-18T23:00:00.000Z",
+    });
+    await db.insert(kejimePenalties).values([
+      { id: "pen-0518", eventActionId: tracker.id, memberId: "km-u1", slackUserId: "U1",
+        date: "2026-05-18", theme: "t", themeKey: "mon", points: 0, requiredChars: 0,
+        status: "pending", lateEventId: "ke-late", createdAt: "2026-05-18T23:00:00.000Z" },
+      { id: "pen-0519", eventActionId: tracker.id, memberId: "km-u1", slackUserId: "U1",
+        date: "2026-05-19", theme: "t", themeKey: "tue", points: 0, requiredChars: 0,
+        status: "pending", lateEventId: null, createdAt: "2026-05-19T23:00:00.000Z" },
+    ]);
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1" }) },
+    );
+    expect(res.status).toBe(201);
+    // 0518 は cleared、0519 は pending のまま (本人のガチャ一覧に残る)。
+    expect((await listMyPendingGachas(env.DB, "U1")).map((g) => g.penaltyId))
+      .toEqual(["pen-0519"]);
   });
 
   it("date / slackUserId 欠落 → 400", async () => {
