@@ -386,6 +386,9 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
     botUserId?: string;
     inviteOk?: boolean;
     inviteError?: string;
+    // per-user の invite 失敗を制御する。指定された user は (bulk でも個別でも)
+    // 常に失敗する。これにより「1 人だけ invite 不可」シナリオを表現できる。
+    inviteFailUsers?: Map<string, string>;
     kickFail?: Set<string>;
     fetchFail?: Set<string>;
   }) {
@@ -415,14 +418,26 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
     });
     const inviteSpy = vi
       .spyOn(MockSlackClient.prototype, "conversationsInviteBulk")
-      .mockImplementation(async () =>
-        opts.inviteOk === false
+      .mockImplementation(async (_channel: string, userIds: string[]) => {
+        // per-user 失敗指定があれば、その user を含む呼び出しは失敗させる
+        // (Slack の bulk invite は 1 人でも不正なら呼び出し全体が失敗するため)。
+        if (opts.inviteFailUsers) {
+          const bad = userIds.find((u) => opts.inviteFailUsers!.has(u));
+          if (bad) {
+            return {
+              ok: false,
+              error: opts.inviteFailUsers.get(bad),
+            } as SlackResponse;
+          }
+          return { ok: true } as SlackResponse;
+        }
+        return opts.inviteOk === false
           ? ({
               ok: false,
               error: opts.inviteError ?? "invite_failed",
             } as SlackResponse)
-          : ({ ok: true } as SlackResponse),
-      );
+          : ({ ok: true } as SlackResponse);
+      });
     const kickSpy = vi
       .spyOn(MockSlackClient.prototype, "conversationsKick")
       .mockImplementation(async (_channel: string, user: string) =>
@@ -492,7 +507,7 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
     expect(kickSpy.mock.calls).toHaveLength(0);
   });
 
-  it("invite 失敗 → errors[] に action:'invite' と users を集約 (invited 加算しない)", async () => {
+  it("invite が全員失敗 (channel 起因 not_in_channel) → 個別 fallback でも全員失敗し per-user error 化", async () => {
     const action = await setup({
       members: ["U-x", "U-y"],
       channels: ["C1"],
@@ -504,14 +519,85 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
     });
     const res = await executeSync(makeEnv(), action);
     expect(res.invited).toBe(0);
+    // bulk 失敗 → U-x, U-y それぞれ個別 invite に fallback。両方失敗するので
+    // per-user error が 2 件 (userId 付き)。
     expect(res.errors).toEqual([
       {
         channelId: "C1",
         action: "invite",
-        users: ["U-x", "U-y"],
+        userId: "U-x",
+        error: "not_in_channel",
+      },
+      {
+        channelId: "C1",
+        action: "invite",
+        userId: "U-y",
         error: "not_in_channel",
       },
     ]);
+  });
+
+  it("1 人だけ invite 不可 → bulk 失敗でも個別 fallback で健全な user を救済し、原因 user だけを error 化", async () => {
+    const action = await setup({
+      members: ["U-good1", "U-bad", "U-good2"],
+      channels: ["C1"],
+    });
+    const { inviteSpy } = stubSlack({
+      currentByChannel: { C1: [] },
+      // U-bad だけが user_not_found で常に弾かれる。
+      inviteFailUsers: new Map([["U-bad", "user_not_found"]]),
+    });
+    const res = await executeSync(makeEnv(), action);
+    // U-good1 / U-good2 は救済され invite 成功 (2 件)。U-bad だけ失敗。
+    expect(res.invited).toBe(2);
+    expect(res.errors).toEqual([
+      {
+        channelId: "C1",
+        action: "invite",
+        userId: "U-bad",
+        error: "user_not_found",
+      },
+    ]);
+    // bulk 1 回 (失敗) → 個別 fallback 3 回 = 計 4 回呼ばれる。
+    expect(inviteSpy.mock.calls).toHaveLength(4);
+    // 1 回目は bulk (全員まとめて)。期待 member は Set 由来で順不同なので件数で確認。
+    expect(inviteSpy.mock.calls[0][0]).toBe("C1");
+    expect([...inviteSpy.mock.calls[0][1]].sort()).toEqual([
+      "U-bad",
+      "U-good1",
+      "U-good2",
+    ]);
+  });
+
+  it("単一 user の invite 失敗 → 個別 fallback せず per-user error (userId 付き)", async () => {
+    const action = await setup({ members: ["U-solo"], channels: ["C1"] });
+    const { inviteSpy } = stubSlack({
+      currentByChannel: { C1: [] },
+      inviteFailUsers: new Map([["U-solo", "user_not_found"]]),
+    });
+    const res = await executeSync(makeEnv(), action);
+    expect(res.invited).toBe(0);
+    expect(res.errors).toEqual([
+      {
+        channelId: "C1",
+        action: "invite",
+        userId: "U-solo",
+        error: "user_not_found",
+      },
+    ]);
+    // 1 人なので bulk 1 回のみ (個別 fallback しない)。
+    expect(inviteSpy.mock.calls).toHaveLength(1);
+  });
+
+  it("bulk が already_in_channel で失敗 → 成功扱い (期待 member が既に在席)", async () => {
+    const action = await setup({ members: ["U-here"], channels: ["C1"] });
+    stubSlack({
+      currentByChannel: { C1: [] },
+      inviteFailUsers: new Map([["U-here", "already_in_channel"]]),
+    });
+    const res = await executeSync(makeEnv(), action);
+    expect(res.invited).toBe(1);
+    expect(res.errors).toEqual([]);
   });
 
   it("kick 失敗 → errors[] に action:'kick' と userId を per-user 集約", async () => {
