@@ -197,6 +197,32 @@ export class SlackClient implements SlackPort {
   }
 
   /**
+   * read-only Slack API (Claude 連携): チャンネルの直近メッセージを取得する。
+   * conversations.history を 1:1 で写す薄いラッパー。
+   * - channel: チャンネル ID (C.../G...)。名前解決は呼び出し側の責務。
+   * - limit: 取得件数 (Slack 既定 100、ここでは呼び出し側が default/cap を制御)。
+   * - oldest: この Unix ts (秒。小数可) より新しいメッセージのみ返す (任意)。
+   *
+   * 必要 scope: public は `channels:history`、private は `groups:history`
+   * (どちらも oauth.ts の REQUIRED_SCOPES に付与済み)。bot が未参加の
+   * チャンネルでは `not_in_channel` が返る (呼び出し側で fail-soft 表示)。
+   *
+   * 戻り値の messages[] は Slack 仕様で **新しい順** (newest first)。
+   * 時系列 (oldest -> newest) に並べ替えるのは呼び出し側の責務。
+   */
+  async conversationsHistory(
+    channel: string,
+    opts?: { limit?: number; oldest?: string },
+  ): Promise<SlackResponse> {
+    const params: Record<string, string | number> = { channel };
+    if (opts?.limit !== undefined) params.limit = opts.limit;
+    if (opts?.oldest !== undefined && opts.oldest !== "") {
+      params.oldest = opts.oldest;
+    }
+    return this.callApiGet("conversations.history", params);
+  }
+
+  /**
    * ADR-0008: 指定チャンネルに 1 ユーザーを招待する。
    * - public channel: `channels:manage` scope が必要
    * - private channel: `groups:write.invites` scope が必要
