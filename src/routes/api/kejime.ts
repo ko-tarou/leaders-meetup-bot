@@ -131,6 +131,11 @@ kejimeRouter.post(`${BASE}/exemption`, async (c: C) => {
 // 5 ずつ減算し (下限 0)、超過分は残す (例: 7pt/ramen1 -> 2pt、6pt/ramen1 -> 1pt、
 // 12pt/ramen2 -> 2pt)。これで「5pt 到達でラーメン、食べたら 5pt 消費・端数は持ち越し」
 // になる。減算後は ramen_count = floor(current_points/5) の不変条件が保たれる。
+// あわせて、消費した pt 分だけ古い「未消化の遅刻イベント」(open penalty) を古い順に
+// cleared (消化済み) にする。これでけじめページ最下部の「未消化の遅刻イベント」から
+// ラーメンで払った分が消える。各 penalty.points が消費 budget に完全に収まる範囲だけを
+// cleared にし、budget で賄い切れない penalty は据え置く (払い切っていない遅刻イベントを
+// 誤って消さない)。penalty.points は大半が 1pt (gacha 既定 70%) なので通常はほぼ一致する。
 kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   const db = drizzle(c.env.DB);
   const r = await findAction(db, c.req.param("actionId") as string);
@@ -147,6 +152,9 @@ kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   const prev = member.ramenCount;
   const nextPoints = Math.max(0, member.currentPoints - 5 * prev);
   const pointsDelta = nextPoints - member.currentPoints;
+  // 実際に消費した pt (= 下限 0 クランプ後の差)。これを未消化遅刻イベントの消し込み
+  // budget に使う。
+  const consumed = member.currentPoints - nextPoints;
   const now = new Date().toISOString();
   const ev: typeof kejimeEvents.$inferInsert = {
     id: crypto.randomUUID(), memberId, type: "ramen_reset",
@@ -157,8 +165,33 @@ kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
   await db.update(kejimeMembers).set({
     currentPoints: nextPoints, ramenCount: 0, updatedAt: now,
   }).where(eq(kejimeMembers.id, memberId));
+  // 消費した pt 分、古い順に open penalty (未消化の遅刻イベント) を cleared にする。
+  const clearedPenaltyIds: string[] = [];
+  if (consumed > 0) {
+    const openPens = await db.select().from(kejimePenalties).where(and(
+      eq(kejimePenalties.eventActionId, r.action.id),
+      eq(kejimePenalties.memberId, memberId),
+      eq(kejimePenalties.status, "open"),
+    )).orderBy(asc(kejimePenalties.date), asc(kejimePenalties.createdAt)).all();
+    let budget = consumed;
+    for (const pen of openPens) {
+      if (pen.points <= budget) {
+        clearedPenaltyIds.push(pen.id);
+        budget -= pen.points;
+      } else {
+        break; // 古い順を崩さない: budget で賄えない penalty が来たら打ち切る
+      }
+    }
+    if (clearedPenaltyIds.length > 0) {
+      await db.update(kejimePenalties).set({ status: "cleared", clearedAt: now })
+        .where(and(
+          inArray(kejimePenalties.id, clearedPenaltyIds),
+          eq(kejimePenalties.status, "open"),
+        ));
+    }
+  }
   await triggerStatusUpdate(c.env, r.action.id);
-  return c.json({ ok: true, event: ev, member: {
+  return c.json({ ok: true, event: ev, clearedPenaltyIds, member: {
     ...member, currentPoints: nextPoints, ramenCount: 0,
     displayPoints: Math.min(nextPoints, CAP), updatedAt: now,
   } }, 201);
