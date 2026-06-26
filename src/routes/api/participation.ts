@@ -106,6 +106,8 @@ participationRouter.post("/participation/:eventId", async (c) => {
   const body = await c.req.json<{
     token?: string;
     name?: string;
+    // 参加届フリガナ欄: 全角カタカナ (FE 必須・BE 任意)。fields へ素通し。
+    nameKana?: string;
     slackName?: string;
     // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
     // あれば users.lookupByEmail で slack_user_id を解決する。
@@ -178,6 +180,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
         name: fields.name,
         email: fields.email,
         submittedAt: fields.submittedAt,
+        nameKana: fields.nameKana,
         slackName: fields.slackName,
         studentId: fields.studentId,
         department: fields.department,
@@ -259,6 +262,7 @@ participationRouter.post("/participation/:eventId", async (c) => {
             name: fields.name,
             email: fields.email,
             submittedAt: fields.submittedAt,
+            nameKana: fields.nameKana,
             slackName: fields.slackName,
             studentId: fields.studentId,
             department: fields.department,

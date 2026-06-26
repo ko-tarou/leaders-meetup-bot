@@ -33,7 +33,7 @@ export type ParticipationNotificationConfig = {
   mentionUserIds?: string[];
   /**
    * 通知文テンプレ。未設定 or 空文字なら DEFAULT_PARTICIPATION_TEMPLATE を使う。
-   * placeholder: {mentions} {name} {slackName} {email} {studentId}
+   * placeholder: {mentions} {name} {nameKana} {slackName} {email} {studentId}
    *              {department} {grade} {gender} {desiredActivity}
    *              {devRoles} {otherAffiliations} {submittedAt}
    */
@@ -48,6 +48,8 @@ export type ParticipationFormLike = {
   name: string;
   email: string;
   submittedAt: string;
+  // フリガナ (全角カタカナ)。未設定は render 時に空文字へ置換する。
+  nameKana?: string | null;
   slackName?: string | null;
   studentId?: string | null;
   department?: string | null;
@@ -63,6 +65,7 @@ export type ParticipationFormLike = {
  */
 export const DEFAULT_PARTICIPATION_TEMPLATE = `{mentions} 📋 参加届が提出されました
 名前: {name}
+フリガナ: {nameKana}
 Slack表示名: {slackName}
 メール: {email}
 希望活動: {desiredActivity}`;
@@ -73,6 +76,7 @@ Slack表示名: {slackName}
  */
 export const DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE = `{mentions} ⚠️ 参加届の Slack 表示名が見つかりませんでした
 名前: {name}
+フリガナ: {nameKana}
 Slack表示名: {slackName}
 メール: {email}
 希望活動: {desiredActivity}
@@ -129,6 +133,7 @@ async function sendParticipationNotificationGeneric(
     const vars: Record<string, string> = {
       mentions: buildMentionPrefix(notif.mentionUserIds),
       name: form.name,
+      nameKana: form.nameKana ?? "",
       slackName: form.slackName ?? "",
       email: form.email,
       studentId: form.studentId ?? "",

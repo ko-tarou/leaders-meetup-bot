@@ -24,6 +24,8 @@
 export interface ParticipationSubmissionBody {
   token?: string;
   name?: string;
+  // 参加届フリガナ欄: 全角カタカナ。FE では必須・BE は任意 (空/未指定は null)。
+  nameKana?: string;
   slackName?: string;
   // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
   // 提出ハンドラ側で users.lookupByEmail に渡し slack_user_id を解決する。
@@ -47,6 +49,8 @@ export interface ParticipationSubmissionBody {
 export interface ParticipationFields {
   eventId: string;
   name: string;
+  // フリガナ (全角カタカナ)。trim 後、空/未指定は null (任意文字列と同扱い)。
+  nameKana: string | null;
   slackName: string | null;
   // 名簿 Slack 連携強化 PR1: Slack 登録メアド (任意)。
   // trim 後の文字列を保存し、空/未指定は null (slack_name と同扱い)。
@@ -69,6 +73,9 @@ const VALID_GRADE = ["1", "2", "3", "4", "graduate"];
 const VALID_GENDER = ["male", "female", "other", "prefer_not"];
 const VALID_ACTIVITY = ["event", "dev", "both"];
 const VALID_DEV_ROLES = ["pm", "frontend", "backend", "android", "ios", "infra"];
+// 参加届フリガナ欄: 許可文字は全角カタカナ・長音符・全角/半角スペース。
+// 姓名を区切るスペースを許すため空白も許可する (例: "ヤマダ タロウ")。
+const NAME_KANA_RE = /^[ァ-ヶー　 ]+$/;
 
 /**
  * 提出ボディのバリデーション結果。
@@ -97,6 +104,17 @@ export function validateSubmission(
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) {
     return { ok: false, error: "invalid email format" };
+  }
+  // 参加届フリガナ欄: nameKana は任意項目 (FE では必須)。値があれば全角
+  // カタカナ形式をチェックする。空文字 / undefined / 空白のみは「未入力」
+  // 扱いで素通し (buildParticipationFields 側で null)。既存提出 (nameKana を
+  // 送らない経路) を壊さないため slackEmail と同じ「あれば検証」方式にする。
+  if (
+    typeof body.nameKana === "string" &&
+    body.nameKana.trim() !== "" &&
+    !NAME_KANA_RE.test(body.nameKana.trim())
+  ) {
+    return { ok: false, error: "invalid nameKana format" };
   }
   if (
     body.grade !== undefined &&
@@ -182,6 +200,8 @@ export function buildParticipationFields(
     eventId,
     // validateSubmission 通過後に呼ばれるため body.name は非空文字列。
     name: (body.name as string).trim(),
+    // 任意入力。trim 後、空/未指定は null (slack_name 等と同扱い)。
+    nameKana: body.nameKana?.trim() || null,
     // 任意入力。空/未指定は null (student_id 等の任意文字列と同扱い)
     slackName: body.slackName?.trim() || null,
     // 名簿 Slack 連携強化 PR1: 任意入力。空/未指定は null。
