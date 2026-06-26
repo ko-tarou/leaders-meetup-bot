@@ -18,6 +18,10 @@ import { colors } from "../styles/tokens";
 
 type Opt<T extends string> = { value: T; label: string };
 
+// フリガナ許可文字: 全角カタカナ・長音符・全角/半角スペース (姓名区切り用)。
+// BE の validateSubmission (src/domain/participation/submission.ts) と揃える。
+const NAME_KANA_RE = /^[ァ-ヶー　 ]+$/;
+
 const GRADE_OPTS: Opt<ParticipationGrade>[] = [
   { value: "1", label: "1年" },
   { value: "2", label: "2年" },
@@ -61,6 +65,8 @@ export function ParticipationFormPage() {
   // 苗字/名前を分割入力。送信時に半角スペース結合で既存 `name` カラムに詰める。
   const [familyName, setFamilyName] = useState("");
   const [givenName, setGivenName] = useState("");
+  // フリガナ (全角カタカナ)。名簿の name_kana へ転記不要にするため収集する。
+  const [nameKana, setNameKana] = useState("");
   const [slackName, setSlackName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [department, setDepartment] = useState("");
@@ -136,14 +142,20 @@ export function ParticipationFormPage() {
     e.preventDefault();
     const trimmedFamilyName = familyName.trim();
     const trimmedGivenName = givenName.trim();
+    const trimmedNameKana = nameKana.trim();
     if (
       !trimmedFamilyName ||
       !trimmedGivenName ||
+      !trimmedNameKana ||
       !slackName.trim() ||
       !studentId.trim() ||
       !department.trim()
     ) {
-      setError("姓・名・Slack 表示名・学籍番号・学科は必須です");
+      setError("姓・名・フリガナ・Slack 表示名・学籍番号・学科は必須です");
+      return;
+    }
+    if (!NAME_KANA_RE.test(trimmedNameKana)) {
+      setError("フリガナは全角カタカナで入力してください");
       return;
     }
     if (!grade) return setError("学年を選択してください");
@@ -170,6 +182,7 @@ export function ParticipationFormPage() {
       const res = await api.participation.submit(eventId!, {
         token: token || undefined,
         name,
+        nameKana: trimmedNameKana,
         slackName: slackName.trim(),
         studentId: studentId.trim(),
         department: department.trim(),
@@ -247,6 +260,20 @@ export function ParticipationFormPage() {
           onFamilyNameChange={setFamilyName}
           onGivenNameChange={setGivenName}
         />
+        <Field
+          label="フリガナ *"
+          hint="全角カタカナで入力してください（例: ヤマダ タロウ）"
+        >
+          <input
+            type="text"
+            value={nameKana}
+            onChange={(e) => setNameKana(e.target.value)}
+            required
+            maxLength={100}
+            placeholder="例: ヤマダ タロウ"
+            style={inputStyle}
+          />
+        </Field>
         <Field
           label="Slack 表示名 *"
           hint="Slack に表示されている名前（例: 山田太郎）。ロール自動割当に使用します"
