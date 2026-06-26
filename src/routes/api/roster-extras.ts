@@ -144,6 +144,8 @@ rosterExtrasRouter.get(
       remaining.map((f) => ({
         id: f.id,
         name: f.name,
+        // フリガナを取り込み候補に含め、roster_members.name_kana へ転記不要にする。
+        nameKana: f.nameKana,
         email: f.email,
         slackEmail: f.slackEmail,
         slackName: f.slackName,

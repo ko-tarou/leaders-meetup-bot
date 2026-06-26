@@ -64,6 +64,8 @@ export function RosterImportModal({
         // PR3 (2026-05): 参加届ベースなので Slack 情報も一緒に保存する。
         await api.roster.createMember(eventId, actionId, {
           name: t.name,
+          // フリガナを参加届から引き継ぎ、名簿への手動転記を省く。
+          nameKana: t.nameKana ?? undefined,
           email: t.email,
           slackEmail: t.slackEmail ?? undefined,
           slackName: t.slackName ?? undefined,

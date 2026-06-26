@@ -79,13 +79,14 @@ describe("split-name-input スモーク", () => {
     await user.type(await screen.findByRole("textbox", { name: "姓" }), "  山田  ");
     await user.type(screen.getByRole("textbox", { name: "名" }), "  太郎  ");
     // Field は label/input が分離されているため textbox 全件取得で順に埋める。
-    // 0=姓, 1=名, 2=slackName, 3=studentId, 4=department, 5=email, 6=slackEmail (任意)
+    // 0=姓, 1=名, 2=フリガナ, 3=slackName, 4=studentId, 5=department, 6=email, 7=slackEmail (任意)
     const tb = screen.getAllByRole("textbox");
-    await user.type(tb[2], "yamada");
-    await user.type(tb[3], "1 EP 1 - 1");
-    await user.type(tb[4], "情報");
+    await user.type(tb[2], "ヤマダ タロウ"); // フリガナ (全角カタカナ・必須)
+    await user.type(tb[3], "yamada");
+    await user.type(tb[4], "1 EP 1 - 1");
+    await user.type(tb[5], "情報");
     await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
-    await user.type(tb[5], "test@example.com");
+    await user.type(tb[6], "test@example.com");
     await user.click(screen.getByRole("radio", { name: "イベント運営" }));
     await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
     await waitFor(() => expect(captured.value).not.toBeNull());
@@ -113,14 +114,15 @@ describe("split-name-input スモーク", () => {
     const user = userEvent.setup();
     await user.type(await screen.findByRole("textbox", { name: "姓" }), "山田");
     await user.type(screen.getByRole("textbox", { name: "名" }), "花子");
-    // 0=姓, 1=名, 2=slackName, 3=studentId, 4=department, 5=email, 6=slackEmail
+    // 0=姓, 1=名, 2=フリガナ, 3=slackName, 4=studentId, 5=department, 6=email, 7=slackEmail
     const tb = screen.getAllByRole("textbox");
-    await user.type(tb[2], "hanako");
-    await user.type(tb[3], "1 EP 1 - 2");
-    await user.type(tb[4], "情報");
+    await user.type(tb[2], "ヤマダ ハナコ"); // フリガナ (全角カタカナ・必須)
+    await user.type(tb[3], "hanako");
+    await user.type(tb[4], "1 EP 1 - 2");
+    await user.type(tb[5], "情報");
     await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
-    await user.type(tb[5], "school@example.com");
-    await user.type(tb[6], "  hanako@example.com  ");
+    await user.type(tb[6], "school@example.com");
+    await user.type(tb[7], "  hanako@example.com  ");
     await user.click(screen.getByRole("radio", { name: "イベント運営" }));
     await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
     await waitFor(() => expect(captured.value).not.toBeNull());

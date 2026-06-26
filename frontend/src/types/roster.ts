@@ -38,6 +38,8 @@ export type RosterMemberValue = {
 export type RosterImportCandidate = {
   id: string;
   name: string;
+  /** フリガナ (全角カタカナ)。取り込み時に name_kana へそのまま流し込む。 */
+  nameKana: string | null;
   email: string;
   slackEmail: string | null;
   slackName: string | null;

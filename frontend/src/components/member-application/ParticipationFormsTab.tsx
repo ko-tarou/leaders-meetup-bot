@@ -264,6 +264,7 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
             <thead>
               <tr>
                 <th style={s.th}>氏名</th>
+                <th style={s.th}>フリガナ</th>
                 <th style={s.th}>状態</th>
                 <th style={s.th}>Slack表示名</th>
                 <th style={s.th}>学籍番号</th>
@@ -292,6 +293,7 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
                 return (
                   <tr key={f.id}>
                     <td style={{ ...td, ...s.tdName }}>{display(f.name)}</td>
+                    <td style={td}>{display(f.nameKana)}</td>
                     <td style={td}>
                       <div style={s.cellBadges}>
                         {rejected && (
@@ -387,6 +389,7 @@ export function ParticipationFormsTab({ eventId, action }: Props) {
               .map((r) => DEV_ROLE_LABEL[r] ?? r)
               .filter((r) => r.length > 0);
             const fields: { label: string; value: string }[] = [
+              { label: "フリガナ", value: display(f.nameKana) },
               { label: "Slack表示名", value: display(f.slackName) },
               { label: "学籍番号", value: display(f.studentId) },
               { label: "学科", value: display(f.department) },

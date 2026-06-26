@@ -250,6 +250,9 @@ export const participationForms = sqliteTable(
       onDelete: "set null",
     }),
     name: text("name").notNull(),
+    // フリガナ (全角カタカナ)。名簿 (roster_members.name_kana) への転記を
+    // 省くため追加 (migration 0071)。FE では必須・DB/BE は任意 (nullable)。
+    nameKana: text("name_kana"),
     studentId: text("student_id"),
     // Slack 表示名。Phase2 のロール自動割当用 (nullable・任意入力)
     slackName: text("slack_name"),

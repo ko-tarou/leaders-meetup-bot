@@ -14,13 +14,13 @@ const ACTION_ID = "act-1";
 
 const cands: RosterImportCandidate[] = [
   {
-    id: "pf-1", name: "Alice", email: "alice@example.com",
+    id: "pf-1", name: "Alice", nameKana: "アリス", email: "alice@example.com",
     slackEmail: "alice@slack.example.com",
     slackName: "alice", slackUserId: "U_ALICE",
     submittedAt: "2026-05-10T00:00:00.000Z",
   },
   {
-    id: "pf-2", name: "Bob", email: "bob@example.com",
+    id: "pf-2", name: "Bob", nameKana: null, email: "bob@example.com",
     slackEmail: null, slackName: null, slackUserId: null,
     submittedAt: "2026-05-09T00:00:00.000Z",
   },

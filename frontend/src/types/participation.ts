@@ -24,6 +24,8 @@ export type ParticipationPrefill = {
 export type ParticipationSubmitBody = {
   token?: string;
   name: string;
+  /** フリガナ (全角カタカナ)。FE では必須入力。 */
+  nameKana?: string;
   slackName?: string;
   /**
    * 名簿 Slack 連携強化 PR2: 任意の Slack メアド。
@@ -52,6 +54,8 @@ export type ParticipationForm = {
   eventId: string;
   applicationId: string | null;
   name: string;
+  /** フリガナ (全角カタカナ)。migration 0071 で追加 (nullable)。 */
+  nameKana: string | null;
   slackName: string | null;
   studentId: string | null;
   department: string | null;
