@@ -53,6 +53,8 @@ const form: ParticipationFormLike = {
   name: "参加 太郎",
   email: "p@example.com",
   submittedAt: "2026-05-17T00:00:00.000Z",
+  // 参加届フリガナ欄 (migration 0071)。デフォルトテンプレに {nameKana} 行を追加。
+  nameKana: "サンカ タロウ",
   slackName: "taro",
   studentId: "1EP1-1",
   department: "情報",
@@ -70,13 +72,13 @@ beforeEach(() => {
 describe("デフォルトテンプレ文面 (現状固定)", () => {
   it("DEFAULT_PARTICIPATION_TEMPLATE が現状のまま", () => {
     expect(DEFAULT_PARTICIPATION_TEMPLATE).toBe(
-      "{mentions} 📋 参加届が提出されました\n名前: {name}\nSlack表示名: {slackName}\nメール: {email}\n希望活動: {desiredActivity}",
+      "{mentions} 📋 参加届が提出されました\n名前: {name}\nフリガナ: {nameKana}\nSlack表示名: {slackName}\nメール: {email}\n希望活動: {desiredActivity}",
     );
   });
 
   it("DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE が現状のまま", () => {
     expect(DEFAULT_PARTICIPATION_UNRESOLVED_TEMPLATE).toBe(
-      "{mentions} ⚠️ 参加届の Slack 表示名が見つかりませんでした\n名前: {name}\nSlack表示名: {slackName}\nメール: {email}\n希望活動: {desiredActivity}\n手動でのロール紐付けが必要です（参加届タブ）",
+      "{mentions} ⚠️ 参加届の Slack 表示名が見つかりませんでした\n名前: {name}\nフリガナ: {nameKana}\nSlack表示名: {slackName}\nメール: {email}\n希望活動: {desiredActivity}\n手動でのロール紐付けが必要です（参加届タブ）",
     );
   });
 });
@@ -209,7 +211,7 @@ describe("sendParticipationNotification 文面 (現状固定)", () => {
     // CHARACTERIZATION: デフォルトテンプレに mentions/name/slackName/email/
     // desiredActivity のみ展開。submittedAt は出ない (テンプレに placeholder 無)。
     expect(text).toBe(
-      "<@U1> <@U2> 📋 参加届が提出されました\n名前: 参加 太郎\nSlack表示名: taro\nメール: p@example.com\n希望活動: dev",
+      "<@U1> <@U2> 📋 参加届が提出されました\n名前: 参加 太郎\nフリガナ: サンカ タロウ\nSlack表示名: taro\nメール: p@example.com\n希望活動: dev",
     );
   });
 
@@ -294,7 +296,7 @@ describe("sendParticipationNotification 文面 (現状固定)", () => {
     // CHARACTERIZATION: text は .trim() されるため末尾 "希望活動: " の
     // 行末スペースが除去され "希望活動:" で終わる。
     expect(text).toBe(
-      "📋 参加届が提出されました\n名前: 参加 太郎\nSlack表示名: \nメール: p@example.com\n希望活動:",
+      "📋 参加届が提出されました\n名前: 参加 太郎\nフリガナ: サンカ タロウ\nSlack表示名: \nメール: p@example.com\n希望活動:",
     );
   });
 });
@@ -335,7 +337,7 @@ describe("sendParticipationUnresolvedNotification (現状固定)", () => {
     ];
     expect(channel).toBe("C-U");
     expect(text).toBe(
-      "<@UADMIN> ⚠️ 参加届の Slack 表示名が見つかりませんでした\n名前: 参加 太郎\nSlack表示名: taro\nメール: p@example.com\n希望活動: dev\n手動でのロール紐付けが必要です（参加届タブ）",
+      "<@UADMIN> ⚠️ 参加届の Slack 表示名が見つかりませんでした\n名前: 参加 太郎\nフリガナ: サンカ タロウ\nSlack表示名: taro\nメール: p@example.com\n希望活動: dev\n手動でのロール紐付けが必要です（参加届タブ）",
     );
   });
 

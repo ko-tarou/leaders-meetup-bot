@@ -220,6 +220,9 @@ describe("POST /participation/:eventId バリデーション (現状固定)", ()
     ["grade 不正値", { grade: "5" }, "invalid grade"],
     ["gender 不正値", { gender: "??" }, "invalid gender"],
     ["desiredActivity 不正値", { desiredActivity: "xxx" }, "invalid desiredActivity"],
+    // 参加届フリガナ欄: 全角カタカナ以外 (ひらがな/漢字/半角) は 400。
+    ["nameKana ひらがな", { nameKana: "やまだ" }, "invalid nameKana format"],
+    ["nameKana 漢字混在", { nameKana: "ヤマダ太郎" }, "invalid nameKana format"],
   ];
   for (const [label, over, err] of cases) {
     it(`${label} → 400 { error: '${err}' }`, async () => {
@@ -244,6 +247,19 @@ describe("POST /participation/:eventId バリデーション (現状固定)", ()
     );
     expect(res.status).toBe(201);
   });
+
+  it("nameKana 未指定/空白のみ → 許可 (BE 任意・name_kana は null 保存)", async () => {
+    const ev = await makeEvent();
+    const res = await post(ev.id, validBody({ nameKana: "   " }));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await testDb()
+      .select()
+      .from(participationForms)
+      .where(eq(participationForms.id, id))
+      .get();
+    expect(row?.nameKana).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -255,6 +271,7 @@ describe("POST /participation/:eventId 保存経路 (現状固定 / DB)", () => 
     const res = await post(
       ev.id,
       validBody({
+        nameKana: " ヤマダ タロウ ",
         slackName: "  taro  ",
         studentId: " s1 ",
         department: " 情報 ",
@@ -276,6 +293,7 @@ describe("POST /participation/:eventId 保存経路 (現状固定 / DB)", () => 
       eventId: ev.id,
       applicationId: null,
       name: "参加 太郎",
+      nameKana: "ヤマダ タロウ", // 参加届フリガナ欄: trim 後保存
       slackName: "taro", // trim
       studentId: "s1", // trim
       department: "情報",
