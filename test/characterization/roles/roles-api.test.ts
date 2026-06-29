@@ -251,6 +251,89 @@ describe("GET/POST roles (現状固定)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST event-child-role: イベントごとに「運営」配下の子ロールを作るショートカット
+// ---------------------------------------------------------------------------
+describe("POST event-child-role", () => {
+  it("運営 を親に自動解決して子ロールを作成 (HackIT 想定)", async () => {
+    // HackIT 想定: 自前 role_management action に親「運営」がいる。
+    const ev = await makeEvent({ name: "HackIT 2026" });
+    const action = await makeEventAction(ev.id, {
+      actionType: "role_management",
+      config: JSON.stringify({ workspaceId: "ws_hackit" }),
+    });
+    const unei = await makeSlackRole(action.id, { name: "運営" });
+
+    const res = await reqJson(
+      base(ev.id, action.id) + "/event-child-role",
+      "POST",
+      { name: "HackIT 運営チーム" },
+    );
+    expect(res.status).toBe(201);
+    const row = (await res.json()) as {
+      id: string;
+      name: string;
+      parentRoleId: string | null;
+      eventActionId: string;
+    };
+    expect(row.name).toBe("HackIT 運営チーム");
+    expect(row.parentRoleId).toBe(unei.id);
+    expect(row.eventActionId).toBe(action.id);
+    // DB にも親紐付きで永続化されている。
+    const persisted = await testDb()
+      .select()
+      .from(slackRoles)
+      .where(eq(slackRoles.id, row.id))
+      .get();
+    expect(persisted?.parentRoleId).toBe(unei.id);
+  });
+
+  it("name 省略時はイベント名を子ロール名に使う", async () => {
+    const ev = await makeEvent({ name: "HackIT 2026" });
+    const action = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    await makeSlackRole(action.id, { name: "運営" });
+    const res = await reqJson(
+      base(ev.id, action.id) + "/event-child-role",
+      "POST",
+      {},
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { name: string }).name).toBe("HackIT 2026");
+  });
+
+  it("親 (運営) が存在しない → 404", async () => {
+    const { ev, action } = await setup();
+    const res = await reqJson(
+      base(ev.id, action.id) + "/event-child-role",
+      "POST",
+      { name: "Child" },
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "parent role not found: 運営" });
+  });
+
+  it("parentName 指定で別名の親に紐付けできる", async () => {
+    const ev = await makeEvent({ name: "HackIT 2026" });
+    const action = await makeEventAction(ev.id, {
+      actionType: "role_management",
+    });
+    const parent = await makeSlackRole(action.id, {
+      name: "DevelopersHub運営",
+    });
+    const res = await reqJson(
+      base(ev.id, action.id) + "/event-child-role",
+      "POST",
+      { name: "Child", parentName: "DevelopersHub運営" },
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { parentRoleId: string }).parentRoleId).toBe(
+      parent.id,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Roles PUT (更新 / 循環検出 / 子⊆親)
 // ---------------------------------------------------------------------------
 describe("PUT roles (現状固定)", () => {
