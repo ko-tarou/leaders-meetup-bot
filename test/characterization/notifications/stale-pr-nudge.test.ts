@@ -3,7 +3,7 @@
  *
  * `src/services/stale-pr-nudge.ts` の挙動を固定する:
  *   - pure 関数 (parseStalePrNudgeConfig / isStale / isWithinFireWindow /
- *     jstDayOfWeek / isWeekday / makeDedupKey / buildNudgeText)
+ *     jstDayOfWeek / isWeekday / makeDedupKey / buildDigestText)
  *   - cron 本体 processStalePrNudges (平日窓 + GitHub fetch stub + mapping 解決 +
  *     dedup + fail-soft)
  *
@@ -28,7 +28,7 @@ import {
   jstDayOfWeek,
   isWeekday,
   makeDedupKey,
-  buildNudgeText,
+  buildDigestText,
   buildMention,
 } from "../../../src/services/stale-pr-nudge";
 import {
@@ -261,22 +261,30 @@ describe("buildMention", () => {
   });
 });
 
-describe("buildNudgeText", () => {
-  it("メンションありは先頭に並べて催促 + URL を改行で付ける", () => {
-    expect(
-      buildNudgeText(
-        ["<@U1>", "<https://github.com/foo|@foo>"],
-        "My PR",
-        "http://x/1",
-      ),
-    ).toBe(
-      "<@U1> <https://github.com/foo|@foo> このPRレビューお願いします: My PR\nhttp://x/1",
+describe("buildDigestText (ダイジェスト集約)", () => {
+  it("サマリ行 + PR 1 行ずつ。各行はメンション群を行頭に並べ URL を改行で付ける", () => {
+    const text = buildDigestText(
+      [
+        {
+          mentions: ["<@U1>", "<https://github.com/foo|@foo>"],
+          title: "My PR",
+          url: "http://x/1",
+        },
+        { mentions: ["<@U2>"], title: "Second PR", url: "http://x/2" },
+      ],
+      48,
+    );
+    expect(text).toBe(
+      "📋 レビュー待ちの PR 2 件 (48時間以上更新が止まっています)\n" +
+        "\n" +
+        "• <@U1> <https://github.com/foo|@foo> My PR\nhttp://x/1\n" +
+        "• <@U2> Second PR\nhttp://x/2",
     );
   });
-  it("メンション無し (未割当) は <!channel> (@channel) を先頭に置く", () => {
-    expect(buildNudgeText([], "T", "http://x")).toBe(
-      "<!channel> このPRレビューお願いします: T\nhttp://x",
-    );
+  it("メンション無し (未割当) の行は <!channel> (@channel) を行頭に置く", () => {
+    const text = buildDigestText([{ mentions: [], title: "T", url: "http://x" }], 24);
+    expect(text).toContain("📋 レビュー待ちの PR 1 件 (24時間以上更新が止まっています)");
+    expect(text).toContain("• <!channel> T\nhttp://x");
   });
 });
 
@@ -309,10 +317,47 @@ describe("processStalePrNudges: 対象抽出 / 窓判定", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0].channel).toBe(NUDGE_CHANNEL);
     expect(posts[0].text).toContain("<@U-OCTO>");
-    expect(posts[0].text).toContain("このPRレビューお願いします");
+    expect(posts[0].text).toContain("レビュー待ちの PR 1 件");
     expect(posts[0].text).toContain(
       "https://github.com/ko-tarou/leaders-meetup-bot/pull/42",
     );
+  });
+
+  it("★ダイジェスト: 複数の stale PR を 1 通のまとめメッセージに集約する", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({
+          number: 42,
+          html_url: "https://github.com/ko-tarou/leaders-meetup-bot/pull/42",
+          title: "PR forty-two",
+        }),
+        stalePr({
+          number: 43,
+          html_url: "https://github.com/ko-tarou/leaders-meetup-bot/pull/43",
+          title: "PR forty-three",
+        }),
+        stalePr({
+          number: 44,
+          html_url: "https://github.com/ko-tarou/leaders-meetup-bot/pull/44",
+          title: "PR forty-four",
+        }),
+      ],
+    });
+    await seedAction(cfg());
+
+    const res = await processStalePrNudges(testD1(), env);
+    // nudged は集約した PR 件数。ただし投稿は 1 通だけ (チャンネルを汚さない)。
+    expect(res).toEqual({ nudged: 3 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].text).toContain("レビュー待ちの PR 3 件");
+    expect(posts[0].text).toContain("PR forty-two");
+    expect(posts[0].text).toContain("PR forty-three");
+    expect(posts[0].text).toContain("PR forty-four");
+    // 各 PR の dedupKey は個別に completed 化される (再送防止は PR 単位で維持)。
+    const jobs = await testDb().select().from(scheduledJobs).all();
+    expect(jobs).toHaveLength(3);
+    expect(jobs.every((j) => j.status === "completed")).toBe(true);
   });
 
   it("mapping 未登録レビュアーは GitHub リンク fallback (誤メンションしない)", async () => {
