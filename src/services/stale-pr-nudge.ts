@@ -51,6 +51,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { eventActions, githubUserMappings, scheduledJobs } from "../db/schema";
 import { getSlackClientForChannel } from "./workspace";
 import { getJstNow } from "./time-utils";
+import { autoAssignReviewers } from "./pr-reviewer-assign";
 import {
   divider,
   headerBlock,
@@ -65,6 +66,11 @@ export type StalePrNudgeConfig = {
   nudgeChannelId: string;
   staleHours: number;
   nudgeTime: string; // "HH:MM"
+  // レビュアー自動割当 (任意): 設定時のみ有効。未設定なら従来動作 (担当不在は
+  // <!channel>)。reviewerRoleActionId = 職能ロールを持つ role_management action。
+  reviewerRoleActionId?: string;
+  // "owner/repo" -> 職能名 の明示マップ (ドメイン判定の override・任意)。
+  repoDisciplineMap?: Record<string, string>;
 };
 
 const DEFAULT_STALE_HOURS = 48;
@@ -121,7 +127,30 @@ export function parseStalePrNudgeConfig(
       ? o.nudgeTime
       : DEFAULT_NUDGE_TIME;
 
-  return { githubRepos, nudgeChannelId, staleHours, nudgeTime };
+  const reviewerRoleActionId =
+    typeof o.reviewerRoleActionId === "string" && o.reviewerRoleActionId.trim()
+      ? o.reviewerRoleActionId.trim()
+      : undefined;
+
+  const repoDisciplineMap =
+    o.repoDisciplineMap &&
+    typeof o.repoDisciplineMap === "object" &&
+    !Array.isArray(o.repoDisciplineMap)
+      ? (Object.fromEntries(
+          Object.entries(o.repoDisciplineMap as Record<string, unknown>).filter(
+            ([, v]) => typeof v === "string",
+          ),
+        ) as Record<string, string>)
+      : undefined;
+
+  return {
+    githubRepos,
+    nudgeChannelId,
+    staleHours,
+    nudgeTime,
+    reviewerRoleActionId,
+    repoDisciplineMap,
+  };
 }
 
 /** PR.updated_at が staleHours 以上前なら stale。nowMs は判定基準時刻 (ms)。 */
@@ -285,6 +314,9 @@ export type GHPullRequest = {
   draft?: boolean;
   requested_reviewers?: GHUser[];
   assignees?: GHUser[];
+  // ドメイン判定 (レビュアー自動割当) に使う。GitHub REST pulls list が返す。
+  labels?: { name: string }[];
+  user?: GHUser; // PR 作者 (自分を自分のレビュアーにしないため除外に使う)。
 };
 
 function ghHeaders(env: Env): Record<string, string> {
@@ -503,6 +535,30 @@ async function nudgeOneAction(
         if (!u?.login || seen.has(u.login)) continue;
         seen.add(u.login);
         mentions.push(await resolveMention(env, u.login));
+      }
+
+      // レビュアー未割当 (reviewer も assignee も居ない) の PR は、設定が
+      // あれば PR ドメインから職能ロールのメンバーを最大 3 人まで自動選定し、
+      // その 3 人へ Slack メンションでレビュー依頼を飛ばす (近接補完つき)。
+      // 設定 (reviewerRoleActionId) 無し / 候補ゼロなら従来どおり <!channel>。
+      if (mentions.length === 0 && config.reviewerRoleActionId) {
+        try {
+          const ids = await autoAssignReviewers(env, {
+            roleActionId: config.reviewerRoleActionId,
+            repo,
+            labels: (pr.labels ?? []).map((l) => l.name),
+            authorLogin: pr.user?.login,
+            repoDisciplineMap: config.repoDisciplineMap,
+            limit: 3,
+          });
+          for (const id of ids) mentions.push(`<@${id}>`);
+        } catch (e) {
+          // 自動割当の失敗で催促自体を止めない (fail-soft)。
+          console.warn(
+            `[stale-pr-nudge] auto-assign reviewers failed (action ${actionId}, repo ${repo}):`,
+            e instanceof Error ? e.message : e,
+          );
+        }
       }
       const staleDays = Math.floor(
         (nowMs - Date.parse(pr.updated_at)) / (24 * 3600 * 1000),
