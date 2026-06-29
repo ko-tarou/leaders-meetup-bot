@@ -13,6 +13,7 @@
  *     POST   /orgs/:eventId/actions/:actionId/roles
  *     PUT    /orgs/:eventId/actions/:actionId/roles/:roleId
  *     DELETE /orgs/:eventId/actions/:actionId/roles/:roleId
+ *     POST   /orgs/:eventId/actions/:actionId/event-child-role  (親「運営」自動解決の子ロール作成)
  *
  *   Role members
  *     GET    /orgs/:eventId/actions/:actionId/roles/:roleId/members
@@ -36,6 +37,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
+  events,
   eventActions,
   slackRoles,
   slackRoleMembers,
@@ -257,6 +259,85 @@ rolesRouter.post(
       name: body.name.trim(),
       description: body.description?.trim() || null,
       parentRoleId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.insert(slackRoles).values(row);
+    return c.json(row, 201);
+  },
+);
+
+/**
+ * POST /orgs/:eventId/actions/:actionId/event-child-role
+ *
+ * 「イベントごとに子ロールを作る」ショートカット。
+ *   通常の POST .../roles は parentRoleId を呼び出し側が解決して渡す必要が
+ *   あるが、ここでは action 配下の親ロール「運営」(ルート = parentRoleId NULL)
+ *   を自動で解決し、その子ロールを 1 つ作る。可視性スコープ等の新機構は持たず、
+ *   既存の parent_role_id / event_action スコープをそのまま使う薄い糖衣。
+ *
+ *   body (任意): { name?, description?, parentName? }
+ *     - name        省略時はイベント名を子ロール名に使う。
+ *     - parentName  親ロール名。省略時 '運営'。
+ *
+ *   共有 (sharedFromActionId) のイベントは findRoleManagementAction が共有元へ
+ *   解決するため、子ロールも共有元 action 配下に作られる (親「運営」と同じ場所)。
+ */
+rolesRouter.post(
+  "/orgs/:eventId/actions/:actionId/event-child-role",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const body = await c.req
+      .json<{ name?: string; description?: string; parentName?: string }>()
+      .catch(() => ({}) as { name?: string; description?: string; parentName?: string });
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    // 親「運営」(ルート) を action 配下から解決する。
+    const parentName = body.parentName?.trim() || "運営";
+    const parent = await db
+      .select()
+      .from(slackRoles)
+      .where(
+        and(
+          eq(slackRoles.eventActionId, actionId),
+          eq(slackRoles.name, parentName),
+        ),
+      )
+      .get();
+    if (!parent) {
+      return c.json(
+        { error: `parent role not found: ${parentName}` },
+        404,
+      );
+    }
+
+    // 子ロール名: body.name 優先、無ければイベント名。
+    let name = body.name?.trim();
+    if (!name) {
+      const ev = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, eventId))
+        .get();
+      name = ev?.name?.trim();
+    }
+    if (!name) {
+      return c.json({ error: "name is required" }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const row = {
+      id,
+      eventActionId: actionId,
+      name,
+      description: body.description?.trim() || null,
+      parentRoleId: parent.id,
       createdAt: now,
       updatedAt: now,
     };
