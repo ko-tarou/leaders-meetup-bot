@@ -29,6 +29,7 @@ import {
   isWeekday,
   makeDedupKey,
   buildDigestText,
+  buildDigestBlocks,
   buildMention,
 } from "../../../src/services/stale-pr-nudge";
 import {
@@ -59,17 +60,31 @@ function freezeJst(ymd: string, hm: string) {
   vi.setSystemTime(new Date(`${ymd}T${hm}:00.000+09:00`));
 }
 
-/** fake Slack client。postMessage の (channel, text) を記録する。 */
-function setupSlackSpy(): { posts: Array<{ channel: string; text: string }> } {
-  const posts: Array<{ channel: string; text: string }> = [];
+/**
+ * fake Slack client。postMessage の (channel, text, blocks) と
+ * deleteMessage の (channel, ts) を記録する。delete+repost 検証のため
+ * postMessage は呼び出しごとに一意な ts ("1.0", "2.0", ...) を返す。
+ */
+function setupSlackSpy(): {
+  posts: Array<{ channel: string; text: string; blocks?: unknown[] }>;
+  deletes: Array<{ channel: string; ts: string }>;
+} {
+  const posts: Array<{ channel: string; text: string; blocks?: unknown[] }> = [];
+  const deletes: Array<{ channel: string; ts: string }> = [];
+  let seq = 0;
   const fake = {
-    postMessage: async (channel: string, text: string) => {
-      posts.push({ channel, text });
-      return { ok: true, ts: "1.0" };
+    postMessage: async (channel: string, text: string, blocks?: unknown[]) => {
+      posts.push({ channel, text, blocks });
+      seq += 1;
+      return { ok: true, ts: `${seq}.0` };
+    },
+    deleteMessage: async (channel: string, ts: string) => {
+      deletes.push({ channel, ts });
+      return { ok: true };
     },
   };
   setSlackClientProvider(async () => fake as never);
-  return { posts };
+  return { posts, deletes };
 }
 
 /** GitHub fetch を repo ごとに固定 PR 配列を返す stub に差し替える。 */
@@ -261,30 +276,76 @@ describe("buildMention", () => {
   });
 });
 
-describe("buildDigestText (ダイジェスト集約)", () => {
-  it("サマリ行 + PR 1 行ずつ。各行はメンション群を行頭に並べ URL を改行で付ける", () => {
+describe("buildDigestText (通知フォールバック)", () => {
+  it("サマリ行 + PR 1 行ずつ。メンション群 + 停滞日数 + URL を含む", () => {
     const text = buildDigestText(
       [
         {
           mentions: ["<@U1>", "<https://github.com/foo|@foo>"],
           title: "My PR",
           url: "http://x/1",
+          staleDays: 3,
         },
-        { mentions: ["<@U2>"], title: "Second PR", url: "http://x/2" },
+        { mentions: ["<@U2>"], title: "Second PR", url: "http://x/2", staleDays: 5 },
       ],
       48,
     );
     expect(text).toBe(
-      "📋 レビュー待ちの PR 2 件 (48時間以上更新が止まっています)\n" +
+      "🔍 レビュー待ちの PR 2 件 (48時間以上更新が止まっています)\n" +
         "\n" +
-        "• <@U1> <https://github.com/foo|@foo> My PR\nhttp://x/1\n" +
-        "• <@U2> Second PR\nhttp://x/2",
+        "• <@U1> <https://github.com/foo|@foo> My PR (⏳3日 停滞)\nhttp://x/1\n" +
+        "• <@U2> Second PR (⏳5日 停滞)\nhttp://x/2",
     );
   });
   it("メンション無し (未割当) の行は <!channel> (@channel) を行頭に置く", () => {
-    const text = buildDigestText([{ mentions: [], title: "T", url: "http://x" }], 24);
-    expect(text).toContain("📋 レビュー待ちの PR 1 件 (24時間以上更新が止まっています)");
-    expect(text).toContain("• <!channel> T\nhttp://x");
+    const text = buildDigestText(
+      [{ mentions: [], title: "T", url: "http://x", staleDays: 2 }],
+      24,
+    );
+    expect(text).toContain("🔍 レビュー待ちの PR 1 件 (24時間以上更新が止まっています)");
+    expect(text).toContain("• <!channel> T (⏳2日 停滞)\nhttp://x");
+  });
+});
+
+describe("buildDigestBlocks (見やすいレイアウト)", () => {
+  it("header + divider + 各 PR section + footer。状態/停滞日数/担当が分かる", () => {
+    const blocks = buildDigestBlocks(
+      [
+        { mentions: ["<@U1>"], title: "My PR", url: "http://x/1", staleDays: 3 },
+        { mentions: [], title: "Orphan PR", url: "http://x/2", staleDays: 7 },
+      ],
+      48,
+    ) as Array<Record<string, unknown>>;
+    // 先頭は header、2 つ目は divider
+    expect(blocks[0]).toMatchObject({ type: "header" });
+    expect((blocks[0].text as { text: string }).text).toBe(
+      "🔍 レビュー待ちの PR (2件)",
+    );
+    expect(blocks[1]).toMatchObject({ type: "divider" });
+    // 全体を直列化して中身を検証 (タイトルリンク / 停滞日数 / メンション)。
+    const json = JSON.stringify(blocks);
+    expect(json).toContain("<http://x/1|My PR>");
+    expect(json).toContain("3日 更新なし");
+    expect(json).toContain("<@U1>");
+    // 未割当 PR は <!channel> を担当に出す。
+    expect(json).toContain("<!channel>");
+    expect(json).toContain("7日 更新なし");
+  });
+
+  it("MAX_DIGEST_BLOCK_ITEMS (20) を超える分はフッターに「他 N 件」", () => {
+    const items = Array.from({ length: 23 }, (_, i) => ({
+      mentions: ["<@U1>"],
+      title: `PR ${i}`,
+      url: `http://x/${i}`,
+      staleDays: 3,
+    }));
+    const blocks = buildDigestBlocks(items, 48) as Array<Record<string, unknown>>;
+    const json = JSON.stringify(blocks);
+    // header の件数は総数 (23) を表示。
+    expect(json).toContain("🔍 レビュー待ちの PR (23件)");
+    // 21..23 件目 (3 件) は省略され footer に出る。
+    expect(json).toContain("ほか 3 件は省略");
+    expect(json).not.toContain("PR 22");
   });
 });
 
@@ -358,6 +419,44 @@ describe("processStalePrNudges: 対象抽出 / 窓判定", () => {
     const jobs = await testDb().select().from(scheduledJobs).all();
     expect(jobs).toHaveLength(3);
     expect(jobs.every((j) => j.status === "completed")).toBe(true);
+    // 見やすいレイアウトのため Block Kit も付与して投稿する。
+    expect(posts[0].blocks).toBeDefined();
+    expect(JSON.stringify(posts[0].blocks)).toContain("レビュー待ちの PR (3件)");
+  });
+
+  it("(1) draft (WIP) PR は催促ダイジェストから除外する", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({ number: 50, title: "Draft WIP", draft: true }),
+        stalePr({ number: 51, title: "Ready for review", draft: false }),
+      ],
+    });
+    await seedAction(cfg());
+
+    const res = await processStalePrNudges(testD1(), env);
+    // draft は除外され、ready の 1 件だけが催促される。
+    expect(res).toEqual({ nudged: 1 });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].text).toContain("Ready for review");
+    expect(posts[0].text).not.toContain("Draft WIP");
+    // draft 分の dedupKey 予約も発生しない (scheduledJobs は 1 件のみ)。
+    const jobs = await testDb().select().from(scheduledJobs).all();
+    expect(jobs).toHaveLength(1);
+  });
+
+  it("全 PR が draft → 何も投稿しない", async () => {
+    const { posts } = setupSlackSpy();
+    stubGithub({
+      "ko-tarou/leaders-meetup-bot": [
+        stalePr({ number: 60, draft: true }),
+        stalePr({ number: 61, draft: true }),
+      ],
+    });
+    await seedAction(cfg());
+    const res = await processStalePrNudges(testD1(), env);
+    expect(res).toEqual({ nudged: 0 });
+    expect(posts).toHaveLength(0);
   });
 
   it("mapping 未登録レビュアーは GitHub リンク fallback (誤メンションしない)", async () => {
@@ -491,6 +590,41 @@ describe("processStalePrNudges: 冪等 (dedup)", () => {
     expect(jobs[0].dedupKey).toBe(
       "stale_pr_nudge:ko-tarou/leaders-meetup-bot:42:20260518",
     );
+  });
+});
+
+describe("processStalePrNudges: delete+repost (最新の 1 通だけ残す)", () => {
+  it("(2) 翌日の実行は前回ダイジェストを削除してから新規投稿する", async () => {
+    // ts/deletes を実行間で共有するため setupSlackSpy は 1 回だけ呼ぶ。
+    const { posts, deletes } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    await seedAction(cfg());
+
+    // Day1 (月): 初回投稿。前回 ts が無いので delete は起きない。
+    freezeJst(MON_YMD, "09:00");
+    const day1 = await processStalePrNudges(testD1(), env);
+    expect(day1).toEqual({ nudged: 1 });
+    expect(posts).toHaveLength(1);
+    expect(deletes).toHaveLength(0);
+
+    // Day2 (火): dedupKey の日付が変わり再 stale 判定。前回 ts ("1.0") を
+    // 削除してから新規投稿する = チャンネルには常に最新 1 通だけ。
+    freezeJst("2026-05-19", "09:00");
+    const day2 = await processStalePrNudges(testD1(), env);
+    expect(day2).toEqual({ nudged: 1 });
+    expect(posts).toHaveLength(2);
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]).toEqual({ channel: NUDGE_CHANNEL, ts: "1.0" });
+  });
+
+  it("同日 2 回目 (dedup skip) は前回を消さない (無駄な delete をしない)", async () => {
+    const { posts, deletes } = setupSlackSpy();
+    stubGithub({ "ko-tarou/leaders-meetup-bot": [stalePr()] });
+    await seedAction(cfg());
+    await processStalePrNudges(testD1(), env);
+    await processStalePrNudges(testD1(), env);
+    expect(posts).toHaveLength(1);
+    expect(deletes).toHaveLength(0);
   });
 });
 
