@@ -2,6 +2,13 @@
 // 更新の止まった (stale) PR について、依頼中レビュアーを共有チャンネルへ
 // @メンションで名指し催促する cron サービス。
 //
+// ★ダイジェスト方式 (チャンネル汚染対策):
+//   1 アクション (= 1 nudgeChannel) につき、その実行で見つかった stale PR を
+//   「1 通のまとめメッセージ」に集約して投稿する。以前は stale PR 1 件ごとに
+//   個別メッセージを投稿しており、open PR が多いとチャンネルがレビュー依頼で
+//   溢れてカオスだった。本方式では PR が何件あっても投稿は 1 通に収まる
+//   (各 PR 行に依頼中レビュアーの @メンションを並べるので通知は従来どおり届く)。
+//
 // 背景:
 //   既存の sticky-pr-review-board.ts は「手動で登録した」PR レビュー一覧を
 //   チャンネル最下部に貼り続ける (mention 抑制) 機能。これに対して本サービスは
@@ -35,8 +42,9 @@
 //   }
 //
 // fail-soft:
-//   - 1 repo の取得失敗で他 repo を止めない。
-//   - 1 PR の post 失敗で他 PR を止めない (dedupKey は completed にしない)。
+//   - 1 repo の取得失敗で他 repo を止めない (集約対象から外すだけ)。
+//   - ダイジェスト 1 通の post 失敗時は、その実行で予約した全 dedupKey を failed に
+//     落とし completed にしない (次回 cron で同じ PR 群を再度まとめて催促できる)。
 
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, inArray } from "drizzle-orm";
@@ -181,22 +189,37 @@ export function buildMention(
   return `<https://github.com/${login}|@${login}>`;
 }
 
+/** ダイジェストに載せる stale PR 1 件分。mentions は解決済みメンション群。 */
+export type StalePrItem = {
+  mentions: string[];
+  title: string;
+  url: string;
+};
+
 /**
- * 催促メッセージ本文を組み立てる。
- * - reviewer/assignee が居る場合は解決済みメンション群を先頭に置く
+ * stale PR 群を「1 通のまとめメッセージ (ダイジェスト)」に集約する。
+ *
+ * 以前は PR 1 件ごとに個別メッセージを投稿していたが、open PR が多いと
+ * チャンネルがレビュー依頼で溢れてカオスになるため、1 実行 1 通に集約する。
+ *
+ * - 先頭にサマリ行 (`📋 レビュー待ちの PR N 件 ...`) を置く。
+ * - 各 PR は 1 行 1 件で、依頼中レビュアーの解決済みメンションを行頭に並べる
  *   (`<@SlackID>` は実通知、未 mapping は GitHub リンク表示)。
- * - reviewer も assignee も居ない (未割当) 場合は `<!channel>` (@channel) を
- *   先頭に置き、チャンネル全員へ通知する (FIX 2: 担当不在を放置しない)。
+ * - reviewer も assignee も居ない未割当 PR は `<!channel>` を行頭に置く
+ *   (担当不在を放置しない)。
  *
  * 戻り値は Slack mrkdwn。`<@ID>` / `<!channel>` が実メンションとして描画される。
  */
-export function buildNudgeText(
-  mentions: string[],
-  prTitle: string,
-  prUrl: string,
+export function buildDigestText(
+  items: StalePrItem[],
+  staleHours: number,
 ): string {
-  const who = mentions.length > 0 ? mentions.join(" ") : "<!channel>";
-  return `${who} このPRレビューお願いします: ${prTitle}\n${prUrl}`;
+  const header = `📋 レビュー待ちの PR ${items.length} 件 (${staleHours}時間以上更新が止まっています)`;
+  const lines = items.map((it) => {
+    const who = it.mentions.length > 0 ? it.mentions.join(" ") : "<!channel>";
+    return `• ${who} ${it.title}\n${it.url}`;
+  });
+  return [header, "", ...lines].join("\n");
 }
 
 // === GitHub API (使う field だけ最小限) ===
@@ -370,7 +393,6 @@ async function nudgeOneAction(
   ymdCompact: string,
 ): Promise<number> {
   const nowMs = Date.now();
-  let nudged = 0;
 
   // 催促先チャンネルから workspace を解決して SlackClient を得る
   // (notifyReviewersAssigned と同じ経路)。解決不能なら何もしない。
@@ -382,12 +404,18 @@ async function nudgeOneAction(
     return 0;
   }
 
+  // 全 repo の stale PR を 1 通のダイジェストに集約する。投稿前に各 PR の
+  // dedupKey を予約 (UNIQUE) して同日二重催促を防ぐ。予約済みキーは投稿成否で
+  // 一括に completed / failed へ遷移させる。
+  const items: StalePrItem[] = [];
+  const reservedKeys: string[] = [];
+
   for (const repo of config.githubRepos) {
     let prs: GHPullRequest[];
     try {
       prs = await fetchOpenPRs(env, repo);
     } catch (e) {
-      // 1 repo の取得失敗で他 repo を止めない。
+      // 1 repo の取得失敗で他 repo を止めない (集約対象から外すだけ)。
       console.error(
         `[stale-pr-nudge] fetchOpenPRs failed for ${repo}:`,
         e instanceof Error ? e.message : e,
@@ -403,39 +431,45 @@ async function nudgeOneAction(
       if (!(await reserveDedup(db, dedupKey, actionId, repo, pr.number))) {
         continue;
       }
+      reservedKeys.push(dedupKey);
 
-      try {
-        // requested_reviewers と assignees を「対象者」として束ね、login で
-        // 重複排除する (同一人物が両方に居るケースを 1 メンションに畳む)。
-        // どちらも空なら mentions=[] となり、buildNudgeText が <!channel> へ
-        // フォールバックする (FIX 2: 未割当 PR はチャンネル全体へ通知)。
-        const targets = [
-          ...(pr.requested_reviewers ?? []),
-          ...(pr.assignees ?? []),
-        ];
-        const seen = new Set<string>();
-        const mentions: string[] = [];
-        for (const u of targets) {
-          if (!u?.login || seen.has(u.login)) continue;
-          seen.add(u.login);
-          mentions.push(await resolveMention(env, u.login));
-        }
-        const text = buildNudgeText(mentions, pr.title, pr.html_url);
-        await client.postMessage(config.nudgeChannelId, text);
-        await markCompleted(db, dedupKey);
-        nudged++;
-      } catch (e) {
-        // post 失敗: dedupKey を failed に落とし、completed にはしない
-        // (次回 cron で再挑戦できる)。1 PR の失敗で他 PR を止めない。
-        await markFailed(db, dedupKey, e);
-        console.error(
-          `[stale-pr-nudge] post failed for ${repo}#${pr.number}:`,
-          e instanceof Error ? e.message : e,
-        );
+      // requested_reviewers と assignees を「対象者」として束ね、login で
+      // 重複排除する (同一人物が両方に居るケースを 1 メンションに畳む)。
+      // どちらも空なら mentions=[] となり、buildDigestText が <!channel> へ
+      // フォールバックする (FIX 2: 未割当 PR はチャンネル全体へ通知)。
+      const targets = [
+        ...(pr.requested_reviewers ?? []),
+        ...(pr.assignees ?? []),
+      ];
+      const seen = new Set<string>();
+      const mentions: string[] = [];
+      for (const u of targets) {
+        if (!u?.login || seen.has(u.login)) continue;
+        seen.add(u.login);
+        mentions.push(await resolveMention(env, u.login));
       }
+      items.push({ mentions, title: pr.title, url: pr.html_url });
     }
   }
-  return nudged;
+
+  // 今回新たに催促すべき stale PR が無ければ何も投稿しない。
+  if (items.length === 0) return 0;
+
+  // ダイジェスト 1 通を投稿する。成功なら全予約キーを completed、失敗なら全て
+  // failed に落とし completed にしない (次回 cron で同じ PR 群を再集約・再送可)。
+  const text = buildDigestText(items, config.staleHours);
+  try {
+    await client.postMessage(config.nudgeChannelId, text);
+    for (const key of reservedKeys) await markCompleted(db, key);
+    return items.length;
+  } catch (e) {
+    for (const key of reservedKeys) await markFailed(db, key, e);
+    console.error(
+      `[stale-pr-nudge] digest post failed for action ${actionId} (${items.length} PRs):`,
+      e instanceof Error ? e.message : e,
+    );
+    return 0;
+  }
 }
 
 // === scheduled_jobs dedup helpers (weekly-reminder の 2 段階フロー踏襲) ===
