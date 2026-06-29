@@ -64,6 +64,11 @@ export const eventActions = sqliteTable(
     // アクション固有設定（JSON 文字列）
     config: text("config").notNull().default("{}"),
     enabled: integer("enabled").notNull().default(1),
+    // stale_pr_nudge 専用: 直前に投稿したレビュー依頼ダイジェストの ts / channel。
+    // 「チャンネルに最新の 1 通だけ残す」delete+repost のため、翌日の投稿前に
+    // この ts を削除する（sticky board の *_board_ts と同じ役割）。migration 0072。
+    nudgeLastMessageTs: text("nudge_last_message_ts"),
+    nudgeLastChannelId: text("nudge_last_channel_id"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

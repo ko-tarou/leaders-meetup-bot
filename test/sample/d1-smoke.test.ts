@@ -21,11 +21,11 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は参加届フリガナ欄を追加する 0071_add_name_kana_to_participation_forms。
+    // 末尾は stale-pr-nudge を delete+repost 化する 0072_stale_pr_nudge_last_message。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
     expect(names[names.length - 1]).toBe(
-      "0071_add_name_kana_to_participation_forms",
+      "0072_stale_pr_nudge_last_message",
     );
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();

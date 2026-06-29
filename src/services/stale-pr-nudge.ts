@@ -2,6 +2,13 @@
 // 更新の止まった (stale) PR について、依頼中レビュアーを共有チャンネルへ
 // @メンションで名指し催促する cron サービス。
 //
+// ★ダイジェスト方式 (チャンネル汚染対策):
+//   1 アクション (= 1 nudgeChannel) につき、その実行で見つかった stale PR を
+//   「1 通のまとめメッセージ」に集約して投稿する。以前は stale PR 1 件ごとに
+//   個別メッセージを投稿しており、open PR が多いとチャンネルがレビュー依頼で
+//   溢れてカオスだった。本方式では PR が何件あっても投稿は 1 通に収まる
+//   (各 PR 行に依頼中レビュアーの @メンションを並べるので通知は従来どおり届く)。
+//
 // 背景:
 //   既存の sticky-pr-review-board.ts は「手動で登録した」PR レビュー一覧を
 //   チャンネル最下部に貼り続ける (mention 抑制) 機能。これに対して本サービスは
@@ -35,14 +42,20 @@
 //   }
 //
 // fail-soft:
-//   - 1 repo の取得失敗で他 repo を止めない。
-//   - 1 PR の post 失敗で他 PR を止めない (dedupKey は completed にしない)。
+//   - 1 repo の取得失敗で他 repo を止めない (集約対象から外すだけ)。
+//   - ダイジェスト 1 通の post 失敗時は、その実行で予約した全 dedupKey を failed に
+//     落とし completed にしない (次回 cron で同じ PR 群を再度まとめて催促できる)。
 
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, inArray } from "drizzle-orm";
 import { eventActions, githubUserMappings, scheduledJobs } from "../db/schema";
 import { getSlackClientForChannel } from "./workspace";
 import { getJstNow } from "./time-utils";
+import {
+  divider,
+  headerBlock,
+  mrkdwnSection,
+} from "../domain/slack-blocks/builders";
 import type { Env } from "../types/env";
 
 // === pure config / domain (テスト容易な純粋関数) ===
@@ -181,22 +194,81 @@ export function buildMention(
   return `<https://github.com/${login}|@${login}>`;
 }
 
+/** ダイジェストに載せる stale PR 1 件分。mentions は解決済みメンション群。 */
+export type StalePrItem = {
+  mentions: string[];
+  title: string;
+  url: string;
+  /** updated_at から計算した「更新が止まっている日数」(切り捨て)。 */
+  staleDays: number;
+};
+
+// 1 通の Block Kit に載せる PR 件数の上限。Slack の 50 blocks 制限に余裕を
+// 持たせる (PR 1 件 = section + divider の 2 blocks + header/footer)。超過分は
+// フッターに「他 N 件」と出すに留める (翌日のリマインドで再掲される)。
+const MAX_DIGEST_BLOCK_ITEMS = 20;
+
+/** 担当メンション群を表示文字列にする。未割当は `<!channel>`。 */
+function whoText(mentions: string[]): string {
+  return mentions.length > 0 ? mentions.join(" ") : "<!channel>";
+}
+
 /**
- * 催促メッセージ本文を組み立てる。
- * - reviewer/assignee が居る場合は解決済みメンション群を先頭に置く
- *   (`<@SlackID>` は実通知、未 mapping は GitHub リンク表示)。
- * - reviewer も assignee も居ない (未割当) 場合は `<!channel>` (@channel) を
- *   先頭に置き、チャンネル全員へ通知する (FIX 2: 担当不在を放置しない)。
+ * stale PR 群を「1 通のまとめメッセージ (ダイジェスト)」の通知用フォールバック
+ * テキストに集約する。Block Kit を付けても `text` 引数は通知プレビュー兼
+ * メンション発火用に使われるため、`<@ID>` / `<!channel>` をここに必ず含める。
  *
- * 戻り値は Slack mrkdwn。`<@ID>` / `<!channel>` が実メンションとして描画される。
+ * 以前は PR 1 件ごとに個別メッセージを投稿していたが、open PR が多いと
+ * チャンネルがレビュー依頼で溢れてカオスになるため、1 実行 1 通に集約する。
  */
-export function buildNudgeText(
-  mentions: string[],
-  prTitle: string,
-  prUrl: string,
+export function buildDigestText(
+  items: StalePrItem[],
+  staleHours: number,
 ): string {
-  const who = mentions.length > 0 ? mentions.join(" ") : "<!channel>";
-  return `${who} このPRレビューお願いします: ${prTitle}\n${prUrl}`;
+  const header = `🔍 レビュー待ちの PR ${items.length} 件 (${staleHours}時間以上更新が止まっています)`;
+  const lines = items.map(
+    (it) => `• ${whoText(it.mentions)} ${it.title} (⏳${it.staleDays}日 停滞)\n${it.url}`,
+  );
+  return [header, "", ...lines].join("\n");
+}
+
+/**
+ * stale PR 群を見やすい Block Kit (header / divider / 各 PR section) に集約する。
+ *
+ * レイアウト方針 (冗長にしない):
+ *   - header: `🔍 レビュー待ちの PR (N件)`
+ *   - 各 PR: 1 section に「タイトル(リンク)」+「⏳停滞日数 ・ 👤担当(メンション)」
+ *     の 2 行。PR 間は divider で区切る。
+ *   - 担当メンション (`<@ID>` / 未割当は `<!channel>`) は section にも入れて
+ *     ブロック側でも通知が飛ぶようにする。
+ *   - 表示は MAX_DIGEST_BLOCK_ITEMS 件まで。超過分はフッターに「他 N 件」。
+ */
+export function buildDigestBlocks(
+  items: StalePrItem[],
+  staleHours: number,
+): unknown[] {
+  const shown = items.slice(0, MAX_DIGEST_BLOCK_ITEMS);
+  const overflow = items.length - shown.length;
+
+  const blocks: unknown[] = [
+    headerBlock(`🔍 レビュー待ちの PR (${items.length}件)`),
+    divider(),
+  ];
+  for (const it of shown) {
+    const titleLink = it.url ? `<${it.url}|${it.title}>` : it.title;
+    blocks.push(
+      mrkdwnSection(
+        `🔴 *${titleLink}*\n⏳ ${it.staleDays}日 更新なし ・ 👤 ${whoText(it.mentions)}`,
+      ),
+    );
+    blocks.push(divider());
+  }
+  const footer =
+    overflow > 0
+      ? `_${staleHours}時間以上更新が止まっている open PR。ほか ${overflow} 件は省略 (翌日のリマインドで再掲)_`
+      : `_${staleHours}時間以上更新が止まっている open PR の一覧です_`;
+  blocks.push(mrkdwnSection(footer));
+  return blocks;
 }
 
 // === GitHub API (使う field だけ最小限) ===
@@ -208,6 +280,9 @@ export type GHPullRequest = {
   html_url: string;
   title: string;
   updated_at: string;
+  // draft (WIP) PR は催促対象から除外する。GitHub REST は draft PR にこの
+  // フラグを true で返す。未指定 (古い API レスポンス等) は false 扱い。
+  draft?: boolean;
   requested_reviewers?: GHUser[];
   assignees?: GHUser[];
 };
@@ -370,7 +445,6 @@ async function nudgeOneAction(
   ymdCompact: string,
 ): Promise<number> {
   const nowMs = Date.now();
-  let nudged = 0;
 
   // 催促先チャンネルから workspace を解決して SlackClient を得る
   // (notifyReviewersAssigned と同じ経路)。解決不能なら何もしない。
@@ -382,12 +456,18 @@ async function nudgeOneAction(
     return 0;
   }
 
+  // 全 repo の stale PR を 1 通のダイジェストに集約する。投稿前に各 PR の
+  // dedupKey を予約 (UNIQUE) して同日二重催促を防ぐ。予約済みキーは投稿成否で
+  // 一括に completed / failed へ遷移させる。
+  const items: StalePrItem[] = [];
+  const reservedKeys: string[] = [];
+
   for (const repo of config.githubRepos) {
     let prs: GHPullRequest[];
     try {
       prs = await fetchOpenPRs(env, repo);
     } catch (e) {
-      // 1 repo の取得失敗で他 repo を止めない。
+      // 1 repo の取得失敗で他 repo を止めない (集約対象から外すだけ)。
       console.error(
         `[stale-pr-nudge] fetchOpenPRs failed for ${repo}:`,
         e instanceof Error ? e.message : e,
@@ -396,6 +476,10 @@ async function nudgeOneAction(
     }
 
     for (const pr of prs) {
+      // (1) draft (WIP) PR は催促しない。作者が修正中のものを急かさない。
+      if (pr.draft) continue;
+      // "直近 push で更新中" の PR は updated_at が新しいため staleHours 基準で
+      // 自然に除外される (isStale=false)。draft 除外と合わせて WIP を対象外に。
       if (!isStale(pr.updated_at, config.staleHours, nowMs)) continue;
 
       // dedupKey で同日二重催促を防ぐ (UNIQUE 違反 = 既に催促済み)。
@@ -403,39 +487,74 @@ async function nudgeOneAction(
       if (!(await reserveDedup(db, dedupKey, actionId, repo, pr.number))) {
         continue;
       }
+      reservedKeys.push(dedupKey);
 
-      try {
-        // requested_reviewers と assignees を「対象者」として束ね、login で
-        // 重複排除する (同一人物が両方に居るケースを 1 メンションに畳む)。
-        // どちらも空なら mentions=[] となり、buildNudgeText が <!channel> へ
-        // フォールバックする (FIX 2: 未割当 PR はチャンネル全体へ通知)。
-        const targets = [
-          ...(pr.requested_reviewers ?? []),
-          ...(pr.assignees ?? []),
-        ];
-        const seen = new Set<string>();
-        const mentions: string[] = [];
-        for (const u of targets) {
-          if (!u?.login || seen.has(u.login)) continue;
-          seen.add(u.login);
-          mentions.push(await resolveMention(env, u.login));
-        }
-        const text = buildNudgeText(mentions, pr.title, pr.html_url);
-        await client.postMessage(config.nudgeChannelId, text);
-        await markCompleted(db, dedupKey);
-        nudged++;
-      } catch (e) {
-        // post 失敗: dedupKey を failed に落とし、completed にはしない
-        // (次回 cron で再挑戦できる)。1 PR の失敗で他 PR を止めない。
-        await markFailed(db, dedupKey, e);
-        console.error(
-          `[stale-pr-nudge] post failed for ${repo}#${pr.number}:`,
-          e instanceof Error ? e.message : e,
-        );
+      // requested_reviewers と assignees を「対象者」として束ね、login で
+      // 重複排除する (同一人物が両方に居るケースを 1 メンションに畳む)。
+      // どちらも空なら mentions=[] となり、未割当 PR は <!channel> へ
+      // フォールバックする (FIX 2: 未割当 PR はチャンネル全体へ通知)。
+      const targets = [
+        ...(pr.requested_reviewers ?? []),
+        ...(pr.assignees ?? []),
+      ];
+      const seen = new Set<string>();
+      const mentions: string[] = [];
+      for (const u of targets) {
+        if (!u?.login || seen.has(u.login)) continue;
+        seen.add(u.login);
+        mentions.push(await resolveMention(env, u.login));
       }
+      const staleDays = Math.floor(
+        (nowMs - Date.parse(pr.updated_at)) / (24 * 3600 * 1000),
+      );
+      items.push({
+        mentions,
+        title: pr.title,
+        url: pr.html_url,
+        staleDays,
+      });
     }
   }
-  return nudged;
+
+  // 今回新たに催促すべき stale PR が無ければ何も投稿しない (前回の 1 通は残す)。
+  if (items.length === 0) return 0;
+
+  // (2) delete + repost: チャンネルに「最新の 1 通だけ」を残す。前回投稿の ts を
+  // event_actions に保存しておき、新しいダイジェストを投稿する前に削除する
+  // (sticky-pr-review-board と同じ方式)。これで過去のリマインドが積み上がらない。
+  const prev = await readLastDigest(db, actionId);
+  if (prev?.ts) {
+    try {
+      await client.deleteMessage(prev.channelId ?? config.nudgeChannelId, prev.ts);
+    } catch (e) {
+      // 既に削除済み・権限失効等でも続行 (fail-soft)。新規投稿を止めない。
+      console.warn(
+        `[stale-pr-nudge] previous digest delete soft-fail (action ${actionId}):`,
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
+
+  // ダイジェスト 1 通を投稿する。成功なら全予約キーを completed + 新 ts を保存、
+  // 失敗なら全て failed に落とし completed にしない (次回 cron で再集約・再送可)。
+  const text = buildDigestText(items, config.staleHours);
+  const blocks = buildDigestBlocks(items, config.staleHours);
+  try {
+    const res = await client.postMessage(config.nudgeChannelId, text, blocks);
+    if (!res.ok || typeof res.ts !== "string") {
+      throw new Error(`postMessage not ok: ${JSON.stringify(res)}`);
+    }
+    for (const key of reservedKeys) await markCompleted(db, key);
+    await writeLastDigest(db, actionId, res.ts, config.nudgeChannelId);
+    return items.length;
+  } catch (e) {
+    for (const key of reservedKeys) await markFailed(db, key, e);
+    console.error(
+      `[stale-pr-nudge] digest post failed for action ${actionId} (${items.length} PRs):`,
+      e instanceof Error ? e.message : e,
+    );
+    return 0;
+  }
 }
 
 // === scheduled_jobs dedup helpers (weekly-reminder の 2 段階フロー踏襲) ===
@@ -512,4 +631,36 @@ async function markFailed(
       failedAt: new Date().toISOString(),
     })
     .where(eq(scheduledJobs.dedupKey, dedupKey));
+}
+
+// === delete + repost helpers (前回ダイジェストの ts を event_actions に保存) ===
+
+/**
+ * 直前に投稿したダイジェストの ts / channel を読む。未投稿なら null。
+ * migration 0072 で追加した nudge_last_message_ts / nudge_last_channel_id を使う。
+ */
+async function readLastDigest(
+  db: D1Database,
+  actionId: string,
+): Promise<{ ts: string; channelId: string | null } | null> {
+  const row = await drizzle(db)
+    .select()
+    .from(eventActions)
+    .where(eq(eventActions.id, actionId))
+    .get();
+  if (!row?.nudgeLastMessageTs) return null;
+  return { ts: row.nudgeLastMessageTs, channelId: row.nudgeLastChannelId };
+}
+
+/** 新しく投稿したダイジェストの ts / channel を保存する (翌日の削除に使う)。 */
+async function writeLastDigest(
+  db: D1Database,
+  actionId: string,
+  ts: string,
+  channelId: string,
+): Promise<void> {
+  await drizzle(db)
+    .update(eventActions)
+    .set({ nudgeLastMessageTs: ts, nudgeLastChannelId: channelId })
+    .where(eq(eventActions.id, actionId));
 }
