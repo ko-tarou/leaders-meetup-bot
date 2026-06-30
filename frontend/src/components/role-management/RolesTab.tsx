@@ -46,9 +46,16 @@ function parseConfig(raw: string): Config {
 
 type ExpandedView = "members" | "channels" | null;
 
-// フラットな roles 配列を「ルート → その子」の表示順に並べ替える。
-// 2 階層想定。parentRoleId が一覧内に存在しない場合もルート扱いにして
-// 取りこぼしを防ぐ。各要素に表示用の depth を付与する。
+// 表示する最大の深さ (0-indexed)。判断27: ロールツリーは最大 3 層
+// (運営 → 開発チーム/各イベント運営 → その子) まで描画し、4 層目以降は
+// 表示しない。無限再帰だと階層が無制限に増えて管理が複雑化するため
+// 意図的に MAX_DEPTH = 2 で打ち切る。
+const MAX_DEPTH = 2;
+
+// フラットな roles 配列を「ルート → 子 → 孫」の表示順に並べ替える。
+// 最大 3 層 (depth 0/1/2)。parentRoleId が一覧内に存在しない場合もルート
+// 扱いにして取りこぼしを防ぐ。visited で循環に耐性を持たせ、MAX_DEPTH を
+// 超える子孫は描画しない (上限 3 層)。各要素に表示用の depth を付与する。
 function toTreeOrder(
   roles: SlackRole[],
 ): Array<{ role: SlackRole; depth: number }> {
@@ -62,12 +69,15 @@ function toTreeOrder(
   const childrenOf = (pid: string) =>
     byCreated.filter((r) => r.parentRoleId === pid);
   const out: Array<{ role: SlackRole; depth: number }> = [];
-  for (const root of roots) {
-    out.push({ role: root, depth: 0 });
-    for (const child of childrenOf(root.id)) {
-      out.push({ role: child, depth: 1 });
-    }
-  }
+  const visited = new Set<string>();
+  const walk = (role: SlackRole, depth: number) => {
+    if (visited.has(role.id)) return; // 循環防止
+    visited.add(role.id);
+    out.push({ role, depth });
+    if (depth >= MAX_DEPTH) return; // 上限 3 層で打ち切る
+    for (const child of childrenOf(role.id)) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
   return out;
 }
 
@@ -178,7 +188,13 @@ export function RolesTab({ eventId, action }: Props) {
               key={r.id}
               style={
                 depth > 0
-                  ? { display: "grid", gap: "0.5rem", ...s.childRow }
+                  ? {
+                      display: "grid",
+                      gap: "0.5rem",
+                      ...s.childRow,
+                      // depth に比例してインデント (孫 = depth 2 はより深く)。
+                      marginLeft: `${depth * 1.5}rem`,
+                    }
                   : { display: "grid", gap: "0.5rem" }
               }
             >
