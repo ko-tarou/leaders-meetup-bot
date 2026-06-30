@@ -1206,3 +1206,15 @@ export const scheduledJobs = sqliteTable(
     index("idx_scheduled_jobs_status_next_run").on(t.status, t.nextRunAt),
   ],
 );
+
+// コテージ旅行タイムテーブル (cottage-ios へ配信する単一ドキュメント)。
+// 1 行だけ持つ key-value 風テーブル。id 固定値 'cottage'。
+// data は { trip, days } を JSON 文字列で保持。公開 GET /api/cottage/timetable
+// が読み、admin PUT が上書きする。既存 event_actions と独立 (破壊的変更なし)。
+export const cottageTimetable = sqliteTable("cottage_timetable", {
+  id: text("id").primaryKey(),
+  // { trip: {...}, days: [...] } を JSON シリアライズした文字列。
+  data: text("data").notNull(),
+  // クライアント同期判定用の更新時刻 (ISO 8601 UTC)。
+  updatedAt: text("updated_at").notNull(),
+});
