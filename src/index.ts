@@ -3,6 +3,7 @@ import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
 import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
+import { cottageAdminPage } from "./routes/cottage-admin";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
@@ -29,6 +30,10 @@ const app = new Hono<{ Bindings: Env }>();
 app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
+
+// コテージ タイムテーブル 管理用 簡易編集画面 (curl 不要の GUI)。
+// HTML のみ返す独立ページ。保存はページ内で ADMIN_TOKEN を入力し admin PUT を叩く。
+app.get("/cottage-admin", cottageAdminPage);
 
 // SPA fallback: /api, /slack 以外で Hono にマッチしないパス（例: /events/.../actions）は
 // ASSETS バインディング経由で index.html を返し、React Router にクライアント側で処理させる。
