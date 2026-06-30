@@ -29,6 +29,7 @@ import { sponsorRouter } from "./api/sponsor";
 import { sheetsRouter } from "./api/sheets";
 import { driveRouter } from "./api/drive";
 import { slackReadRouter } from "./api/slack-read";
+import { cottageRouter } from "./api/cottage";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -94,7 +95,10 @@ api.use("/*", async (c, next) => {
     // /app-settings (admin GET/PUT) は bypass しない (保護)。
     sub === "/feedback" ||
     sub === "/feedback/ai-chat" ||
-    sub === "/feedback/status"
+    sub === "/feedback/status" ||
+    // cottage-ios タイムテーブル: 公開 GET のみ bypass (iOS 同期用・認証不要)。
+    // PUT (admin 上書き) は bypass せず adminAuth で保護する。
+    (sub === "/cottage/timetable" && c.req.method === "GET")
   ) {
     return next();
   }
@@ -157,5 +161,8 @@ api.route("/", driveRouter);
 // read-only Slack API (Claude 連携): Slack チャンネルの会話を読むだけの admin API
 // (GET /slack/channels, GET /slack/history)。adminAuth で保護される (read-only / 投稿しない)。
 api.route("/", slackReadRouter);
+// cottage-ios タイムテーブル配信: 公開 GET /cottage/timetable (iOS 同期) +
+// admin PUT /cottage/timetable (上書き)。GET は上の bypass で認証不要。
+api.route("/", cottageRouter);
 
 export { api };
