@@ -3,7 +3,11 @@ import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
 import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
-import { adminListPage, adminEventPage } from "./routes/admin-ui";
+import {
+  adminListPage,
+  adminEventDetailPage,
+  adminEventPage,
+} from "./routes/admin-ui";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
@@ -31,10 +35,14 @@ app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
 
-// 汎用イベント タイムテーブル管理画面 (curl 不要の GUI)。
-// /admin = イベント一覧 + 新規作成、/admin/:eventId = 1 イベント編集。
-// HTML のみ返す独立ページ。保存はページ内で ADMIN_TOKEN を入力し admin API を叩く。
+// DevHub Ops 管理コンソール (curl 不要の GUI)。
+// /admin            = core events 一覧ダッシュボード (アクション/参加届/応募/TT 集計 + 受付開閉 + 新規作成)。
+// /admin/e/:eventId = 1 イベントの管理 (情報編集 / アクション / 参加届 / 共有リンク)。
+// /admin/:eventId   = タイムテーブル編集 (timetable_events・iOS 配信/後方互換)。
+// 3 セグメントの /admin/e/:eventId が 2 セグメントの /admin/:eventId と衝突しないよう
+// より具体的なパスを先に登録する。HTML のみ返し、保存はページ内で ADMIN_TOKEN を入力する。
 app.get("/admin", adminListPage);
+app.get("/admin/e/:eventId", adminEventDetailPage);
 app.get("/admin/:eventId", adminEventPage);
 
 // 旧 cottage 専用画面は汎用 /admin/cottage へ 301 リダイレクト (後方互換)。
