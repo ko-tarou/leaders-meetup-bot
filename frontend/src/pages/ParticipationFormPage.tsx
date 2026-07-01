@@ -160,9 +160,10 @@ export function ParticipationFormPage() {
     }
     if (!grade) return setError("学年を選択してください");
     if (!email.trim()) return setError("メールアドレスを入力してください");
-    // 連絡先メールは Gmail 指定。ドメイン (末尾) が gmail.com 以外は弾く。
-    // 大文字小文字は問わない。サーバ側 (validateSubmission) でも同じ検証を行う。
-    if (email.trim().split("@").pop()?.toLowerCase() !== "gmail.com") {
+    // 連絡先メールは Gmail 指定。形式チェックとドメイン完全一致を 1 本の正規表現で行う
+    // (大文字小文字問わず・"gmail.com" 単体や偽装ドメインも弾く)。サーバ側
+    // (validateSubmission / isGmailAddress) でも同じ検証を行う (最終防御はサーバ)。
+    if (!/^[^\s@]+@gmail\.com$/i.test(email.trim())) {
       return setError("Gmail アドレスを入力してください（@gmail.com のみ利用できます）");
     }
     // 名簿 Slack 連携強化 PR2: slackEmail は任意。入力された場合のみ形式チェック。

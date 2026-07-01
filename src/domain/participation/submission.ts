@@ -93,12 +93,12 @@ export const GMAIL_REQUIRED_ERROR =
   "Gmail アドレスを入力してください（@gmail.com のみ利用できます）";
 
 /**
- * メールアドレスのドメイン (末尾) が gmail.com か判定する (大文字小文字問わず)。
- * email format 検証を通過している前提 (@ は 1 個)。前後空白は無視する。
+ * メールアドレスが Gmail (@gmail.com) か判定する (大文字小文字問わず)。
+ * 形式チェックとドメイン完全一致を 1 本の正規表現で行い、前提に依存せず
+ * 自己完結させる (前後空白は無視・ローカル部/ドメイン偽装も弾く)。
  */
 export function isGmailAddress(email: string): boolean {
-  const domain = email.trim().split("@").pop();
-  return domain !== undefined && domain.toLowerCase() === "gmail.com";
+  return /^[^\s@]+@gmail\.com$/i.test(email.trim());
 }
 
 /**
