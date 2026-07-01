@@ -2,54 +2,29 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { cottageTimetable } from "../../db/schema";
+import { timetableEvents } from "../../db/schema";
+import { daysFromRow, type TimetableDay } from "./events-timetable";
 
 /**
- * コテージ旅行タイムテーブル API (cottage-ios へ配信)。
+ * コテージ タイムテーブル API (後方互換レイヤ)。
  *
- * - GET /cottage/timetable: 公開 (認証不要)。iOS アプリが同期する。
- *   admin-auth ミドルウェアで GET のみ bypass 登録済み。
- * - PUT /cottage/timetable: admin (x-admin-token)。タイムテーブルを上書きする。
+ * 汎用 timetable_events (id='cottage') を読み書きし、旧 iOS 契約
+ * ({ event, updatedAt, trip:{title,startDate,endDate}, days }) をそのまま返す。
+ * iOS アプリは GET /api/cottage/timetable を無改修で使い続けられる。
  *
- * 保存先: D1 cottage_timetable テーブルの単一行 (id='cottage')。
- *   data 列に { trip, days } を JSON 文字列で保持する。
+ * - GET /cottage/timetable: 公開 (admin-auth は GET のみ bypass)。
+ * - PUT /cottage/timetable: admin。旧 { trip, days } body を受け、trip をメタ列へ、
+ *   days を data ({days}) へ保存する。
  */
 export const cottageRouter = new Hono<{ Bindings: Env }>();
 
-const ROW_ID = "cottage";
+const COTTAGE_ID = "cottage";
 
-type TimetableItem = {
-  id: string;
-  start: string;
-  end: string;
-  title: string;
-  location: string;
-  note: string;
-};
+const isStr = (v: unknown): v is string => typeof v === "string";
 
-type TimetableDay = {
-  day: number;
-  date: string;
-  items: TimetableItem[];
-};
-
-type Trip = {
-  title: string;
-  startDate: string;
-  endDate: string;
-};
-
-type TimetableData = {
-  trip: Trip;
-  days: TimetableDay[];
-};
-
-function isStr(v: unknown): v is string {
-  return typeof v === "string";
-}
-
-/** PUT body を最小限バリデーションし、欠損フィールドは空文字で正規化する。 */
-function parseBody(raw: unknown): { data: TimetableData } | { error: string } {
+function parseBody(raw: unknown):
+  | { name: string; startDate: string; endDate: string; days: TimetableDay[] }
+  | { error: string } {
   if (typeof raw !== "object" || raw === null) return { error: "body must be an object" };
   const b = raw as Record<string, unknown>;
   const trip = b.trip as Record<string, unknown> | undefined;
@@ -66,7 +41,7 @@ function parseBody(raw: unknown): { data: TimetableData } | { error: string } {
       return { error: "day.day (number) and day.date (string) are required" };
     }
     if (!Array.isArray(day.items)) return { error: "day.items must be an array" };
-    const items: TimetableItem[] = [];
+    const items = [];
     for (const it of day.items as unknown[]) {
       if (typeof it !== "object" || it === null) return { error: "each item must be an object" };
       const i = it as Record<string, unknown>;
@@ -84,60 +59,69 @@ function parseBody(raw: unknown): { data: TimetableData } | { error: string } {
     }
     days.push({ day: day.day, date: day.date, items });
   }
-
-  return {
-    data: {
-      trip: { title: trip.title, startDate: trip.startDate, endDate: trip.endDate },
-      days,
-    },
-  };
+  return { name: trip.title, startDate: trip.startDate, endDate: trip.endDate, days };
 }
 
-// 公開 GET: iOS 同期用。updatedAt で差分判定する。
+// 公開 GET: 旧契約のまま返す。
 cottageRouter.get("/cottage/timetable", async (c) => {
   const db = drizzle(c.env.DB);
   const row = await db
     .select()
-    .from(cottageTimetable)
-    .where(eq(cottageTimetable.id, ROW_ID))
+    .from(timetableEvents)
+    .where(eq(timetableEvents.id, COTTAGE_ID))
     .get();
   if (!row) return c.json({ error: "timetable not found" }, 404);
-
-  let data: TimetableData;
-  try {
-    data = JSON.parse(row.data) as TimetableData;
-  } catch {
-    return c.json({ error: "timetable data corrupted" }, 500);
-  }
   return c.json({
     event: "cottage",
     updatedAt: row.updatedAt,
-    trip: data.trip,
-    days: data.days,
+    trip: { title: row.name, startDate: row.startDate, endDate: row.endDate },
+    days: daysFromRow(row.data),
   });
 });
 
-// admin PUT: タイムテーブルを上書き。updatedAt はサーバ側で現在時刻に更新する。
+// admin PUT: 旧 body を受け取り timetable_events へ保存。
 cottageRouter.put("/cottage/timetable", async (c) => {
   const raw = await c.req.json().catch(() => null);
   const parsed = parseBody(raw);
   if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
   const updatedAt = new Date().toISOString();
-  const dataStr = JSON.stringify(parsed.data);
   const db = drizzle(c.env.DB);
-  await db
-    .insert(cottageTimetable)
-    .values({ id: ROW_ID, data: dataStr, updatedAt })
-    .onConflictDoUpdate({
-      target: cottageTimetable.id,
-      set: { data: dataStr, updatedAt },
+  const existing = await db
+    .select({ id: timetableEvents.id })
+    .from(timetableEvents)
+    .where(eq(timetableEvents.id, COTTAGE_ID))
+    .get();
+
+  const data = JSON.stringify({ days: parsed.days });
+  if (existing) {
+    await db
+      .update(timetableEvents)
+      .set({
+        name: parsed.name,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        data,
+        updatedAt,
+      })
+      .where(eq(timetableEvents.id, COTTAGE_ID));
+  } else {
+    await db.insert(timetableEvents).values({
+      id: COTTAGE_ID,
+      name: parsed.name,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      description: "",
+      data,
+      createdAt: updatedAt,
+      updatedAt,
     });
+  }
 
   return c.json({
     event: "cottage",
     updatedAt,
-    trip: parsed.data.trip,
-    days: parsed.data.days,
+    trip: { title: parsed.name, startDate: parsed.startDate, endDate: parsed.endDate },
+    days: parsed.days,
   });
 });
