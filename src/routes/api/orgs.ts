@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 import type { Env } from "../../types/env";
-import { events, eventActions } from "../../db/schema";
+import {
+  events,
+  eventActions,
+  participationForms,
+  applications,
+  timetableEvents,
+} from "../../db/schema";
 import { ensureDefaultActions } from "../../services/event-actions-bootstrap";
 import { DEFAULT_TUTORIAL_TEMPLATE } from "../../services/tutorial";
 import { validateLatePointWeights } from "../../services/kejime-late-gacha";
@@ -20,6 +26,71 @@ orgsRouter.get("/orgs", async (c) => {
     .all();
   rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return c.json(rows);
+});
+
+// --- Admin console dashboard summary ---
+// 管理コンソール (/admin) の一覧用。各 event に「登録アクション数 / 有効アクション数 /
+// 参加届数 / 応募数 / タイムテーブル有無」を付与して 1 リクエストで返す (N+1 回避)。
+// ?status=all で archived も含める (デフォルトは GET /orgs と同じく active のみ)。
+// /orgs/:id より先に登録し、id="summary" 誤マッチを防ぐ。adminAuth 配下 (api.ts)。
+orgsRouter.get("/orgs/summary", async (c) => {
+  const db = drizzle(c.env.DB);
+  const includeAll = c.req.query("status") === "all";
+
+  const eventRows = await db.select().from(events).all();
+  const filtered = includeAll
+    ? eventRows
+    : eventRows.filter((e) => e.status === "active");
+
+  // 小テーブル前提でまとめて取得 → JS 側で eventId 別に集計する。
+  const actionRows = await db
+    .select({ eventId: eventActions.eventId, enabled: eventActions.enabled })
+    .from(eventActions)
+    .all();
+  const formRows = await db
+    .select({ eventId: participationForms.eventId })
+    .from(participationForms)
+    .all();
+  const appRows = await db
+    .select({ eventId: applications.eventId })
+    .from(applications)
+    .all();
+  const ttRows = await db
+    .select({ id: timetableEvents.id })
+    .from(timetableEvents)
+    .all();
+  const ttSet = new Set(ttRows.map((r) => r.id));
+
+  const actionCount = new Map<string, number>();
+  const actionsEnabled = new Map<string, number>();
+  for (const a of actionRows) {
+    actionCount.set(a.eventId, (actionCount.get(a.eventId) ?? 0) + 1);
+    if (a.enabled)
+      actionsEnabled.set(a.eventId, (actionsEnabled.get(a.eventId) ?? 0) + 1);
+  }
+  const formCount = new Map<string, number>();
+  for (const f of formRows)
+    formCount.set(f.eventId, (formCount.get(f.eventId) ?? 0) + 1);
+  const appCount = new Map<string, number>();
+  for (const a of appRows)
+    appCount.set(a.eventId, (appCount.get(a.eventId) ?? 0) + 1);
+
+  const summary = filtered
+    .map((e) => ({
+      id: e.id,
+      type: e.type,
+      name: e.name,
+      status: e.status,
+      createdAt: e.createdAt,
+      actionCount: actionCount.get(e.id) ?? 0,
+      actionsEnabled: actionsEnabled.get(e.id) ?? 0,
+      participationCount: formCount.get(e.id) ?? 0,
+      applicationCount: appCount.get(e.id) ?? 0,
+      hasTimetable: ttSet.has(e.id),
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return c.json({ events: summary });
 });
 
 orgsRouter.get("/orgs/:id", async (c) => {
