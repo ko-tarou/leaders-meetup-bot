@@ -63,14 +63,27 @@ const PRELUDE_JS = String.raw`
   var SPA_KEY = "devhub_ops:admin_token";  // localStorage (React SPA と共有 → deep link で再入力不要)
   var statusEl = document.getElementById("status");
   function setStatus(msg, ok) { if (!statusEl) return; statusEl.textContent = msg; statusEl.style.color = ok ? "#15803d" : "#b91c1c"; }
-  function token() { return document.getElementById("token").value.trim(); }
-  function persistToken(v) { try { sessionStorage.setItem(SS_KEY, v); localStorage.setItem(SPA_KEY, v); } catch (e) {} }
+  function persistToken(v) { if (!v) return; try { sessionStorage.setItem(SS_KEY, v); localStorage.setItem(SPA_KEY, v); } catch (e) {} }
+  // token() は読むたびに現在値を永続化する。password manager の autofill は
+  // 'input' を発火しないことがあり、input 時のみ保存だと storage が空のまま
+  // 別ページ (詳細) へ遷移してトークンを見失う → アクションが出ない不具合になる。
+  // 読み取り時保存にすることで、一覧が出た時点で確実に storage へ載る。
+  function token() {
+    var el0 = document.getElementById("token");
+    var v = el0 ? el0.value.trim() : "";
+    persistToken(v);
+    return v;
+  }
   function initToken() {
     var el0 = document.getElementById("token");
     var saved = "";
     try { saved = sessionStorage.getItem(SS_KEY) || localStorage.getItem(SPA_KEY) || ""; } catch (e) {}
     el0.value = saved;
-    el0.addEventListener("input", function () { persistToken(el0.value.trim()); });
+    var save = function () { persistToken(el0.value.trim()); };
+    // input / change / blur を全て拾う (autofill 差異に強くする)。
+    el0.addEventListener("input", save);
+    el0.addEventListener("change", save);
+    el0.addEventListener("blur", save);
   }
   function authHeaders(json) {
     var h = { "x-admin-token": token() };
@@ -208,7 +221,16 @@ const DETAIL_JS = String.raw`
   function fmtDate(s) { return s ? String(s).slice(0, 16).replace("T", " ") : ""; }
 
   function reloadAll() {
-    if (!token()) { setStatus("管理トークンを入力してください", false); return; }
+    if (!token()) {
+      setStatus("管理トークンを入力してください", false);
+      // 空セクションを黙って出さず、原因を明示する (トークン未入力 = アクション非表示の主因)。
+      var hint = "上の「管理トークン」を入力して「再読み込み」を押してください。";
+      document.getElementById("actions").textContent = "";
+      document.getElementById("actions").appendChild(el("p", { class: "lede" }, [hint]));
+      document.getElementById("forms").textContent = "";
+      document.getElementById("forms").appendChild(el("p", { class: "lede" }, [hint]));
+      return;
+    }
     setStatus("読み込み中...", true);
     loadEvent(); loadActions(); loadForms();
   }
