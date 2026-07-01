@@ -86,7 +86,7 @@ describe("split-name-input スモーク", () => {
     await user.type(tb[4], "1 EP 1 - 1");
     await user.type(tb[5], "情報");
     await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
-    await user.type(tb[6], "test@example.com");
+    await user.type(tb[6], "test@gmail.com"); // 連絡先は Gmail 指定
     await user.click(screen.getByRole("radio", { name: "イベント運営" }));
     await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
     await waitFor(() => expect(captured.value).not.toBeNull());
@@ -121,7 +121,7 @@ describe("split-name-input スモーク", () => {
     await user.type(tb[4], "1 EP 1 - 2");
     await user.type(tb[5], "情報");
     await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
-    await user.type(tb[6], "school@example.com");
+    await user.type(tb[6], "school@gmail.com"); // 連絡先は Gmail 指定
     await user.type(tb[7], "  hanako@example.com  ");
     await user.click(screen.getByRole("radio", { name: "イベント運営" }));
     await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
@@ -129,5 +129,38 @@ describe("split-name-input スモーク", () => {
     expect((captured.value as { slackEmail: string }).slackEmail).toBe(
       "hanako@example.com",
     );
+  });
+
+  it("参加届: 連絡先メールが非 Gmail だとエラーになり送信されない", async () => {
+    // 連絡先メール Gmail 指定の FE ガード。非 gmail (icloud) は POST されず
+    // 「Gmail アドレスを入力してください」エラーが表示される。
+    const captured: { value: unknown } = { value: null };
+    stubFetch(captured);
+    render(
+      <MemoryRouter initialEntries={[`/participation/${EV}`]}>
+        <Routes>
+          <Route
+            path="/participation/:eventId"
+            element={<ParticipationFormPage />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByRole("textbox", { name: "姓" }), "山田");
+    await user.type(screen.getByRole("textbox", { name: "名" }), "太郎");
+    // 0=姓, 1=名, 2=フリガナ, 3=slackName, 4=studentId, 5=department, 6=email, 7=slackEmail
+    const tb = screen.getAllByRole("textbox");
+    await user.type(tb[2], "ヤマダ タロウ");
+    await user.type(tb[3], "yamada");
+    await user.type(tb[4], "1 EP 1 - 1");
+    await user.type(tb[5], "情報");
+    await user.selectOptions(screen.getAllByRole("combobox")[0], "1");
+    await user.type(tb[6], "taro@icloud.com"); // 非 Gmail
+    await user.click(screen.getByRole("radio", { name: "イベント運営" }));
+    await user.click(screen.getByRole("button", { name: /参加届を送信/ }));
+    // Gmail エラーが表示され、POST は発火しない。
+    expect(await screen.findByText(/Gmail アドレスを入力してください/)).toBeInTheDocument();
+    expect(captured.value).toBeNull();
   });
 });

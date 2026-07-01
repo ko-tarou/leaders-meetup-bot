@@ -71,7 +71,8 @@ function lastSlack(): MockSlackClient {
 function validBody(over: Record<string, unknown> = {}) {
   return {
     name: "参加 太郎",
-    email: "p@example.com",
+    // 連絡先メールは Gmail 指定 (validateSubmission の gmail 検証を満たす)。
+    email: "p@gmail.com",
     ...over,
   };
 }
@@ -213,10 +214,20 @@ describe("GET /participation/:eventId/prefill (現状固定 / 漏洩防止)", ()
 // POST /participation/:eventId バリデーション
 // ---------------------------------------------------------------------------
 describe("POST /participation/:eventId バリデーション (現状固定)", () => {
+  // 連絡先メール Gmail 指定 (submission.ts GMAIL_REQUIRED_ERROR) と一致させる。
+  const GMAIL_ERR = "Gmail アドレスを入力してください（@gmail.com のみ利用できます）";
   const cases: Array<[string, Record<string, unknown>, string]> = [
     ["name 空", { name: "  " }, "name is required"],
     ["email 空", { email: "" }, "email is required"],
     ["email 形式不正", { email: "bad" }, "invalid email format"],
+    // 連絡先メールは Gmail 指定: 非 gmail ドメインは 400 で弾く。
+    ["email icloud", { email: "taro@icloud.com" }, GMAIL_ERR],
+    ["email outlook", { email: "taro@outlook.com" }, GMAIL_ERR],
+    ["email 独自ドメイン", { email: "taro@example.co.jp" }, GMAIL_ERR],
+    // gmail のサブドメイン偽装 (末尾一致でなくドメイン完全一致) も 400。
+    ["email gmail サブドメイン", { email: "taro@sub.gmail.com" }, GMAIL_ERR],
+    // ローカル部に gmail.com を含むだけの別ドメインも 400。
+    ["email gmail 偽装", { email: "gmail.com@evil.com" }, GMAIL_ERR],
     ["grade 不正値", { grade: "5" }, "invalid grade"],
     ["gender 不正値", { gender: "??" }, "invalid gender"],
     ["desiredActivity 不正値", { desiredActivity: "xxx" }, "invalid desiredActivity"],
@@ -230,6 +241,20 @@ describe("POST /participation/:eventId バリデーション (現状固定)", ()
       const res = await post(ev.id, validBody(over));
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: err });
+    });
+  }
+
+  // 連絡先メール Gmail 指定: 正常系 (gmail は通る・大文字小文字問わず)。
+  const gmailOk: Array<[string, string]> = [
+    ["小文字 gmail", "taro@gmail.com"],
+    ["大文字 GMAIL", "TARO@GMAIL.COM"],
+    ["前後空白 gmail", "  taro@gmail.com  "],
+  ];
+  for (const [label, email] of gmailOk) {
+    it(`email ${label} → 201 (弾かれない)`, async () => {
+      const ev = await makeEvent();
+      const res = await post(ev.id, validBody({ email }));
+      expect(res.status).toBe(201);
     });
   }
 
