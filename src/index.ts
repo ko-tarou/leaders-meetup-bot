@@ -3,7 +3,7 @@ import type { Env } from "./types/env";
 import { slack } from "./routes/slack";
 import { oauth } from "./routes/oauth";
 import { api } from "./routes/api";
-import { cottageAdminPage } from "./routes/cottage-admin";
+import { adminListPage, adminEventPage } from "./routes/admin-ui";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
 import { processWeeklyReminders } from "./services/weekly-reminder";
@@ -31,9 +31,14 @@ app.route("/slack/oauth", oauth);
 app.route("/slack", slack);
 app.route("/api", api);
 
-// コテージ タイムテーブル 管理用 簡易編集画面 (curl 不要の GUI)。
-// HTML のみ返す独立ページ。保存はページ内で ADMIN_TOKEN を入力し admin PUT を叩く。
-app.get("/cottage-admin", cottageAdminPage);
+// 汎用イベント タイムテーブル管理画面 (curl 不要の GUI)。
+// /admin = イベント一覧 + 新規作成、/admin/:eventId = 1 イベント編集。
+// HTML のみ返す独立ページ。保存はページ内で ADMIN_TOKEN を入力し admin API を叩く。
+app.get("/admin", adminListPage);
+app.get("/admin/:eventId", adminEventPage);
+
+// 旧 cottage 専用画面は汎用 /admin/cottage へ 301 リダイレクト (後方互換)。
+app.get("/cottage-admin", (c) => c.redirect("/admin/cottage", 301));
 
 // SPA fallback: /api, /slack 以外で Hono にマッチしないパス（例: /events/.../actions）は
 // ASSETS バインディング経由で index.html を返し、React Router にクライアント側で処理させる。
