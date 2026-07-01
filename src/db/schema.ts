@@ -1218,3 +1218,19 @@ export const cottageTimetable = sqliteTable("cottage_timetable", {
   // クライアント同期判定用の更新時刻 (ISO 8601 UTC)。
   updatedAt: text("updated_at").notNull(),
 });
+
+// 汎用イベント タイムテーブル (migration 0074)。任意イベントを作成・編集・削除でき、
+// iOS へ GET /api/events/:id/timetable で配信する。既存 `events` (meetup/hackathon の
+// 中核ドメイン) とは別物。`data` は { days: [...] } を JSON 文字列で保持し、メタ
+// (name / 開始終了日 / 説明) は列で持つ。cottage は id='cottage' の 1 行として移行済み。
+export const timetableEvents = sqliteTable("timetable_events", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  startDate: text("start_date").notNull().default(""),
+  endDate: text("end_date").notNull().default(""),
+  description: text("description").notNull().default(""),
+  // { days: [...] } を JSON シリアライズした文字列。
+  data: text("data").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

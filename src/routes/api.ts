@@ -30,6 +30,7 @@ import { sheetsRouter } from "./api/sheets";
 import { driveRouter } from "./api/drive";
 import { slackReadRouter } from "./api/slack-read";
 import { cottageRouter } from "./api/cottage";
+import { eventsTimetableRouter } from "./api/events-timetable";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -98,7 +99,10 @@ api.use("/*", async (c, next) => {
     sub === "/feedback/status" ||
     // cottage-ios タイムテーブル: 公開 GET のみ bypass (iOS 同期用・認証不要)。
     // PUT (admin 上書き) は bypass せず adminAuth で保護する。
-    (sub === "/cottage/timetable" && c.req.method === "GET")
+    (sub === "/cottage/timetable" && c.req.method === "GET") ||
+    // 汎用イベント タイムテーブル: 公開 GET /events/:id/timetable のみ bypass。
+    // 一覧 GET /events や作成/更新/削除は bypass せず adminAuth で保護する。
+    (c.req.method === "GET" && /^\/events\/[^/]+\/timetable$/.test(sub))
   ) {
     return next();
   }
@@ -164,5 +168,7 @@ api.route("/", slackReadRouter);
 // cottage-ios タイムテーブル配信: 公開 GET /cottage/timetable (iOS 同期) +
 // admin PUT /cottage/timetable (上書き)。GET は上の bypass で認証不要。
 api.route("/", cottageRouter);
+// 汎用イベント タイムテーブル: イベント CRUD (admin) + 公開 GET /events/:id/timetable。
+api.route("/", eventsTimetableRouter);
 
 export { api };
