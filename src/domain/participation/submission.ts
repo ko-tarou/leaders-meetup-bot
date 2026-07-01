@@ -86,6 +86,22 @@ export type SubmissionValidation =
   | { ok: false; error: string };
 
 /**
+ * 参加届の連絡先メールが Gmail 指定でない時に返すエラー文言。
+ * FE (ParticipationFormPage) にも同じ文言を出し、サーバ応答もそのまま表示される。
+ */
+export const GMAIL_REQUIRED_ERROR =
+  "Gmail アドレスを入力してください（@gmail.com のみ利用できます）";
+
+/**
+ * メールアドレスのドメイン (末尾) が gmail.com か判定する (大文字小文字問わず)。
+ * email format 検証を通過している前提 (@ は 1 個)。前後空白は無視する。
+ */
+export function isGmailAddress(email: string): boolean {
+  const domain = email.trim().split("@").pop();
+  return domain !== undefined && domain.toLowerCase() === "gmail.com";
+}
+
+/**
  * 提出ボディを検証する（現状 route の 113-143 行と完全等価）。
  *
  * 検証の順序・条件式・エラー文字列を一切変えない。最初に失敗した規則の
@@ -104,6 +120,11 @@ export function validateSubmission(
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) {
     return { ok: false, error: "invalid email format" };
+  }
+  // 参加届の連絡先メールは Gmail 指定。ドメイン (末尾) が gmail.com 以外は弾く。
+  // 大文字小文字は問わない。format 検証済みなので @ は 1 個 → split で domain を取れる。
+  if (!isGmailAddress(body.email)) {
+    return { ok: false, error: GMAIL_REQUIRED_ERROR };
   }
   // 参加届フリガナ欄: nameKana は任意項目 (FE では必須)。値があれば全角
   // カタカナ形式をチェックする。空文字 / undefined / 空白のみは「未入力」
