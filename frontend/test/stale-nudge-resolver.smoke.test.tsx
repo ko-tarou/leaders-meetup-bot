@@ -30,7 +30,7 @@ function action(over: Partial<EventAction>): EventAction {
 }
 
 const VALID_PR_REVIEW_CONFIG = JSON.stringify({
-  githubRepos: ["DvelopersHub/hackit-web"],
+  githubRepos: ["KIT-DevelopersHub/hackit-web"],
   nudgeChannelId: "C0AS3LZ12A0",
   staleHours: 48,
   nudgeTime: "09:00",
@@ -39,7 +39,7 @@ const VALID_PR_REVIEW_CONFIG = JSON.stringify({
 // 旧 stale_pr_nudge の畳み込み後 no-op 形 (channel が null)。
 const LEGACY_NOOP_CONFIG = JSON.stringify({
   schemaVersion: 1,
-  githubRepos: ["DvelopersHub/hackit-ios"],
+  githubRepos: ["KIT-DevelopersHub/hackit-ios"],
   nudgeChannelId: null,
   staleHours: 48,
   nudgeTime: "09:00",
