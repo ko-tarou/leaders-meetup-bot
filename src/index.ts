@@ -7,6 +7,7 @@ import {
   adminListPage,
   adminEventDetailPage,
   adminEventPage,
+  adminCottageContentPage,
 } from "./routes/admin-ui";
 import { processScheduledJobs } from "./services/scheduler";
 import { processAutoCycles } from "./services/auto-cycle";
@@ -43,6 +44,9 @@ app.route("/api", api);
 // より具体的なパスを先に登録する。HTML のみ返し、保存はページ内で ADMIN_TOKEN を入力する。
 app.get("/admin", adminListPage);
 app.get("/admin/e/:eventId", adminEventDetailPage);
+// コテージ表示コンテンツ編集 (cottage_content・iOS 配信)。3 セグメントなので
+// 2 セグメントの /admin/:eventId とは衝突しないが、具体パスを先に登録する。
+app.get("/admin/cottage/content", adminCottageContentPage);
 app.get("/admin/:eventId", adminEventPage);
 
 // 旧 cottage 専用画面は汎用 /admin/cottage へ 301 リダイレクト (後方互換)。

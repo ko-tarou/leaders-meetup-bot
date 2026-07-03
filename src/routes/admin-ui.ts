@@ -551,6 +551,284 @@ const EDITOR_JS = String.raw`
 })();
 `;
 
+// ---- コテージ表示コンテンツ編集ページ (cottage_content / iOS 配信) ----
+// 8 セクション (旅行概要 / 催し / レシピ / 持ち物 / 班 / 集金 / 版一覧 / 会場マップ)
+// を 1 ドキュメントとして編集し、PUT /api/cottage/content で丸ごと保存する。
+// 文字列配列 (メモ・材料・手順・コツ・メンバー等) は 1 行 1 項目の textarea で編集。
+const COTTAGE_CONTENT_JS = String.raw`
+(function () {
+  initToken();
+  var api = location.origin + "/api/cottage/content";
+  var content = null;
+  var updatedEl = document.getElementById("updated");
+
+  // 1 行 1 項目の textarea (文字列配列 <-> 複数行)。
+  function ta(value, onchange) {
+    var n = el("textarea", { rows: String(Math.max(2, (value || []).length + 1)) });
+    n.value = (value || []).join("\n");
+    n.addEventListener("input", function () {
+      onchange(n.value.split("\n").map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; }));
+    });
+    return n;
+  }
+  function numInput(value, onchange, ph) {
+    var i = input(value == null ? "" : String(value), function (v) {
+      onchange(v.trim() === "" ? null : (parseInt(v, 10) || 0));
+    }, ph);
+    i.setAttribute("inputmode", "numeric");
+    return i;
+  }
+  function delBtn(onclick) {
+    var b = el("button", { class: "del" }, ["削除"]);
+    b.addEventListener("click", onclick);
+    return b;
+  }
+  function addBtn(label, onclick) {
+    var b = el("button", { class: "add" }, [label]);
+    b.addEventListener("click", onclick);
+    return b;
+  }
+  function card(children) { return el("div", { class: "day" }, children); }
+
+  function renderTrip() {
+    var tr = content.trip;
+    var root = document.getElementById("sec-trip"); root.textContent = "";
+    root.appendChild(el("div", { class: "row" }, [
+      labeled("タイトル", input(tr.title, function (v) { tr.title = v; })),
+      labeled("場所", input(tr.location, function (v) { tr.location = v; })),
+      labeled("開始日", input(tr.startDate, function (v) { tr.startDate = v; }, "YYYY-MM-DD")),
+      labeled("終了日", input(tr.endDate, function (v) { tr.endDate = v; }, "YYYY-MM-DD")),
+      labeled("泊数", numInput(tr.nights, function (v) { tr.nights = v || 0; })),
+      labeled("参加人数", numInput(tr.participantCount, function (v) { tr.participantCount = v || 0; }))
+    ]));
+    root.appendChild(labeled("メモ (1行1項目)", ta(tr.notes, function (v) { tr.notes = v; })));
+  }
+
+  function renderActivities() {
+    var root = document.getElementById("sec-activities"); root.textContent = "";
+    content.activities.forEach(function (a, i) {
+      root.appendChild(card([
+        el("div", { class: "row" }, [
+          labeled("id", input(a.id, function (v) { a.id = v; })),
+          labeled("名前", input(a.name, function (v) { a.name = v; })),
+          labeled("絵文字", input(a.emoji, function (v) { a.emoji = v; })),
+          labeled("場所", input(a.location, function (v) { a.location = v || null; })),
+          delBtn(function () { content.activities.splice(i, 1); renderActivities(); })
+        ]),
+        labeled("概要", input(a.summary, function (v) { a.summary = v; })),
+        labeled("説明", input(a.description, function (v) { a.description = v; })),
+        labeled("持ち物/コツ (1行1項目)", ta(a.tips, function (v) { a.tips = v; }))
+      ]));
+    });
+    root.appendChild(addBtn("＋ 催しを追加", function () {
+      content.activities.push({ id: "act-" + Date.now().toString(36), name: "", emoji: "", summary: "", description: "", location: null, tips: [] });
+      renderActivities();
+    }));
+  }
+
+  function renderRecipes() {
+    var root = document.getElementById("sec-recipes"); root.textContent = "";
+    content.recipes.forEach(function (r, i) {
+      root.appendChild(card([
+        el("div", { class: "row" }, [
+          labeled("id", input(r.id, function (v) { r.id = v; })),
+          labeled("名前", input(r.name, function (v) { r.name = v; })),
+          labeled("絵文字", input(r.emoji, function (v) { r.emoji = v; })),
+          labeled("分類", input(r.category, function (v) { r.category = v; })),
+          labeled("分量", input(r.servings, function (v) { r.servings = v; })),
+          labeled("時間", input(r.time, function (v) { r.time = v; })),
+          delBtn(function () { content.recipes.splice(i, 1); renderRecipes(); })
+        ]),
+        labeled("材料 (1行1項目)", ta(r.ingredients, function (v) { r.ingredients = v; })),
+        labeled("手順 (1行1項目)", ta(r.steps, function (v) { r.steps = v; })),
+        labeled("コツ (1行1項目)", ta(r.tips, function (v) { r.tips = v; }))
+      ]));
+    });
+    root.appendChild(addBtn("＋ レシピを追加", function () {
+      content.recipes.push({ id: "recipe-" + Date.now().toString(36), name: "", emoji: "", category: "", servings: "", time: "", ingredients: [], steps: [], tips: [] });
+      renderRecipes();
+    }));
+  }
+
+  function renderPacking() {
+    var root = document.getElementById("sec-packing"); root.textContent = "";
+    content.packing.forEach(function (p, i) {
+      root.appendChild(el("div", { class: "row" }, [
+        labeled("id", input(p.id, function (v) { p.id = v; })),
+        labeled("項目", input(p.label, function (v) { p.label = v; })),
+        labeled("カテゴリ", input(p.category, function (v) { p.category = v; })),
+        delBtn(function () { content.packing.splice(i, 1); renderPacking(); })
+      ]));
+    });
+    root.appendChild(addBtn("＋ 持ち物を追加", function () {
+      content.packing.push({ id: "p-" + Date.now().toString(36), label: "", category: "" });
+      renderPacking();
+    }));
+  }
+
+  function renderGroups() {
+    var root = document.getElementById("sec-groups"); root.textContent = "";
+    content.groups.forEach(function (g, i) {
+      root.appendChild(card([
+        el("div", { class: "row" }, [
+          labeled("id", input(g.id, function (v) { g.id = v; })),
+          labeled("班名", input(g.name, function (v) { g.name = v; })),
+          labeled("車", input(g.car, function (v) { g.car = v || null; })),
+          labeled("運転手", input(g.driver, function (v) { g.driver = v || null; })),
+          delBtn(function () { content.groups.splice(i, 1); renderGroups(); })
+        ]),
+        labeled("メンバー (1行1名)", ta(g.members, function (v) { g.members = v; }))
+      ]));
+    });
+    root.appendChild(addBtn("＋ 班を追加", function () {
+      content.groups.push({ id: "g-" + Date.now().toString(36), name: "", car: null, driver: null, members: [] });
+      renderGroups();
+    }));
+  }
+
+  function renderCollection() {
+    var root = document.getElementById("sec-collection"); root.textContent = "";
+    root.appendChild(labeled("PayPay 受け取りリンク", input(content.collection.payPayURL, function (v) { content.collection.payPayURL = v; })));
+    content.collection.items.forEach(function (c0, i) {
+      var kindSel = el("select", null, [
+        el("option", { value: "perPerson" }, ["1人あたり固定"]),
+        el("option", { value: "shared" }, ["割り勘"]),
+        el("option", { value: "unknown" }, ["未確定"])
+      ]);
+      kindSel.value = c0.kind;
+      kindSel.addEventListener("change", function () { c0.kind = kindSel.value; });
+      root.appendChild(el("div", { class: "row" }, [
+        labeled("id", input(c0.id, function (v) { c0.id = v; })),
+        labeled("項目", input(c0.label, function (v) { c0.label = v; })),
+        labeled("詳細", input(c0.detail, function (v) { c0.detail = v || null; })),
+        labeled("種別", kindSel),
+        labeled("金額", numInput(c0.amount, function (v) { c0.amount = v || 0; })),
+        labeled("上限(任意)", numInput(c0.amountMax, function (v) { c0.amountMax = v; })),
+        delBtn(function () { content.collection.items.splice(i, 1); renderCollection(); })
+      ]));
+    });
+    root.appendChild(addBtn("＋ 集金項目を追加", function () {
+      content.collection.items.push({ id: "c-" + Date.now().toString(36), label: "", detail: null, kind: "perPerson", amount: 0, amountMax: null });
+      renderCollection();
+    }));
+  }
+
+  function renderVersions() {
+    var root = document.getElementById("sec-versions"); root.textContent = "";
+    content.versions.forEach(function (v0, i) {
+      var cur = el("input", { type: "checkbox" });
+      cur.checked = v0.isCurrent === true;
+      cur.addEventListener("change", function () { v0.isCurrent = cur.checked; });
+      root.appendChild(card([
+        el("div", { class: "row" }, [
+          labeled("id", input(v0.id, function (v) { v0.id = v; })),
+          labeled("版", input(v0.version, function (v) { v0.version = v; })),
+          labeled("日付", input(v0.date, function (v) { v0.date = v; }, "YYYY-MM-DD")),
+          labeled("現行", cur),
+          delBtn(function () { content.versions.splice(i, 1); renderVersions(); })
+        ]),
+        labeled("変更点 (1行1項目)", ta(v0.changes, function (v) { v0.changes = v; }))
+      ]));
+    });
+    root.appendChild(addBtn("＋ 版を追加", function () {
+      content.versions.push({ id: "v-" + Date.now().toString(36), version: "", date: "", changes: [], isCurrent: false });
+      renderVersions();
+    }));
+  }
+
+  function renderVenue() {
+    var root = document.getElementById("sec-venue"); root.textContent = "";
+    root.appendChild(el("div", { class: "row" }, [
+      labeled("中心 緯度", input(content.venue.centerLat, function (v) { content.venue.centerLat = parseFloat(v) || 0; })),
+      labeled("中心 経度", input(content.venue.centerLon, function (v) { content.venue.centerLon = parseFloat(v) || 0; }))
+    ]));
+    content.venue.features.forEach(function (f, i) {
+      var off = el("input", { type: "checkbox" });
+      off.checked = f.offsite === true;
+      off.addEventListener("change", function () { f.offsite = off.checked; });
+      root.appendChild(el("div", { class: "row" }, [
+        labeled("id", input(f.id, function (v) { f.id = v; })),
+        labeled("名称", input(f.name, function (v) { f.name = v; })),
+        labeled("アイコン", input(f.icon, function (v) { f.icon = v; })),
+        labeled("メモ", input(f.note, function (v) { f.note = v || null; })),
+        labeled("緯度", input(f.lat, function (v) { f.lat = parseFloat(v) || 0; })),
+        labeled("経度", input(f.lon, function (v) { f.lon = parseFloat(v) || 0; })),
+        labeled("場外", off),
+        delBtn(function () { content.venue.features.splice(i, 1); renderVenue(); })
+      ]));
+    });
+    root.appendChild(addBtn("＋ 地点を追加", function () {
+      content.venue.features.push({ id: "vf-" + Date.now().toString(36), name: "", icon: "mappin", note: null, lat: content.venue.centerLat, lon: content.venue.centerLon, offsite: false });
+      renderVenue();
+    }));
+  }
+
+  function renderAll() {
+    renderTrip(); renderActivities(); renderRecipes(); renderPacking();
+    renderGroups(); renderCollection(); renderVersions(); renderVenue();
+  }
+
+  function load() {
+    setStatus("読み込み中...", true);
+    jsonFetch(api, { headers: { Accept: "application/json" } })
+      .then(function (res) {
+        if (!res.ok) { setStatus("読み込み失敗 (" + res.status + "): " + (res.body.error || ""), false); return; }
+        content = res.body;
+        updatedEl.textContent = "現在の updatedAt: " + (content.updatedAt || "(なし)");
+        renderAll();
+        setStatus("読み込み完了", true);
+      })
+      .catch(function (e) { setStatus("読み込み失敗: " + e, false); });
+  }
+
+  function save() {
+    if (!token()) { setStatus("管理トークンを入力してください", false); return; }
+    if (!content) { setStatus("先に読み込んでください", false); return; }
+    setStatus("保存中...", true);
+    jsonFetch(api, { method: "PUT", headers: authHeaders(true), body: JSON.stringify(content) })
+      .then(function (res) {
+        if (!res.ok) { setStatus("保存失敗 (" + res.status + "): " + (res.body.error || ""), false); return; }
+        content = res.body;
+        updatedEl.textContent = "現在の updatedAt: " + res.body.updatedAt;
+        setStatus("保存しました。アプリに反映されます。", true);
+      })
+      .catch(function (e) { setStatus("保存失敗: " + e, false); });
+  }
+
+  document.getElementById("reload").addEventListener("click", load);
+  document.getElementById("save").addEventListener("click", save);
+  load();
+})();
+`;
+
+const COTTAGE_CONTENT_HTML = `<!doctype html>
+<html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>コテージ表示コンテンツ編集</title><style>${STYLE}
+  .row .fld textarea { min-width: 260px; }
+  h2 { margin-top: 22px; }
+</style></head>
+<body>
+<p class="lede"><a href="/admin/e/cottage">← このイベントの管理へ</a> ・ <a href="/admin/cottage">タイムテーブル編集</a></p>
+<h1>コテージ表示コンテンツ編集</h1>
+<p class="lede">cottage-ios アプリが表示するタイムテーブル以外の全コンテンツを編集します。保存すると公開 API (GET /api/cottage/content) 経由でアプリに反映されます。保存には管理トークンが必要です。</p>
+<div class="bar">
+  <label class="fld"><span>管理トークン</span><input id="token" type="password" placeholder="ADMIN_TOKEN" /></label>
+  <button id="reload">再読み込み</button>
+  <button id="save" class="primary">保存</button>
+  <span id="status"></span>
+</div>
+<h2>旅行概要</h2><div class="section" id="sec-trip"></div>
+<h2>催し (アクティビティ)</h2><div class="section" id="sec-activities"></div>
+<h2>レシピ (食事)</h2><div class="section" id="sec-recipes"></div>
+<h2>持ち物</h2><div class="section" id="sec-packing"></div>
+<h2>班</h2><div class="section" id="sec-groups"></div>
+<h2>集金</h2><div class="section" id="sec-collection"></div>
+<h2>版一覧</h2><div class="section" id="sec-versions"></div>
+<h2>会場マップ</h2><div class="section" id="sec-venue"></div>
+<p class="updated" id="updated"></p>
+<script>${PRELUDE_JS}${COTTAGE_CONTENT_JS}</script>
+</body></html>`;
+
 const LIST_HTML = `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>イベント管理コンソール</title><style>${STYLE}</style></head>
@@ -627,7 +905,7 @@ const EDITOR_HTML = `<!doctype html>
 <html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>タイムテーブル編集</title><style>${STYLE}</style></head>
 <body>
-<p class="lede"><a id="backlink" href="/admin">← このイベントの管理へ</a></p>
+<p class="lede"><a id="backlink" href="/admin">← このイベントの管理へ</a> ・ <a href="/admin/cottage/content">コテージ表示コンテンツ編集 (cottage のみ)</a></p>
 <h1>タイムテーブル編集: <span id="evid"></span></h1>
 <p class="lede">iOS などへ配信するタイムテーブルを編集します。保存には管理トークンが必要です。</p>
 <div class="bar">
@@ -661,4 +939,8 @@ export function adminEventDetailPage(c: Context<{ Bindings: Env }>) {
 
 export function adminEventPage(c: Context<{ Bindings: Env }>) {
   return c.html(EDITOR_HTML);
+}
+
+export function adminCottageContentPage(c: Context<{ Bindings: Env }>) {
+  return c.html(COTTAGE_CONTENT_HTML);
 }
