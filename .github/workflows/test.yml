@@ -75,6 +75,11 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      # public/ (Workers Assets) は gitignore のため CI では都度ビルドする。
+      # これが無いと wrangler dev が assets.directory 不在で起動できない。
+      - name: Build frontend assets
+        run: npm run build:frontend
+
       - name: Run E2E (Playwright + wrangler dev)
         run: npm run e2e
 
