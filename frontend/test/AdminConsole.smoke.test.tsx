@@ -28,6 +28,22 @@ function detailHtml(): string {
 const ACTIONS = [
   { id: "a1", eventId: EVENT_ID, actionType: "role_management", config: "{}", enabled: 1 },
   { id: "a2", eventId: EVENT_ID, actionType: "member_roster", config: "{}", enabled: 0 },
+  // app_management: config.links がそのまま操作列のボタンになる (SPA 詳細リンクは出ない)。
+  // 同一 origin (先頭 /) 以外の URL は描画しない。
+  {
+    id: "a3",
+    eventId: EVENT_ID,
+    actionType: "app_management",
+    config: JSON.stringify({
+      schemaVersion: 1,
+      links: [
+        { label: "表示コンテンツを編集", url: "/admin/cottage/content" },
+        { label: "タイムテーブルを編集", url: "/admin/cottage" },
+        { label: "外部", url: "https://evil.example.com" },
+      ],
+    }),
+    enabled: 1,
+  },
 ];
 const EVENT = { id: EVENT_ID, type: "meetup", name: "コテージ", status: "active", config: "{}" };
 
@@ -65,8 +81,8 @@ describe("admin console detail page", () => {
     const dom = await loadDetail(true);
     const doc = dom.window.document;
     const rows = doc.querySelectorAll("#actions table tr");
-    // header + 2 アクション行
-    expect(rows.length).toBe(3);
+    // header + 3 アクション行
+    expect(rows.length).toBe(4);
     expect(doc.querySelector("#actions")!.textContent).toContain("ロール管理");
     expect(doc.querySelector("#actions")!.textContent).toContain("名簿");
     expect(doc.getElementById("m-name")!.getAttribute("value") ?? (doc.getElementById("m-name") as HTMLInputElement).value).toBe("コテージ");
@@ -103,7 +119,25 @@ describe("admin console detail page", () => {
     // token() の読み取り時保存で storage に載っている
     expect(w.localStorage.getItem(SPA_KEY)).toBe(TOKEN);
     // アクションも描画される
-    expect(w.document.querySelectorAll("#actions table tr").length).toBe(3);
+    expect(w.document.querySelectorAll("#actions table tr").length).toBe(4);
     w.close();
+  });
+
+  it("app_management は config.links を操作列に描画する (同一 origin のみ)", async () => {
+    const dom = await loadDetail(true);
+    const doc = dom.window.document;
+    const links = Array.from(doc.querySelectorAll("#actions table a")) as HTMLAnchorElement[];
+    const labels = links.map((a) => a.textContent);
+    expect(labels).toContain("表示コンテンツを編集");
+    expect(labels).toContain("タイムテーブルを編集");
+    // 外部 URL の link は描画されない
+    expect(labels).not.toContain("外部");
+    // app_management 行には SPA の「詳細/操作」リンクを出さない
+    const contentLink = links.find((a) => a.textContent === "表示コンテンツを編集")!;
+    expect(contentLink.getAttribute("href")).toBe("/admin/cottage/content");
+    const row = contentLink.closest("tr")!;
+    expect(row.textContent).toContain("アプリ管理");
+    expect(row.textContent).not.toContain("詳細/操作");
+    dom.window.close();
   });
 });

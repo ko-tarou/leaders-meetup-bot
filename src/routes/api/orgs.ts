@@ -232,6 +232,11 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // (event_id, action_type) UNIQUE のため 1 event に最大 1 つ。登録すると PR レビュー一覧の
     // 「📣 リマインド送信」ボタンが出る (FE resolveStaleNudgeTarget が enabled=1 を検出)。
     "stale_pr_nudge",
+    // app_management: イベント連動アプリ (例: cottage-ios) の表示コンテンツ管理。
+    // config.links = [{label, url}] で任意のエディタページへの導線をアクションとして持つ。
+    // cron/Slack 連携なし (管理コンソール上の導線のみ)。他イベントでも links を
+    // 差し替えて使える汎用 type。
+    "app_management",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -330,6 +335,10 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
       staleHours: 48,
       nudgeTime: "09:00",
     }),
+    // app_management: アプリ表示コンテンツ管理。links は空で作成し、
+    // 各イベントのエディタ URL を後から config に足す運用 (cottage は
+    // /admin/cottage/content と /admin/cottage)。
+    app_management: JSON.stringify({ schemaVersion: 1, links: [] }),
   };
   const defaultConfig = DEFAULT_CONFIG[body.actionType] ?? "{}";
 

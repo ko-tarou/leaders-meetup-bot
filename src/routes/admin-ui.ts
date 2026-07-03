@@ -199,9 +199,6 @@ const DETAIL_JS = String.raw`
   initToken();
   var eventId = decodeURIComponent(location.pathname.replace(/^\/admin\/e\//, ""));
   document.getElementById("evid").textContent = eventId;
-  // cottage 専用: 「アプリ管理」セクション (表示コンテンツ/タイムテーブル編集への導線)。
-  // Bot アクションとは性質が違うため、アクション欄には混ぜず独立セクションで出す。
-  if (eventId === "cottage") document.getElementById("app-manage").style.display = "";
   var origin = location.origin;
   var current = null;
   var forms = [];
@@ -212,14 +209,27 @@ const DETAIL_JS = String.raw`
     attendance_check: "出欠確認", role_management: "ロール管理", member_roster: "名簿",
     morning_standup: "朝会", kejime_tracker: "けじめ", whitelist: "ホワイトリスト",
     goal_reminder: "目標リマインド", tutorial: "チュートリアル", sponsor_application: "スポンサー募集",
-    stale_pr_nudge: "PR停滞催促",
+    stale_pr_nudge: "PR停滞催促", app_management: "アプリ管理",
   };
   // orgs POST の VALID_TYPES と一致させる (追加できる種別)。
   var ADD_TYPES = ["schedule_polling", "task_management", "member_welcome", "pr_review_list",
     "member_application", "weekly_reminder", "attendance_check", "role_management", "member_roster",
     "morning_standup", "kejime_tracker", "whitelist", "goal_reminder", "tutorial",
-    "sponsor_application", "stale_pr_nudge"];
+    "sponsor_application", "stale_pr_nudge", "app_management"];
   function actionLabel(x) { return ACTION_LABELS[x] || x; }
+  // app_management: config.links = [{label, url}] を操作列のボタンにする。
+  // SPA に詳細ページを持たない type のため、「詳細/操作」の代わりに links を出す。
+  function configLinks(a) {
+    if (a.actionType !== "app_management") return null;
+    var links = [];
+    try {
+      var parsed = JSON.parse(a.config || "{}");
+      if (Array.isArray(parsed.links)) links = parsed.links;
+    } catch (e) {}
+    return links.filter(function (l) {
+      return l && typeof l.label === "string" && typeof l.url === "string" && /^\//.test(l.url);
+    });
+  }
   function activityLabel(x) { return ({ event: "イベント", dev: "開発", both: "両方" })[x] || (x || ""); }
   function fmtDate(s) { return s ? String(s).slice(0, 16).replace("T", " ") : ""; }
 
@@ -288,13 +298,26 @@ const DETAIL_JS = String.raw`
           acts.forEach(function (a) {
             var toggle = el("button", null, [a.enabled ? "無効化" : "有効化"]);
             toggle.addEventListener("click", function () { setEnabled(a); });
-            var openA = el("a", { href: "/events/" + encodeURIComponent(eventId) + "/actions/" + encodeURIComponent(a.actionType), target: "_blank", class: "btn add" }, ["詳細/操作"]);
             var del = el("button", { class: "del" }, ["削除"]);
             del.addEventListener("click", function () { delAction(a); });
+            // 操作列: app_management は config.links のエディタ導線、他 type は SPA 詳細。
+            var ops = el("td", null, []);
+            var links = configLinks(a);
+            if (links) {
+              links.forEach(function (l) {
+                ops.appendChild(el("a", { href: l.url, class: "btn add" }, [l.label]));
+                ops.appendChild(t(" "));
+              });
+              if (!links.length) ops.appendChild(el("span", { class: "mono" }, ["links 未設定 "]));
+            } else {
+              ops.appendChild(el("a", { href: "/events/" + encodeURIComponent(eventId) + "/actions/" + encodeURIComponent(a.actionType), target: "_blank", class: "btn add" }, ["詳細/操作"]));
+              ops.appendChild(t(" "));
+            }
+            ops.appendChild(toggle); ops.appendChild(t(" ")); ops.appendChild(del);
             table.appendChild(el("tr", null, [
               el("td", null, [el("strong", null, [actionLabel(a.actionType)]), el("span", { class: "mono" }, [" " + a.actionType])]),
               el("td", null, [badge(a.enabled ? "有効" : "無効", a.enabled ? "ok" : "muted")]),
-              el("td", null, [openA, t(" "), toggle, t(" "), del]),
+              ops,
             ]));
           });
           root.appendChild(table);
@@ -881,15 +904,6 @@ const DETAIL_HTML = `<!doctype html>
     <div class="fld"><span>状態</span><div id="m-status" class="ro"></div></div>
     <button id="save-name" class="primary">名前を保存</button>
     <button id="toggle-status">受付終了</button>
-  </div>
-</div>
-
-<div class="section" id="app-manage" style="display:none">
-  <h2>アプリ管理 (コテージ iOS)</h2>
-  <p class="lede">Bot のアクションではなく、cottage-ios アプリに配信する表示内容 (催し/レシピ/持ち物/班/集金/会場マップ/タイムテーブル) の管理です。</p>
-  <div class="row">
-    <a href="/admin/cottage/content" class="btn add">表示コンテンツを編集</a>
-    <a href="/admin/cottage" class="btn add">タイムテーブルを編集</a>
   </div>
 </div>
 
