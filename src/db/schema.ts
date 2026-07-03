@@ -1234,3 +1234,17 @@ export const timetableEvents = sqliteTable("timetable_events", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+// コテージ モバイル表示コンテンツ (migration 0075)。cottage-ios が表示する
+// タイムテーブル以外の全コンテンツ (旅行概要 / 催し / レシピ / 持ち物 / 班 /
+// 集金 / 版一覧 / 会場マップ) を 1 ドキュメント = 1 行で保持する。id 固定値
+// 'cottage'。data 列に全セクションを JSON で保持。公開 GET /api/cottage/content
+// が読み、admin PUT が上書きする。timetable_events と同じ設計方針。
+export const cottageContent = sqliteTable("cottage_content", {
+  id: text("id").primaryKey(),
+  // { trip, activities, recipes, packing, groups, collection, versions, venue }
+  // を JSON シリアライズした文字列。
+  data: text("data").notNull(),
+  // クライアント同期判定用の更新時刻 (ISO 8601 UTC)。
+  updatedAt: text("updated_at").notNull(),
+});
