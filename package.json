@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:fe": "vitest run --config vitest.config.fe.mts"
+    "test:fe": "vitest run --config vitest.config.fe.mts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -27,6 +29,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.6",
     "@cloudflare/workers-types": "latest",
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

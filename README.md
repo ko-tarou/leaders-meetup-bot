@@ -82,6 +82,18 @@ npx wrangler secret put GITHUB_TOKEN
 curl -X POST http://localhost:8787/api/orgs/EVENT_ID/actions/ACTION_ID/stale-pr-nudge/send -H "x-admin-token: ADMIN_TOKEN"
 ```
 
+## E2E テスト (実ブラウザ / Playwright)
+
+管理コンソール (/admin) のユーザー動線を Chromium で踏む E2E。`wrangler dev --local` を
+Playwright が自動起動し、ローカル D1 に migration + seed してから実行する (本番非接触)。
+
+- 初回のみ: `npx playwright install chromium`
+- 実行: `npm run e2e` (UI モード: `npm run e2e:ui`)
+- ADMIN_TOKEN はテスト専用値を `--var` で注入する (playwright.config.ts)。secret 不要。
+- シナリオ: トークン入力 -> イベント一覧 -> 詳細 -> アクション表示 / app_management の
+  リンク設定フォーム (追加・保存・即反映・遷移・バリデーション) / アクションの追加・無効化・削除。
+
+
 ## Slack 読み取り API (Claude 連携 / read-only)
 
 Claude（および任意の認証済みクライアント）が HTTP 経由で Slack チャンネルの会話を**読むだけ**の admin API。投稿・編集・削除は一切しない（`conversations.list` / `conversations.history` / `users.info` のみを叩く read-only）。他の `/api/*` と同じ `x-admin-token`（`ADMIN_TOKEN`）で保護され、トークン無し / 不正は 401 を返す。
