@@ -199,6 +199,9 @@ const DETAIL_JS = String.raw`
   initToken();
   var eventId = decodeURIComponent(location.pathname.replace(/^\/admin\/e\//, ""));
   document.getElementById("evid").textContent = eventId;
+  // cottage 専用: 「アプリ管理」セクション (表示コンテンツ/タイムテーブル編集への導線)。
+  // Bot アクションとは性質が違うため、アクション欄には混ぜず独立セクションで出す。
+  if (eventId === "cottage") document.getElementById("app-manage").style.display = "";
   var origin = location.origin;
   var current = null;
   var forms = [];
@@ -278,17 +281,6 @@ const DETAIL_JS = String.raw`
         var root = document.getElementById("actions"); root.textContent = "";
         if (!res.ok) { root.appendChild(el("p", { class: "lede" }, ["取得失敗: " + (res.body.error || res.status)])); return; }
         var acts = res.body || [];
-        // cottage 専用: アプリ表示コンテンツ/タイムテーブル編集ページへの目立つ導線。
-        // これらは event_actions ではなく専用エディタなので、ここで明示しないと辿り着けない。
-        if (eventId === "cottage") {
-          root.appendChild(el("div", { class: "card" }, [
-            el("strong", null, ["コテージ アプリの表示内容を編集"]),
-            el("p", { class: "lede" }, ["cottage-ios アプリに配信する内容 (催し/レシピ/持ち物/班/集金/会場マップ/タイムテーブル) はここから編集します。"]),
-            el("a", { href: "/admin/cottage/content", class: "btn add" }, ["表示コンテンツを編集"]),
-            t(" "),
-            el("a", { href: "/admin/cottage", class: "btn add" }, ["タイムテーブルを編集"]),
-          ]));
-        }
         if (!acts.length) { root.appendChild(el("p", { class: "lede" }, ["アクション未登録。下で追加できます。"])); }
         else {
           var table = el("table", { class: "tbl" }, []);
@@ -889,6 +881,15 @@ const DETAIL_HTML = `<!doctype html>
     <div class="fld"><span>状態</span><div id="m-status" class="ro"></div></div>
     <button id="save-name" class="primary">名前を保存</button>
     <button id="toggle-status">受付終了</button>
+  </div>
+</div>
+
+<div class="section" id="app-manage" style="display:none">
+  <h2>アプリ管理 (コテージ iOS)</h2>
+  <p class="lede">Bot のアクションではなく、cottage-ios アプリに配信する表示内容 (催し/レシピ/持ち物/班/集金/会場マップ/タイムテーブル) の管理です。</p>
+  <div class="row">
+    <a href="/admin/cottage/content" class="btn add">表示コンテンツを編集</a>
+    <a href="/admin/cottage" class="btn add">タイムテーブルを編集</a>
   </div>
 </div>
 
