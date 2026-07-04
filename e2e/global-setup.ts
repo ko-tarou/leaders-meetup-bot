@@ -10,8 +10,10 @@ import { join } from "node:path";
  * 本番 D1 には一切触れない (--local のみ)。
  */
 export default function globalSetup() {
+  // stdio は inherit にする: 初回 CI は 70+ migration の適用ログが 1MB を超え、
+  // pipe (デフォルト maxBuffer) だと ENOBUFS で落ちるため。
   const run = (cmd: string) =>
-    execSync(cmd, { stdio: "pipe", cwd: join(__dirname, "..") });
+    execSync(cmd, { stdio: "inherit", cwd: join(__dirname, "..") });
 
   run("npx wrangler d1 migrations apply leaders-meetup-bot --local");
 
