@@ -33,6 +33,8 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   // stale-pr-nudge: 登録すると PR レビュー一覧に「📣 リマインド送信」ボタンが出る。
   // 設定 (監視 repo / 催促チャンネル) は登録後に「設定」タブで埋める。
   "stale_pr_nudge",
+  // app_management: イベント連動アプリの表示コンテンツ管理 (エディタリンク集)。
+  "app_management",
 ];
 
 type Props = {

@@ -157,6 +157,7 @@ export function ActionDetailPage() {
             eventId={eventId}
             actionType={actionType as EventActionType}
             action={action}
+            onChanged={bumpRefresh}
           />
         )}
       {subTab === "channels" && hasChannelsTab(actionType as EventActionType) && (
