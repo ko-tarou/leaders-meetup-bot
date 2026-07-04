@@ -31,7 +31,10 @@ export type EventActionType =
   // 宗教イベント tutorial PR1 (UI は PR2)
   | "tutorial"
   // HackIT スポンサー募集 (公開フォーム + 管理一覧)
-  | "sponsor_application";
+  | "sponsor_application"
+  // イベント連動アプリ (例: cottage-ios) の表示コンテンツ管理。
+  // config.links = [{label, url}] でエディタページへの導線を持つ (BE #352)。
+  | "app_management";
 
 export type EventAction = {
   id: string;

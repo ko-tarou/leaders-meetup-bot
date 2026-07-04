@@ -100,6 +100,12 @@ export const ACTION_META: Record<
     description: "停滞している GitHub の open PR をレビュアー名指しで共有チャンネルに催促します",
     icon: "📣",
   },
+  app_management: {
+    label: "アプリ管理",
+    description:
+      "イベント連動アプリ (コテージ iOS など) に配信する表示コンテンツの編集ページを管理します",
+    icon: "📱",
+  },
 };
 
 // 共通タブ (イベント直下)

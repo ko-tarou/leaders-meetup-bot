@@ -11,18 +11,22 @@ import { MorningStandupMainTab } from "../../components/morning-standup/MorningS
 import { GoalReminderMainTab } from "../../components/goal-reminder/GoalReminderMainTab";
 import { TutorialMainTab } from "../../components/tutorial/TutorialMainTab";
 import { RosterPage } from "../roster/RosterPage";
+import { AppManagementTab } from "../../components/app-management/AppManagementTab";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
 
 // Phase4-3: ActionDetailPage から純抽出。switch 分岐・返り値すべて不変。
+// app_management: リンク集の表示 + GUI 編集 (保存後に onChanged で action を再取得)。
 export function ActionMainContent({
   eventId,
   actionType,
   action,
+  onChanged,
 }: {
   eventId: string;
   actionType: EventActionType;
   action: EventAction;
+  onChanged?: () => void;
 }) {
   switch (actionType) {
     case "task_management":
@@ -67,6 +71,14 @@ export function ActionMainContent({
     case "tutorial":
       return (
         <TutorialMainTab eventId={eventId} actionId={action.id} action={action} />
+      );
+    case "app_management":
+      return (
+        <AppManagementTab
+          eventId={eventId}
+          action={action}
+          onSaved={onChanged ?? (() => {})}
+        />
       );
     default:
       return null;
