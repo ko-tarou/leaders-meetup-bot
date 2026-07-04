@@ -300,7 +300,7 @@ const DETAIL_JS = String.raw`
             toggle.addEventListener("click", function () { setEnabled(a); });
             var del = el("button", { class: "del" }, ["削除"]);
             del.addEventListener("click", function () { delAction(a); });
-            // 操作列: app_management は config.links のエディタ導線、他 type は SPA 詳細。
+            // 操作列: app_management は config.links のエディタ導線 + 設定フォーム、他 type は SPA 詳細。
             var ops = el("td", null, []);
             var links = configLinks(a);
             if (links) {
@@ -309,6 +309,9 @@ const DETAIL_JS = String.raw`
                 ops.appendChild(t(" "));
               });
               if (!links.length) ops.appendChild(el("span", { class: "mono" }, ["links 未設定 "]));
+              var cfgBtn = el("button", null, ["設定"]);
+              cfgBtn.addEventListener("click", function () { openLinksEditor(a); });
+              ops.appendChild(cfgBtn); ops.appendChild(t(" "));
             } else {
               ops.appendChild(el("a", { href: "/events/" + encodeURIComponent(eventId) + "/actions/" + encodeURIComponent(a.actionType), target: "_blank", class: "btn add" }, ["詳細/操作"]));
               ops.appendChild(t(" "));
@@ -325,6 +328,88 @@ const DETAIL_JS = String.raw`
         renderAddSelect(acts);
       })
       .catch(function (e) { setStatus("アクション取得失敗: " + e, false); });
+  }
+  // ---- app_management: リンク設定フォーム (生 JSON を触らせない) ----
+  // 設定ボタン -> アクション欄下のカードで label/URL を行編集 (追加/削除/上下入替)。
+  // 保存で config JSON を組み立てて PUT -> loadActions() で行のボタンに即反映。
+  var editorState = null; // { action, links: [{label,url}] }
+  function openLinksEditor(a) {
+    var links = configLinks(a) || [];
+    editorState = { action: a, links: links.map(function (l) { return { label: l.label, url: l.url }; }) };
+    renderLinksEditor();
+    document.getElementById("am-editor").scrollIntoView({ block: "nearest" });
+  }
+  function closeLinksEditor() {
+    editorState = null;
+    document.getElementById("am-editor").textContent = "";
+  }
+  function renderLinksEditor() {
+    var root = document.getElementById("am-editor");
+    root.textContent = "";
+    if (!editorState) return;
+    var card = el("div", { class: "card", "data-testid": "am-editor-card" }, [
+      el("strong", null, ["アプリ管理のリンク設定"]),
+      el("p", { class: "lede" }, ["操作列に出すボタンを編集します。URL はこのサイト内のパス (/ から始まる) のみ有効です。"]),
+    ]);
+    editorState.links.forEach(function (l, i) {
+      var row = el("div", { class: "row", style: "margin-bottom:6px" }, [
+        labeled("ラベル", input(l.label, function (v) { l.label = v; }, "例: 表示コンテンツを編集")),
+        labeled("URL (パス)", input(l.url, function (v) { l.url = v; }, "/admin/cottage/content")),
+      ]);
+      var up = el("button", null, ["↑"]);
+      up.addEventListener("click", function () {
+        if (i === 0) return;
+        var tmp = editorState.links[i - 1]; editorState.links[i - 1] = l; editorState.links[i] = tmp;
+        renderLinksEditor();
+      });
+      var down = el("button", null, ["↓"]);
+      down.addEventListener("click", function () {
+        if (i >= editorState.links.length - 1) return;
+        var tmp = editorState.links[i + 1]; editorState.links[i + 1] = l; editorState.links[i] = tmp;
+        renderLinksEditor();
+      });
+      var rm = el("button", { class: "del" }, ["削除"]);
+      rm.addEventListener("click", function () { editorState.links.splice(i, 1); renderLinksEditor(); });
+      row.appendChild(up); row.appendChild(down); row.appendChild(rm);
+      card.appendChild(row);
+    });
+    var addBtn = el("button", { class: "add" }, ["＋ リンクを追加"]);
+    addBtn.addEventListener("click", function () { editorState.links.push({ label: "", url: "" }); renderLinksEditor(); });
+    var saveBtn = el("button", { class: "primary" }, ["保存"]);
+    saveBtn.addEventListener("click", saveLinksEditor);
+    var cancelBtn = el("button", null, ["キャンセル"]);
+    cancelBtn.addEventListener("click", closeLinksEditor);
+    card.appendChild(el("div", { class: "row", style: "margin-top:8px" }, [addBtn, saveBtn, cancelBtn]));
+    root.appendChild(card);
+  }
+  function saveLinksEditor() {
+    if (!editorState) return;
+    if (!token()) { setStatus("管理トークンを入力してください", false); return; }
+    var cleaned = [];
+    for (var i = 0; i < editorState.links.length; i++) {
+      var l = editorState.links[i];
+      var label = (l.label || "").trim();
+      var url = (l.url || "").trim();
+      if (!label && !url) continue; // 空行は無視
+      if (!label) { setStatus("リンク " + (i + 1) + ": ラベルを入力してください", false); return; }
+      if (!/^\//.test(url)) { setStatus("リンク " + (i + 1) + ": URL は / から始まるパスにしてください", false); return; }
+      cleaned.push({ label: label, url: url });
+    }
+    // 既存 config の他キーを壊さない (schemaVersion 等はマージ)。
+    var cfg = {};
+    try { cfg = JSON.parse(editorState.action.config || "{}") || {}; } catch (e) { cfg = {}; }
+    cfg.schemaVersion = cfg.schemaVersion || 1;
+    cfg.links = cleaned;
+    jsonFetch(origin + "/api/orgs/" + encodeURIComponent(eventId) + "/actions/" + encodeURIComponent(editorState.action.id), {
+      method: "PUT", headers: authHeaders(true), body: JSON.stringify({ config: JSON.stringify(cfg) }),
+    })
+      .then(function (res) {
+        if (!res.ok) { setStatus("設定保存失敗: " + (res.body.error || res.status), false); return; }
+        setStatus("リンク設定を保存しました", true);
+        closeLinksEditor();
+        loadActions();
+      })
+      .catch(function (e) { setStatus("設定保存失敗: " + e, false); });
   }
   function renderAddSelect(existing) {
     var sel = document.getElementById("add-type"); sel.textContent = "";
@@ -911,6 +996,7 @@ const DETAIL_HTML = `<!doctype html>
   <h2>アクション (この Bot 機能)</h2>
   <p class="lede">有効/無効の切替・詳細操作 (新規タブで SPA を開く) ・追加・削除ができます。</p>
   <div id="actions"></div>
+  <div id="am-editor"></div>
   <div class="row" style="margin-top:8px">
     <label class="fld"><span>アクションを追加</span><select id="add-type"></select></label>
     <button id="add-action" class="add">＋ 追加</button>

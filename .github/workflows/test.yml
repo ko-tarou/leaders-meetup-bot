@@ -55,3 +55,38 @@ jobs:
 
       - name: Run FE smoke tests (vitest + jsdom)
         run: npm run test:fe
+
+  # E2E (実ブラウザ): 管理コンソール /admin のユーザー動線を Chromium で踏む。
+  # Playwright が wrangler dev --local を自動起動し、ローカル D1 に migration +
+  # seed してから実行する。secrets 不要 (ADMIN_TOKEN はテスト専用値を --var 注入)。
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      # public/ (Workers Assets) は gitignore のため CI では都度ビルドする。
+      # これが無いと wrangler dev が assets.directory 不在で起動できない。
+      - name: Build frontend assets
+        run: npm run build:frontend
+
+      - name: Run E2E (Playwright + wrangler dev)
+        run: npm run e2e
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
