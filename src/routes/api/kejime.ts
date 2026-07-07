@@ -222,6 +222,8 @@ kejimeRouter.get(`${BASE}/articles`, async (c: C) => {
     penaltyId: kejimeArticleRequests.penaltyId,
     themeApproved: kejimeArticleRequests.themeApproved,
     pointsToClear: kejimeArticleRequests.pointsToClear,
+    decidedBy: kejimeArticleRequests.decidedBy,
+    decidedAt: kejimeArticleRequests.decidedAt,
     memberDisplayName: kejimeMembers.displayName,
     slackUserId: kejimeMembers.slackUserId,
   }).from(kejimeArticleRequests)
