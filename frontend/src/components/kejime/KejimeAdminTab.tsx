@@ -13,8 +13,21 @@ type Article = { id: string; memberId: string; memberDisplayName: string;
   qiitaUrl: string; bodyLength: number | null; status: string; createdAt: string;
   // イベント単位ペナルティ連携: 対象 penalty / テーマ承認状態 / 消費 pt。
   penaltyId: string | null; themeApproved: number | null; pointsToClear: number | null;
+  // 申請履歴表示用: 誰がいつ決裁したか (未決裁は null)。
+  decidedBy?: string | null; decidedAt?: string | null;
   // LGTM 承認進捗: 集まった LGTM 件数 / 承認に必要な閾値 (既定 3)。
   lgtmCount?: number; lgtmThreshold?: number };
+
+// 申請履歴の status を日本語ラベル化。未知の status はそのまま表示する。
+const ARTICLE_STATUS_LABELS: Record<string, string> = {
+  pending: "申請中",
+  approved: "承認済",
+  rejected_short: "却下 (文字数不足)",
+  rejected_domain: "却下 (対象外URL)",
+  rejected_fetch_error: "本文取得エラー",
+};
+// レビュー対象 (= 申請待ちセクションに出す) status。API の needs_review と同義。
+const NEEDS_REVIEW_STATUSES = new Set(["pending", "rejected_fetch_error"]);
 type Penalty = { id: string; memberDisplayName: string; slackUserId: string;
   date: string; theme: string; points: number; requiredChars: number;
   status: string; clearedAt: string | null };
@@ -86,7 +99,8 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
   const base = `/orgs/${eventId}/actions/${actionId}/kejime`;
   const [members, setMembers] = useState<Member[] | null>(null);
   const [events, setEvents] = useState<EventRow[] | null>(null);
-  const [articles, setArticles] = useState<Article[] | null>(null);
+  // 全申請 (status=all・作成日時降順)。申請待ちはここからクライアント側で導出する。
+  const [allArticles, setAllArticles] = useState<Article[] | null>(null);
   const [penalties, setPenalties] = useState<Penalty[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -98,10 +112,10 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
       const [m, e, a, p] = await Promise.all([
         request<Member[]>(`${base}/members`),
         request<EventRow[]>(`${base}/events`),
-        request<Article[]>(`${base}/articles?status=needs_review`),
+        request<Article[]>(`${base}/articles?status=all`),
         request<Penalty[]>(`${base}/penalties?status=open`),
       ]);
-      setMembers(m); setEvents(e.slice(0, 20)); setArticles(a); setPenalties(p);
+      setMembers(m); setEvents(e.slice(0, 20)); setAllArticles(a); setPenalties(p);
     } catch (err) { setError(err instanceof Error ? err.message : "load failed"); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
@@ -128,12 +142,13 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
     } finally { setBusy(null); }
   }
 
-  if (members === null || events === null || articles === null || penalties === null) {
+  if (members === null || events === null || allArticles === null || penalties === null) {
     return <div style={s.hint}>読み込み中...</div>;
   }
   const ranking = members.filter((m) => m.ramenCount > 0)
     .sort((a, b) => b.ramenCount - a.ramenCount);
   const penaltyById = new Map(penalties.map((p) => [p.id, p]));
+  const articles = allArticles.filter((a) => NEEDS_REVIEW_STATUSES.has(a.status));
 
   return (
     <div style={{ display: "grid", gap: "1.5rem" }}>
@@ -244,6 +259,29 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
               </div>
             </div>
             <span style={s.badge}>open</span>
+          </div>
+        ))}
+      </Section>
+
+      <Section title={`📚 申請履歴 (全${allArticles.length}件)`}
+        empty="申請なし" isEmpty={allArticles.length === 0}>
+        {allArticles.map((a) => (
+          <div key={a.id} style={s.row}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600 }}>{a.memberDisplayName}</div>
+              <div style={s.meta}>
+                <a href={a.qiitaUrl} target="_blank" rel="noreferrer">{a.qiitaUrl}</a>
+              </div>
+              <div style={s.meta}>
+                申請: {a.createdAt.slice(0, 16).replace("T", " ")}
+                {a.bodyLength != null && ` / ${a.bodyLength}文字`}
+                {a.decidedAt && ` / 決裁: ${a.decidedAt.slice(0, 16).replace("T", " ")}`}
+                {a.decidedBy && ` (${a.decidedBy})`}
+              </div>
+            </div>
+            <span style={a.status === "approved" ? s.badge : s.lgtmBadge}>
+              {ARTICLE_STATUS_LABELS[a.status] ?? a.status}
+            </span>
           </div>
         ))}
       </Section>

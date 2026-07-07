@@ -66,6 +66,14 @@ export default function globalSetup() {
     }).replace(/'/g, "''")}','${now}','${now}');`,
     `DELETE FROM cottage_content WHERE id='cottage';`,
     seedInsertsFrom("0075_cottage_content.sql"),
+    // けじめ管理タブ (申請待ち + 申請履歴) 検証用。件数アサートを決定的にするため
+    // action 配下の申請/メンバーを毎回リセットして 2 件 (pending / approved) にする。
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-kejime','cottage','kejime_tracker','{}',1,'${now}','${now}');`,
+    `DELETE FROM kejime_article_requests WHERE event_action_id='e2e-kejime';`,
+    `DELETE FROM kejime_members WHERE event_action_id='e2e-kejime';`,
+    `INSERT INTO kejime_members (id,event_action_id,slack_user_id,display_name,current_points,ramen_count,created_at,updated_at) VALUES ('e2e-km1','e2e-kejime','UE2E0001','E2Eメンバー',2,0,'${now}','${now}');`,
+    `INSERT INTO kejime_article_requests (id,event_action_id,member_id,qiita_url,body_length,status,created_at) VALUES ('e2e-ar-pending','e2e-kejime','e2e-km1','https://qiita.com/e2e/items/pending1',600,'pending','${now}');`,
+    `INSERT INTO kejime_article_requests (id,event_action_id,member_id,qiita_url,body_length,status,decided_by,decided_at,created_at) VALUES ('e2e-ar-approved','e2e-kejime','e2e-km1','https://qiita.com/e2e/items/approved1',800,'approved','admin','${now}','${now}');`,
   ].join("\n");
 
   const dir = mkdtempSync(join(tmpdir(), "lmb-e2e-"));
