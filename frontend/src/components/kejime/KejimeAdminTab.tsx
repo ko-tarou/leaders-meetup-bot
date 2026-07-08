@@ -48,6 +48,26 @@ function Section({ title, empty, isEmpty, children }: {
   );
 }
 
+// 件数が増え続けるセクション用の折りたたみ版 (既定: 閉)。開閉状態は永続化しない。
+function CollapsibleSection({ title, empty, isEmpty, children }: {
+  title: string; empty: string; isEmpty: boolean; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section>
+      <h3 style={s.h}>
+        <button type="button" style={s.toggle} aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}>
+          <span aria-hidden="true">{open ? "▾" : "▸"}</span> {title}
+        </button>
+      </h3>
+      {open && (isEmpty
+        ? <div style={s.empty}>{empty}</div>
+        : <div style={s.list}>{children}</div>)}
+    </section>
+  );
+}
+
 // PR15: admin がメンバーの current_points を直接編集する行コンポーネント。
 // 「編集」→ インライン input → 「保存」/ 「キャンセル」。0〜100 の整数のみ許可。
 function MemberRow({ m, busy, onEdit }: {
@@ -263,7 +283,7 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
         ))}
       </Section>
 
-      <Section title={`📚 申請履歴 (全${allArticles.length}件)`}
+      <CollapsibleSection title={`📚 申請履歴 (全${allArticles.length}件)`}
         empty="申請なし" isEmpty={allArticles.length === 0}>
         {allArticles.map((a) => (
           <div key={a.id} style={s.row}>
@@ -284,7 +304,7 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
             </span>
           </div>
         ))}
-      </Section>
+      </CollapsibleSection>
 
       <section>
         <h3 style={s.h}>管理操作</h3>
@@ -318,6 +338,9 @@ export function KejimeAdminTab({ eventId, actionId }: { eventId: string; actionI
 
 const s: Record<string, CSSProperties> = {
   h: { margin: "0 0 0.5rem", fontSize: "1rem" },
+  toggle: { display: "inline-flex", alignItems: "center", gap: "0.375rem",
+    padding: 0, border: "none", background: "none", cursor: "pointer",
+    font: "inherit", fontWeight: "inherit", color: "inherit" },
   list: { display: "grid", gap: "0.5rem" },
   row: { display: "flex", alignItems: "center", gap: "0.5rem",
     padding: "0.5rem 0.75rem", border: `1px solid ${colors.border}`,
