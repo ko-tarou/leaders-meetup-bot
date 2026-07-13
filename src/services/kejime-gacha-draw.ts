@@ -17,6 +17,8 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, asc, eq } from "drizzle-orm";
 import { eventActions, kejimeEvents, kejimeMembers, kejimePenalties } from "../db/schema";
+import type { SlackClient } from "./slack-api";
+import { checkAndExpelIfNeeded } from "./kejime-expulsion";
 import { bumpPointsAndRamen } from "./kejime-late-judge";
 import {
   DEFAULT_CHARS_PER_POINT, parseLatePointWeights, rollLatePoints,
@@ -37,6 +39,7 @@ export type GachaDrawResult =
       currentPoints: number; // 内部累計 (cap 前)
       displayPoints: number; // min(internal, 5)
       ramenCount: number;
+      expelled: boolean; // 激辛 3 杯到達で今回の抽選により除名されたか
     }
   | { ok: false; reason: "not_found" | "already_drawn" | "member_not_found" };
 
@@ -143,9 +146,11 @@ function parseConfigCharsPerPoint(raw: string | null | undefined): number {
  *
  * D1Database を受け取り内部で drizzle を作る (既存 service の慣例に合わせる)。
  * 第 3 引数は互換のため残すが、所有者照合には使わない (押下者ログ等の将来用)。
+ * slackClient を渡すと、激辛 3 杯到達時の除名通知に使う (未指定は通知なし除名)。
  */
 export async function drawPendingGacha(
   db: D1Database, penaltyId: string, _actorSlackUserId?: string,
+  slackClient?: SlackClient,
 ): Promise<GachaDrawResult> {
   const d1: D1 = drizzle(db);
   const pen = await d1.select().from(kejimePenalties)
@@ -198,10 +203,15 @@ export async function drawPendingGacha(
     currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
   }).where(eq(kejimeMembers.id, member.id));
 
+  // 記録確定 (= 抽選確定) 時の除名判定。激辛 3 杯到達で通知 + 名簿除外。
+  const { expelled } = await checkAndExpelIfNeeded(
+    db, slackClient ?? null, pen.eventActionId, member.id,
+  );
+
   return {
     ok: true, penaltyId, trackerActionId: pen.eventActionId, points: drawn, requiredChars,
     date: pen.date, theme: pen.theme,
     currentPoints: internalAfter, displayPoints: Math.min(internalAfter, DISPLAY_CAP),
-    ramenCount: nextRamen,
+    ramenCount: nextRamen, expelled,
   };
 }

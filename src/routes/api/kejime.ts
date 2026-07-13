@@ -8,6 +8,7 @@ import {
   kejimeMembers, kejimePenalties,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
+import { checkAndExpelIfNeeded } from "../../services/kejime-expulsion";
 import { KEJIME_LGTM_THRESHOLD } from "../../services/kejime-article-flow";
 import { getUserNames } from "../../services/slack-names";
 import { SlackClient } from "../../services/slack-api";
@@ -162,8 +163,10 @@ kejimeRouter.post(`${BASE}/ramen-reset`, async (c: C) => {
     decidedBy: "admin", occurredAt: now,
   };
   await db.insert(kejimeEvents).values(ev);
+  // 激辛リセットは除名の手動復帰も兼ねる (expelled_at を NULL に戻す)。
+  // 名簿 (ロール) への再追加は admin がロール管理から行う。
   await db.update(kejimeMembers).set({
-    currentPoints: nextPoints, ramenCount: 0, updatedAt: now,
+    currentPoints: nextPoints, ramenCount: 0, expelledAt: null, updatedAt: now,
   }).where(eq(kejimeMembers.id, memberId));
   // 消費した pt 分、古い順に open penalty (未消化の遅刻イベント) を cleared にする。
   const clearedPenaltyIds: string[] = [];
@@ -485,8 +488,13 @@ kejimeRouter.post(`${BASE}/edit-points`, async (c: C) => {
   await db.update(kejimeMembers).set({
     currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
   }).where(eq(kejimeMembers.id, memberId));
+  // 記録確定 (= admin 編集) 時の除名判定。激辛 3 杯到達で通知 + 名簿除外。
+  const { expelled } = await checkAndExpelIfNeeded(
+    c.env.DB, new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET),
+    r.action.id, memberId,
+  );
   await triggerStatusUpdate(c.env, r.action.id);
-  return c.json({ ok: true, event: ev, member: {
+  return c.json({ ok: true, event: ev, expelled, member: {
     ...member, currentPoints: internalAfter, ramenCount: nextRamen,
     displayPoints: Math.min(internalAfter, CAP), updatedAt: now,
   } }, 201);

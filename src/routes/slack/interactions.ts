@@ -234,7 +234,7 @@ interactionsRouter.post("/interactions", async (c) => {
       c.executionCtx.waitUntil((async () => {
         const client = getSlackClient(c);
         try {
-          const result = await drawPendingGacha(c.env.DB, penaltyId, userId);
+          const result = await drawPendingGacha(c.env.DB, penaltyId, userId, client);
           if (channelId) {
             if (result.ok) {
               // 演出: ドラムロール -> リビール (2 通の ephemeral)。

@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, like, lte } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   eventActions, kejimeEvents, kejimeMembers, kejimePenalties, morningAttendance,
   morningSessions, slackRoleMembers,
 } from "../../db/schema";
 import { bumpPointsAndRamen } from "../../services/kejime-late-judge";
+import { resolveThemeForDate, themeKeyForDate } from "../../services/morning-standup";
+import { postOrUpdateKejimeStatus } from "../../services/kejime-status-post";
+import { getJstNow } from "../../services/time-utils";
 import { getUserNames } from "../../services/slack-names";
 import { SlackClient } from "../../services/slack-api";
 
@@ -16,9 +19,12 @@ import { SlackClient } from "../../services/slack-api";
 // adminAuth で自動保護される (bypass 対象外)。:actionId は morning_standup
 // action id。同 event 配下の kejime_tracker.config.roleId からメンバー名簿を
 // 取得し、当日の attended/late/null を返す。
-// 手動 attend は INSERT OR REPLACE (UNIQUE 衝突を update 扱い) で late を attended に
-// 上書きし、既存 late kejime_events を物理削除して -1pt 反映する (exemption 履歴は残さない:
+// 手動 attend (遡及修正) は INSERT OR REPLACE (UNIQUE 衝突を update 扱い) で late を
+// attended に上書きし、既存 late kejime_events を物理削除して「実際に付いた pt」
+// (ガチャ抽選済みなら 1〜3pt / 未抽選なら 0pt) を巻き戻す (exemption 履歴は残さない:
 // 「実は遅刻ではなかった」という訂正運用なので exemption ではなく取り消し)。
+// status:"late" を渡すと逆方向 (出席→欠席) の訂正: late event + 未抽選 penalty を
+// 通常の遅刻認定と同じ形で作り直す。
 // DELETE は morning_attendance 行を物理削除のみ (late 自動復活はしない)。
 export const morningAttendanceRouter = new Hono<{ Bindings: Env }>();
 type C = Context<{ Bindings: Env }>;
@@ -167,77 +173,154 @@ morningAttendanceRouter.get(`${BASE}/stats`, async (c: C) => {
   });
 });
 
-// POST 手動 attend (INSERT OR REPLACE)。既存 late kejime_events があれば取り消し (-1pt)。
-// admin がボタン 1 つで「実は出席してた」訂正をできるようにする。
+// late → attended の遡及修正:「実は出席だった」。
+// - penalty (action, user, date) と紐づく late event を特定 (旧データは note 前方
+//   一致 fallback。抽選後は "auto: YYYY-MM-DD (gacha Npt)" になるため like で引く)。
+// - 巻き戻す pt は固定 -1 ではなく late event の points_delta (抽選済み 1〜3 /
+//   未抽選 0) をそのまま返し、ramen も bumpPointsAndRamen で追従させる。
+// - late event / penalty (pending・open) は物理削除。penalty を消すことで同日を
+//   再び欠席へ訂正した時に UNIQUE(action,user,date) と衝突しない。
+// - penalty が cleared (記事で消化済み) の場合は何も巻き戻さない (既に支払済みで
+//   帳尻が合っており、返金すると二重になる)。
+async function revokeLateForDate(
+  db: DB, trackerActionId: string, slackUserId: string, date: string, now: string,
+): Promise<{ lateEventId: string | null; memberId: string; pointsReverted: number } | null> {
+  const member = await db.select().from(kejimeMembers).where(and(
+    eq(kejimeMembers.eventActionId, trackerActionId),
+    eq(kejimeMembers.slackUserId, slackUserId),
+  )).get();
+  if (!member) return null;
+  const penalty = await db.select().from(kejimePenalties).where(and(
+    eq(kejimePenalties.eventActionId, trackerActionId),
+    eq(kejimePenalties.memberId, member.id),
+    eq(kejimePenalties.date, date),
+  )).get();
+  if (penalty?.status === "cleared") return null;
+  const lateEv = penalty?.lateEventId
+    ? await db.select().from(kejimeEvents)
+        .where(eq(kejimeEvents.id, penalty.lateEventId)).get()
+    : await db.select().from(kejimeEvents).where(and(
+        eq(kejimeEvents.memberId, member.id),
+        eq(kejimeEvents.type, "late"),
+        like(kejimeEvents.note, `auto: ${date}%`),
+      )).get();
+  if (!lateEv && !penalty) return null;
+  if (lateEv) await db.delete(kejimeEvents).where(eq(kejimeEvents.id, lateEv.id));
+  if (penalty) await db.delete(kejimePenalties).where(eq(kejimePenalties.id, penalty.id));
+  const revert = -(lateEv?.pointsDelta ?? 0);
+  const { internalAfter, ramenBumped } = bumpPointsAndRamen(member.currentPoints, revert);
+  await db.update(kejimeMembers).set({
+    currentPoints: internalAfter,
+    ramenCount: Math.max(0, member.ramenCount + ramenBumped),
+    updatedAt: now,
+  }).where(eq(kejimeMembers.id, member.id));
+  return { lateEventId: lateEv?.id ?? null, memberId: member.id, pointsReverted: -revert };
+}
+
+// attended → late の遡及修正:「実は欠席だった」。通常の遅刻認定 (kejime-late-judge
+// の recordLate) と同じ形で late event (points_delta=0) + 未抽選 penalty を作る。
+// ポイントはガチャ抽選確定時に付く (ここでは動かさない)。同日の penalty が既に
+// あれば冪等 (多重訂正で二重ペナルティを作らない)。
+async function markLateForDate(
+  db: DB, trackerActionId: string, morningConfig: string | null,
+  slackUserId: string, date: string, now: string,
+): Promise<{ memberId: string; lateEventId: string | null; penaltyId: string | null }> {
+  let member = await db.select().from(kejimeMembers).where(and(
+    eq(kejimeMembers.eventActionId, trackerActionId),
+    eq(kejimeMembers.slackUserId, slackUserId),
+  )).get();
+  if (!member) {
+    const id = crypto.randomUUID();
+    await db.insert(kejimeMembers).values({
+      id, eventActionId: trackerActionId, slackUserId, displayName: slackUserId,
+      currentPoints: 0, ramenCount: 0, createdAt: now, updatedAt: now,
+    });
+    member = (await db.select().from(kejimeMembers).where(eq(kejimeMembers.id, id)).get())!;
+  }
+  const existingPen = await db.select().from(kejimePenalties).where(and(
+    eq(kejimePenalties.eventActionId, trackerActionId),
+    eq(kejimePenalties.slackUserId, slackUserId),
+    eq(kejimePenalties.date, date),
+  )).get();
+  if (existingPen) {
+    return {
+      memberId: member.id, lateEventId: existingPen.lateEventId,
+      penaltyId: existingPen.id,
+    };
+  }
+  const lateEventId = crypto.randomUUID();
+  await db.insert(kejimeEvents).values({
+    id: lateEventId, memberId: member.id, type: "late",
+    pointsDelta: 0, ramenDelta: 0, note: `auto: ${date}`, occurredAt: now,
+  });
+  const penaltyId = crypto.randomUUID();
+  await db.insert(kejimePenalties).values({
+    id: penaltyId, eventActionId: trackerActionId, memberId: member.id,
+    slackUserId, date, theme: resolveThemeForDate(morningConfig, date),
+    themeKey: themeKeyForDate(date), points: 0, requiredChars: 0,
+    status: "pending", lateEventId, createdAt: now,
+  });
+  return { memberId: member.id, lateEventId, penaltyId };
+}
+
+// POST 出欠の遡及修正 (INSERT OR REPLACE)。status 省略時は "attended" (後方互換)。
+// admin がボタン 1 つで「実は出席してた」「実は欠席だった」訂正をできるようにする。
 morningAttendanceRouter.post(`${BASE}`, async (c: C) => {
   const db = drizzle(c.env.DB);
   const r = await findAction(db, c.req.param("actionId") as string);
   if ("error" in r) return c.json({ error: r.error }, r.status);
-  const body = await c.req.json<{ date?: string; slackUserId?: string; note?: string }>()
+  const body = await c.req
+    .json<{ date?: string; slackUserId?: string; note?: string; status?: string }>()
     .catch(() => null);
   if (!body) return c.json({ error: "invalid JSON body" }, 400);
   const date = (body.date ?? "").trim(), slackUserId = (body.slackUserId ?? "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !slackUserId) {
     return c.json({ error: "date (YYYY-MM-DD) and slackUserId are required" }, 400);
   }
+  const status = body.status ?? "attended";
+  if (status !== "attended" && status !== "late") {
+    return c.json({ error: "status must be attended or late" }, 400);
+  }
   const now = new Date().toISOString();
-  // 既存行があれば status を attended に書き換え、無ければ insert。
+  // 既存行があれば status を書き換え、無ければ insert。
   const existing = await db.select().from(morningAttendance).where(and(
     eq(morningAttendance.eventActionId, r.action.id),
     eq(morningAttendance.date, date),
     eq(morningAttendance.slackUserId, slackUserId),
   )).get();
   if (existing) {
-    await db.update(morningAttendance).set({ status: "attended", recordedAt: now })
+    await db.update(morningAttendance).set({ status, recordedAt: now })
       .where(eq(morningAttendance.id, existing.id));
   } else {
     await db.insert(morningAttendance).values({
       id: crypto.randomUUID(), eventActionId: r.action.id, date, slackUserId,
-      status: "attended", messageTs: null, recordedAt: now,
+      status, messageTs: null, recordedAt: now,
     });
   }
-  // 既存 late event があれば取り消し: kejime_tracker 側の kejime_members を探し、
-  // ref/note に当日 ymd を持つ type='late' を物理削除し、-1pt + ramen 同期。
-  // 「実は出席だった」訂正なので exemption (履歴) ではなく削除運用。
+  // けじめ側 (kejime_tracker) のポイント / penalty を訂正方向に応じて追従させる。
   const tracker = await db.select().from(eventActions).where(and(
     eq(eventActions.eventId, r.action.eventId),
     eq(eventActions.actionType, "kejime_tracker"),
   )).get();
-  let revoked: { lateEventId: string; memberId: string } | null = null;
-  if (tracker) {
-    const member = await db.select().from(kejimeMembers).where(and(
-      eq(kejimeMembers.eventActionId, tracker.id),
-      eq(kejimeMembers.slackUserId, slackUserId),
-    )).get();
-    if (member) {
-      const lateEv = await db.select().from(kejimeEvents).where(and(
-        eq(kejimeEvents.memberId, member.id),
-        eq(kejimeEvents.type, "late"),
-        eq(kejimeEvents.note, `auto: ${date}`),
-      )).get();
-      if (lateEv) {
-        const { internalAfter, ramenBumped } =
-          bumpPointsAndRamen(member.currentPoints, -1);
-        await db.delete(kejimeEvents).where(eq(kejimeEvents.id, lateEv.id));
-        const nextRamen = Math.max(0, member.ramenCount + ramenBumped);
-        await db.update(kejimeMembers).set({
-          currentPoints: internalAfter, ramenCount: nextRamen, updatedAt: now,
-        }).where(eq(kejimeMembers.id, member.id));
-        revoked = { lateEventId: lateEv.id, memberId: member.id };
-      }
-      // 「実は出席だった」訂正では、まだ未抽選 (status='pending') の遅刻ガチャ
-      // penalty も取り消す。これをしないと欠席→出席に直した人にも「ガチャを引く」
-      // ボタンが出続けてしまう (status post / 本人の /devhub kejime gacha 両方)。
-      // 既に本人がガチャを引いた (open) / 記事で消化済み (cleared) のものは触らない。
-      await db.update(kejimePenalties).set({ status: "cleared", clearedAt: now })
-        .where(and(
-          eq(kejimePenalties.memberId, member.id),
-          eq(kejimePenalties.date, date),
-          eq(kejimePenalties.status, "pending"),
-        ));
+  let revoked: Awaited<ReturnType<typeof revokeLateForDate>> = null;
+  let lateMarked: Awaited<ReturnType<typeof markLateForDate>> | null = null;
+  if (tracker && status === "attended") {
+    revoked = await revokeLateForDate(db, tracker.id, slackUserId, date, now);
+  } else if (tracker && status === "late") {
+    lateMarked = await markLateForDate(
+      db, tracker.id, r.action.config, slackUserId, date, now,
+    );
+  }
+  // ポイント / 未抽選ガチャが変動した可能性があるので当日 status post を更新 (fail-soft)。
+  if (tracker && (revoked || lateMarked)) {
+    try {
+      const client = new SlackClient(c.env.SLACK_BOT_TOKEN, c.env.SLACK_SIGNING_SECRET);
+      await postOrUpdateKejimeStatus(c.env.DB, client, tracker.id, getJstNow().ymd);
+    } catch (e) {
+      console.warn(`morning-attendance status update hook failed (action=${tracker.id}):`, e);
     }
   }
-  return c.json({ ok: true, revoked }, 201);
+  return c.json({ ok: true, revoked, lateMarked }, 201);
 });
 
 // DELETE 出席取消 (物理削除)。late への自動復活はしない (admin が明示的に再判定する想定)。

@@ -93,6 +93,20 @@ export function MorningStandupMainTab({ eventId, actionId, action }: {
     } finally { setBusy(null); }
   }
 
+  async function markLate(slackUserId: string, displayName: string) {
+    if (!confirm(`${displayName} を ${date} の欠席 (未出席) に変更します。よろしいですか？\n(遅刻イベントと未抽選ガチャが作られます)`)) return;
+    setBusy(`l-${slackUserId}`);
+    try {
+      await request(`${base}`, {
+        method: "POST",
+        body: JSON.stringify({ date, slackUserId, status: "late" }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "mark late failed");
+    } finally { setBusy(null); }
+  }
+
   async function revoke(attendanceId: string, displayName: string) {
     if (!confirm(`${displayName} の ${date} の出席記録を削除します。\n(late への自動復活はしません)`)) return;
     setBusy(`d-${attendanceId}`);
@@ -145,14 +159,24 @@ export function MorningStandupMainTab({ eventId, actionId, action }: {
                   {lbl.text}
                 </span>
                 {isAttended && m.attendanceId ? (
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    disabled={busy === `d-${m.attendanceId}`}
-                    onClick={() => revoke(m.attendanceId!, m.displayName)}
-                    aria-label={`${m.displayName} の出席を取り消し`}
-                  >
-                    取り消し
-                  </button>
+                  <>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy === `l-${m.slackUserId}`}
+                      onClick={() => markLate(m.slackUserId, m.displayName)}
+                      aria-label={`${m.displayName} を欠席にする`}
+                    >
+                      欠席にする
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy === `d-${m.attendanceId}`}
+                      onClick={() => revoke(m.attendanceId!, m.displayName)}
+                      aria-label={`${m.displayName} の出席を取り消し`}
+                    >
+                      取り消し
+                    </button>
+                  </>
                 ) : (
                   <button
                     className="btn btn-primary btn-sm"
