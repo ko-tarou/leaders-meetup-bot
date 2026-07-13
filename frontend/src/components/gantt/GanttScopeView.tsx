@@ -32,7 +32,7 @@ export function GanttScopeView({
   const [scope, setScope] = useState<GanttScope>(scopes[0] ?? "all");
   const [team, setTeam] = useState<string | null>(null);
   const [teams, setTeams] = useState<string[]>([]);
-  // 月別モードの月ドロップダウン (null = 全て)。選択肢は GanttMonthlyTab から通知。
+  // 月別モードの月ドロップダウン。既定は単月 (下の effect で設定)。null = 全ての月。
   const [monthSel, setMonthSel] = useState<string | null>(null);
   const [months, setMonths] = useState<string[]>([]);
   // 全体モードの抽象度ドロップダウン: 詳細 (全タスク) / 最上位 (WBS トップ集約)。
@@ -64,6 +64,31 @@ export function GanttScopeView({
       cancelled = true;
     };
   }, [eventId, action.config, includeTeam]);
+
+  // 「月別」の選択肢はマウント時に先読みし (チーム別と同じ挙動)、モード切替時に
+  // 遅れてドロップダウンが出る違和感を無くす。既定は単月 (今月があれば今月、
+  // 無ければ最古の月) にして、他モードと同じく最初から 1 つが選ばれた状態にする。
+  const includeMonthly = scopes.includes("monthly");
+  useEffect(() => {
+    if (!includeMonthly) return;
+    let cancelled = false;
+    api.gantt
+      .monthly(eventId)
+      .then((res) => {
+        if (cancelled) return;
+        const keys = res.months.map((m) => m.month);
+        setMonths(keys);
+        const thisMonth = new Date().toISOString().slice(0, 7);
+        const def = keys.includes(thisMonth) ? thisMonth : (keys[0] ?? null);
+        setMonthSel((prev) => prev ?? def);
+      })
+      .catch(() => {
+        /* 取得失敗時は月ドロップダウンを出さない (空) */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, includeMonthly]);
 
   return (
     <div>
@@ -125,11 +150,7 @@ export function GanttScopeView({
         )}
       </div>
       {scope === "monthly" ? (
-        <GanttMonthlyTab
-          eventId={eventId}
-          monthFilter={monthSel}
-          onMonthsChange={setMonths}
-        />
+        <GanttMonthlyTab eventId={eventId} monthFilter={monthSel} />
       ) : (
         <GanttChartTab
           eventId={eventId}
