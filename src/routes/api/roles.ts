@@ -34,7 +34,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   events,
@@ -42,6 +42,7 @@ import {
   slackRoles,
   slackRoleMembers,
   slackRoleChannels,
+  rosterMembers,
 } from "../../db/schema";
 import { createSlackClientForWorkspace } from "../../services/workspace";
 import {
@@ -55,6 +56,15 @@ import type { SlackUser } from "../../services/slack-api";
 // 副作用ゼロの純関数なので domain/role へ抽出。route は Repository/DB で
 // I/O → domain 純関数で判断 → I/O で反映、の薄い application フローに。
 import { collectDescendantRoleIds } from "../../domain/role/role-assign";
+// 命名規則ベースの自動分類 (pure domain)。route は Slack/DB の I/O を集め
+// domain の純関数に渡して判断させる薄い application フローに徹する。
+import {
+  classifyMembers,
+  summarizeClassification,
+  normalizeForMatch,
+  CATEGORY_LABELS,
+  type ClassifyMemberInput,
+} from "../../domain/role/name-classify";
 
 export const rolesRouter = new Hono<{ Bindings: Env }>();
 
@@ -749,6 +759,126 @@ rolesRouter.get(
         imageUrl: u.profile?.image_72,
       })),
     );
+  },
+);
+
+// ----------------------------------------------------------------------------
+// Classify preview (命名規則ベースの自動分類・プレビュー)
+// ----------------------------------------------------------------------------
+
+/**
+ * GET /orgs/:eventId/actions/:actionId/classify-preview
+ *
+ *   workspace 全メンバーを抽出し、表示名の「(運営)」「(参加者)」等の
+ *   プレフィックスから 4 カテゴリ (参加者/運営/スポンサー/審査員) へ一次割り当て
+ *   する。運営/スポンサーは同 event の member_roster と照合し、名簿に無ければ
+ *   needsReview フラグを立てる (誤爆招待の防止)。
+ *
+ *   プレビュー専用: DB への書き込みや Slack への招待は一切しない。GUI で調整
+ *   → 確定する前段の「試行」に使う。件数分布は summary で、個別は members で返す。
+ */
+rolesRouter.get(
+  "/orgs/:eventId/actions/:actionId/classify-preview",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+
+    const workspaceId = readWorkspaceId(found.action);
+    if (!workspaceId) {
+      return c.json({ error: "action.config.workspaceId is missing" }, 400);
+    }
+    const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+    if (!slack) {
+      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+    }
+
+    const res = await slack.listAllUsers();
+    if (!res.ok) {
+      return c.json({ error: res.error ?? "users.list failed" }, 502);
+    }
+    const active = res.members.filter((u: SlackUser) => {
+      if (u.deleted) return false;
+      if (u.is_bot) return false;
+      if (u.id === "USLACKBOT") return false;
+      return true;
+    });
+
+    // 名簿 (member_roster) を同 event から探す。無ければ空名簿で扱う
+    // (= gated カテゴリは全員 needsReview になる安全側の挙動)。
+    const rosterAction = await db
+      .select()
+      .from(eventActions)
+      .where(
+        and(
+          eq(eventActions.eventId, found.action.eventId),
+          eq(eventActions.actionType, "member_roster"),
+        ),
+      )
+      .get();
+    const rosterUserIds = new Set<string>();
+    const rosterNames = new Set<string>();
+    if (rosterAction) {
+      const rows = await db
+        .select()
+        .from(rosterMembers)
+        .where(
+          and(
+            eq(rosterMembers.eventActionId, rosterAction.id),
+            isNull(rosterMembers.deletedAt),
+          ),
+        )
+        .all();
+      for (const m of rows) {
+        if (m.slackUserId) rosterUserIds.add(m.slackUserId);
+        for (const n of [m.name, m.nameKana, m.slackName]) {
+          if (n && n.trim()) rosterNames.add(normalizeForMatch(n));
+        }
+      }
+    }
+
+    const inputs: ClassifyMemberInput[] = active.map((u: SlackUser) => {
+      const display =
+        u.profile?.display_name?.trim() ||
+        u.real_name?.trim() ||
+        u.profile?.real_name?.trim() ||
+        u.name ||
+        u.id;
+      return {
+        id: u.id,
+        primaryName: display,
+        matchNames: [
+          u.profile?.display_name,
+          u.real_name,
+          u.profile?.real_name,
+          u.name,
+        ].filter((x): x is string => typeof x === "string" && x.length > 0),
+      };
+    });
+
+    const results = classifyMembers(inputs, rosterUserIds, rosterNames);
+    const summary = summarizeClassification(results);
+
+    const nameById = new Map(inputs.map((i) => [i.id, i.primaryName]));
+    const members = results.map((r) => ({
+      id: r.id,
+      displayName: nameById.get(r.id) ?? r.id,
+      category: r.category,
+      categoryLabel: r.category ? CATEGORY_LABELS[r.category] : null,
+      matchedLabel: r.matchedLabel,
+      inRoster: r.inRoster,
+      needsReview: r.needsReview,
+    }));
+
+    return c.json({
+      workspaceId,
+      rosterActionFound: !!rosterAction,
+      summary,
+      members,
+    });
   },
 );
 
