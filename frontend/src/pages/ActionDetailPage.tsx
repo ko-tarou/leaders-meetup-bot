@@ -16,6 +16,8 @@ import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { colors } from "../styles/tokens";
+import { GanttSummaryTab } from "../components/gantt/GanttSummaryTab";
+import { GanttMonthlyTab } from "../components/gantt/GanttMonthlyTab";
 import { useActionDetail } from "./action-detail/useActionDetail";
 import { getSubTabs, hasChannelsTab } from "./action-detail/subTabs";
 import { ActionDetailHeader } from "./action-detail/ActionDetailHeader";
@@ -188,6 +190,12 @@ export function ActionDetailPage() {
           action={action}
           onSaved={bumpRefresh}
         />
+      )}
+      {subTab === "summary" && actionType === "gantt_tracker" && (
+        <GanttSummaryTab eventId={eventId} />
+      )}
+      {subTab === "monthly" && actionType === "gantt_tracker" && (
+        <GanttMonthlyTab eventId={eventId} />
       )}
       {subTab === "roles" && actionType === "role_management" && (
         <RolesTab eventId={eventId} action={action} />
