@@ -15,6 +15,11 @@ export type Task = {
   // 005-16: N+1 解消のため、GET /tasks のレスポンスに埋め込まれる。
   // 個別 endpoint (GET /tasks/:taskId/assignees) も互換維持。
   assignees?: TaskAssignee[];
+  // gantt_tracker (migration 0077): NULL 許容・既存アクションでは null
+  team: string | null;
+  phase: string | null;
+  wbs: string | null;
+  progressPct: number | null;
 };
 
 export type TaskFilters = {

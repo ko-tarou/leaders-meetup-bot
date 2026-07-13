@@ -7,6 +7,7 @@ export * from "./poll";
 export * from "./schedule";
 export * from "./meeting";
 export * from "./task";
+export * from "./gantt";
 export * from "./pr-review";
 export * from "./workspace";
 export * from "./application";

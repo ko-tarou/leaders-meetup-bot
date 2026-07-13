@@ -89,6 +89,15 @@ export function getSubTabs(
       { id: "manual", label: "手動アクション" },
     ];
   }
+  // gantt_tracker: ガント本体 + サーバ導出ビュー 2 つ (全体サマリー / 月別)。
+  if (actionType === "gantt_tracker") {
+    return [
+      { id: "main", label: "ガント" },
+      { id: "summary", label: "全体サマリー" },
+      { id: "monthly", label: "月別" },
+      { id: "settings", label: "設定" },
+    ];
+  }
   // ADR-0011: channel_router は「メイン (未振り分け + ドライラン) / 振り分けルール /
   // その他設定」の 3 sub-tab。
   if (actionType === "channel_router") {
