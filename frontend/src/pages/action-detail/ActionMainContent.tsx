@@ -12,7 +12,7 @@ import { GoalReminderMainTab } from "../../components/goal-reminder/GoalReminder
 import { TutorialMainTab } from "../../components/tutorial/TutorialMainTab";
 import { RosterPage } from "../roster/RosterPage";
 import { AppManagementTab } from "../../components/app-management/AppManagementTab";
-import { GanttChartTab } from "../../components/gantt/GanttChartTab";
+import { GanttScopeView } from "../../components/gantt/GanttScopeView";
 import { ChannelRouterMainTab } from "../../components/channel-router/ChannelRouterMainTab";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
@@ -59,7 +59,10 @@ export function ActionMainContent({
     case "member_roster":
       return <RosterPage eventId={eventId} actionId={action.id} />;
     case "gantt_tracker":
-      return <GanttChartTab eventId={eventId} action={action} />;
+      // 通常タブは 全体 / チーム別 を切替 (月別は既存サブタブがある)。
+      return (
+        <GanttScopeView eventId={eventId} action={action} scopes={["all", "team"]} />
+      );
     case "kejime_tracker":
       return <KejimeAdminTab eventId={eventId} actionId={action.id} />;
     case "whitelist":
