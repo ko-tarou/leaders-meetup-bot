@@ -26,6 +26,10 @@ export const tasks = {
     priority?: "low" | "mid" | "high";
     parentTaskId?: string;
     createdBySlackId: string;
+    team?: string;
+    phase?: string;
+    wbs?: string;
+    progressPct?: number;
   }) =>
     request<Task>("/tasks", {
       method: "POST",
@@ -41,6 +45,10 @@ export const tasks = {
       status?: "todo" | "doing" | "done";
       priority?: "low" | "mid" | "high";
       parentTaskId?: string | null;
+      team?: string | null;
+      phase?: string | null;
+      wbs?: string | null;
+      progressPct?: number | null;
     },
   ) =>
     request<Task>(`/tasks/${id}`, {

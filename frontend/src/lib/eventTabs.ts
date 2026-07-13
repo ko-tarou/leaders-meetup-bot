@@ -100,6 +100,12 @@ export const ACTION_META: Record<
     description: "停滞している GitHub の open PR をレビュアー名指しで共有チャンネルに催促します",
     icon: "📣",
   },
+  gantt_tracker: {
+    label: "ガントチャート",
+    description:
+      "カンファレンス等の長期プロジェクトを WBS / チーム別ガントで管理します",
+    icon: "📊",
+  },
   app_management: {
     label: "アプリ管理",
     description:
