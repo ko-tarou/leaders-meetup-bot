@@ -33,6 +33,59 @@ const GATED: ReadonlySet<RoleCategory> = new Set<RoleCategory>([
   "sponsor",
 ]);
 
+// 自動割り当ての計画 (pure)。誰をどのカテゴリに追加するか + スキップ理由の件数。
+// フィードバック UI とロジックを分離してテストしやすくする。
+export type AutoAssignPlan = {
+  perCategory: Record<RoleCategory, string[]>;
+  added: number;
+  // gated (運営/スポンサー) で名簿不一致のため除外した数。
+  skippedReview: number;
+  // 既に割当済みでスキップした数。
+  skippedExisting: number;
+  // 分類できた (カテゴリが付いた) メンバー総数。
+  classifiedTotal: number;
+};
+
+export function computeAutoAssignPlan(
+  members: ReadonlyArray<{
+    id: string;
+    category: RoleCategory | null;
+    needsReview: boolean;
+  }>,
+  membership: Record<RoleCategory, ReadonlySet<string>>,
+): AutoAssignPlan {
+  const perCategory: Record<RoleCategory, string[]> = {
+    participant: [],
+    staff: [],
+    sponsor: [],
+    judge: [],
+  };
+  let skippedReview = 0;
+  let skippedExisting = 0;
+  let classifiedTotal = 0;
+  for (const m of members) {
+    if (m.category === null) continue;
+    classifiedTotal += 1;
+    const cat = m.category;
+    if (GATED.has(cat) && m.needsReview) {
+      skippedReview += 1;
+      continue;
+    }
+    if (membership[cat].has(m.id)) {
+      skippedExisting += 1;
+      continue;
+    }
+    perCategory[cat].push(m.id);
+  }
+  const added = CATEGORY_ORDER.reduce(
+    (n, c) => n + perCategory[c].length,
+    0,
+  );
+  return { perCategory, added, skippedReview, skippedExisting, classifiedTotal };
+}
+
+type ApplyResult = AutoAssignPlan & { error: string | null };
+
 type Props = { eventId: string; action: EventAction };
 
 export function AutoClassifyTab({ eventId, action }: Props) {
@@ -51,6 +104,8 @@ export function AutoClassifyTab({ eventId, action }: Props) {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // 「自動割り当てを適用」の結果 (成功/空/エラーを明示する永続バナー)。
+  const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
 
   // name -> カテゴリ root role の対応。
   const categoryRole = useMemo(() => {
@@ -197,24 +252,39 @@ export function AutoClassifyTab({ eventId, action }: Props) {
       return;
     }
     setBusy(true);
+    setApplyResult(null);
+    // 計画を先に立てる (pure)。誰を追加するか + スキップ理由を確定させる。
+    const plan = computeAutoAssignPlan(preview.members, membership);
+    // 反映は local state を直接更新する (reload せず = 画面が「分類中」に戻って
+    // トーストが消える / 何も起きてないように見える現象を防ぐ)。
+    const next: Record<RoleCategory, Set<string>> = {
+      participant: new Set(membership.participant),
+      staff: new Set(membership.staff),
+      sponsor: new Set(membership.sponsor),
+      judge: new Set(membership.judge),
+    };
     try {
-      let added = 0;
       for (const cat of CATEGORY_ORDER) {
         const role = categoryRole.get(cat);
         if (!role) continue;
-        const targets = preview.members
-          .filter((m) => m.category === cat)
-          .filter((m) => !(GATED.has(cat) && m.needsReview))
-          .filter((m) => !membership[cat].has(m.id))
-          .map((m) => m.id);
+        const targets = plan.perCategory[cat];
         if (targets.length === 0) continue;
         await api.roles.addMembers(eventId, action.id, role.id, targets);
-        added += targets.length;
+        for (const id of targets) next[cat].add(id);
       }
-      toast.success(`自動割り当て: ${added} 件を追加しました`);
-      reload();
+      setMembership(next);
+      setApplyResult({ ...plan, error: null });
+      if (plan.added > 0) {
+        toast.success(`${plan.added} 人に割り当てました`);
+      } else {
+        toast.success("追加対象はありませんでした");
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "自動割り当てに失敗しました");
+      const msg = e instanceof Error ? e.message : "自動割り当てに失敗しました";
+      // 途中まで成功した分は local state に反映しておく。
+      setMembership(next);
+      setApplyResult({ ...plan, error: msg });
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -319,6 +389,14 @@ export function AutoClassifyTab({ eventId, action }: Props) {
             </span>
           </div>
 
+          {preview.summary.total === 0 && (
+            <div style={s.warn} data-testid="empty-extract">
+              ワークスペースから抽出できたメンバーが 0 人です。Slack の{" "}
+              <code>users:read</code>{" "}
+              権限が未付与か、対象ワークスペースにメンバーがいない可能性があります。
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: "0.5rem", margin: "0.75rem 0" }}>
             <button
               onClick={handleApplyAuto}
@@ -326,7 +404,7 @@ export function AutoClassifyTab({ eventId, action }: Props) {
               style={s.primaryBtn}
               data-testid="apply-auto-btn"
             >
-              自動割り当てを適用 (名簿ゲート)
+              {busy ? "適用中..." : "自動割り当てを適用 (名簿ゲート)"}
             </button>
             <button
               onClick={handleSync}
@@ -337,6 +415,44 @@ export function AutoClassifyTab({ eventId, action }: Props) {
               確定して招待 (同期)
             </button>
           </div>
+
+          {applyResult && (
+            <div
+              style={
+                applyResult.error
+                  ? s.errorBox
+                  : applyResult.added > 0
+                    ? s.successBox
+                    : s.warn
+              }
+              data-testid="apply-result"
+            >
+              {applyResult.error ? (
+                <span>自動割り当てエラー: {applyResult.error}</span>
+              ) : applyResult.added > 0 ? (
+                <span>
+                  {applyResult.added} 人に割り当てました (
+                  {CATEGORY_ORDER.filter(
+                    (c) => applyResult.perCategory[c].length > 0,
+                  )
+                    .map(
+                      (c) =>
+                        `${CATEGORY_LABELS[c]} ${applyResult.perCategory[c].length}`,
+                    )
+                    .join(" / ")}
+                  )。既存 {applyResult.skippedExisting} 人は重複スキップ、要確認{" "}
+                  {applyResult.skippedReview} 人は名簿ゲートで除外しました。
+                </span>
+              ) : (
+                <span>
+                  追加した人はいませんでした。分類済 {applyResult.classifiedTotal}{" "}
+                  人 (既存 {applyResult.skippedExisting} / 要確認除外{" "}
+                  {applyResult.skippedReview})。抽出が 0 人の場合は Slack{" "}
+                  <code>users:read</code> 権限をご確認ください。
+                </span>
+              )}
+            </div>
+          )}
 
           <div style={s.tableWrap}>
             <table style={s.table}>
@@ -431,6 +547,13 @@ const s: Record<string, CSSProperties> = {
     padding: "0.75rem",
     color: colors.danger,
     background: colors.dangerSubtle,
+    borderRadius: "0.375rem",
+    fontSize: "0.875rem",
+  },
+  successBox: {
+    padding: "0.75rem",
+    color: colors.success,
+    background: colors.successSubtle,
     borderRadius: "0.375rem",
     fontSize: "0.875rem",
   },
