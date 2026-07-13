@@ -163,6 +163,18 @@ describe("GET classify-preview", () => {
     });
   });
 
+  it("Slack クライアントが例外を投げても 500 でなく 502 で返す", async () => {
+    const { event, roleAction } = await setup();
+    vi.spyOn(MockSlackClient.prototype, "listAllUsers").mockRejectedValue(
+      new Error("Invalid encrypted token format"),
+    );
+    const res = await app().request(url(event.id, roleAction.id), {}, env);
+    expect(res.status).toBe(502);
+    expect((await res.json()) as { error: string }).toEqual({
+      error: "Invalid encrypted token format",
+    });
+  });
+
   it("名簿 (member_roster) が無ければ運営/スポンサーは全員 needsReview", async () => {
     const { row: ws } = await makeEncryptedWorkspace();
     const event = await makeEvent();

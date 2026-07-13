@@ -865,12 +865,22 @@ rolesRouter.get(
     if (!workspaceId) {
       return c.json({ error: "action.config.workspaceId is missing" }, 400);
     }
-    const slack = await createSlackClientForWorkspace(c.env, workspaceId);
-    if (!slack) {
-      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+    // token 復号失敗 (createSlackClientForWorkspace) や users.list の例外は
+    // 未処理だと 500 になり FE が原因を掴めない。502 + メッセージで返し、GUI が
+    // 「users:read 未付与/ワークスペース未設定」の案内へ寄せられるようにする。
+    let res: { ok: boolean; error?: string; members: SlackUser[] };
+    try {
+      const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+      if (!slack) {
+        return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+      }
+      res = await slack.listAllUsers();
+    } catch (e) {
+      return c.json(
+        { error: e instanceof Error ? e.message : "users.list failed" },
+        502,
+      );
     }
-
-    const res = await slack.listAllUsers();
     if (!res.ok) {
       return c.json({ error: res.error ?? "users.list failed" }, 502);
     }
