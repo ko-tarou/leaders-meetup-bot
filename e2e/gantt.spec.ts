@@ -155,6 +155,28 @@ test("別画面で開く: ボタンからガント全画面ルートが別タブ
   await expect(popup.locator('[data-testid="gantt-open-fullscreen"]')).toHaveCount(0);
 });
 
+test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のまま切り替えられる", async ({ page, context }) => {
+  await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
+  const [popup] = await Promise.all([
+    context.waitForEvent("page"),
+    page.locator('[data-testid="gantt-open-fullscreen"]').click(),
+  ]);
+  await popup.waitForLoadState();
+  // 全画面側にも 全体/チーム別/月別 の切替 UI が載っている
+  await expect(popup.locator('[data-testid="gantt-scope-all"]')).toBeVisible();
+  await expect(popup.locator('[data-testid="gantt-scope-monthly"]')).toBeVisible();
+  await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+
+  // チーム別 -> 既定チーム 10 タスク
+  await popup.locator('[data-testid="gantt-scope-team"]').click();
+  await expect(popup.locator('[data-testid="gantt-team-select"]')).toBeVisible();
+  await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(10);
+
+  // 月別 -> 月セクションが出る
+  await popup.locator('[data-testid="gantt-scope-monthly"]').click();
+  await expect(popup.locator('[data-testid="gantt-monthly"]')).toBeVisible();
+});
+
 test("全体サマリー: 6 グループがロールアップ表示される", async ({ page }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker?tab=summary`);
   const rows = page.locator('[data-testid="gantt-summary-table"] tbody tr');
