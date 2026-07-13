@@ -25,13 +25,11 @@ const td: React.CSSProperties = {
 export function GanttMonthlyTab({
   eventId,
   monthFilter = null,
-  onMonthsChange,
 }: {
   eventId: string;
   // 単一月に絞る (null なら全月)。GanttScopeView の月ドロップダウンから渡す。
+  // 既定は単月なので通常はこのフィルタが 1 つの月に設定される。
   monthFilter?: string | null;
-  // 読み込んだ月キー ("YYYY-MM") を親に通知しドロップダウンの選択肢にする。
-  onMonthsChange?: (months: string[]) => void;
 }) {
   const [months, setMonths] = useState<GanttMonthlyBucket[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +41,11 @@ export function GanttMonthlyTab({
       .then((res) => {
         if (cancelled) return;
         setMonths(res.months);
-        onMonthsChange?.(res.months.map((m) => m.month));
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : "読み込み失敗"));
     return () => {
       cancelled = true;
     };
-    // onMonthsChange は親の安定参照 (setState) を想定し依存に含めない。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
   if (error) return <div style={{ padding: "2rem", color: colors.danger }}>{error}</div>;
