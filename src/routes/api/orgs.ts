@@ -237,6 +237,9 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // cron/Slack 連携なし (管理コンソール上の導線のみ)。他イベントでも links を
     // 差し替えて使える汎用 type。
     "app_management",
+    // gantt_tracker: カンファレンス等の長期プロジェクトのガント/タスク管理
+    // (ADR-0009 モジュラーモノリス第 1 号)。config = GanttConfig (teams/phases/summaryGroups)。
+    "gantt_tracker",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
