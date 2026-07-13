@@ -145,21 +145,27 @@ test("抽象度切替 (通常): 全体 <-> チーム別 で表示タスク数が
   await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
 });
 
-test("抽象度切替 (全体): 詳細/最上位 ドロップダウンで集約表示に切り替わる", async ({ page }) => {
+test("抽象度切替 (全体): 詳細/中間/最上位 の 3 段で粒度が変わる", async ({ page }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
-  // 全体モードの右側に抽象度ドロップダウンが出る。既定「詳細」= 60 行
+  // 全体モードの右側に 3 段の抽象度ドロップダウンが出る。既定「詳細」= 60 行
   const overview = page.locator('[data-testid="gantt-overview-select"]');
   await expect(overview).toBeVisible();
-  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+  await expect(overview.locator("option")).toHaveCount(3);
+  const rows = page.locator('[data-testid^="gantt-row-"]');
+  await expect(rows).toHaveCount(60);
 
-  // 「最上位」= WBS トップレベル 6 グループに集約 (集約バーも表示)
+  // 「最上位」= WBS トップレベル 6 グループ
   await overview.selectOption("top");
-  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(6);
+  await expect(rows).toHaveCount(6);
   await expect(page.locator('[data-testid="gantt-bar-1"]')).toBeVisible();
+
+  // 「中間」= major を minor 5 番刻みで中分類 -> 12 グループ (6 < 12 < 60)
+  await overview.selectOption("mid");
+  await expect(rows).toHaveCount(12);
 
   // 「詳細」に戻すと 60 行
   await overview.selectOption("detail");
-  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+  await expect(rows).toHaveCount(60);
 });
 
 test("別画面で開く: ボタンからガント全画面ルートが別タブで開く", async ({ page, context }) => {
@@ -193,11 +199,14 @@ test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のま
   await expect(popup.locator('[data-testid="gantt-scope-monthly"]')).toBeVisible();
   await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
 
-  // 全体モードの抽象度ドロップダウンも全画面に出て、最上位で集約される
+  // 全体モードの 3 段抽象度ドロップダウンも全画面に出て、最上位/中間で集約される
   const fsOverview = popup.locator('[data-testid="gantt-overview-select"]');
   await expect(fsOverview).toBeVisible();
+  await expect(fsOverview.locator("option")).toHaveCount(3);
   await fsOverview.selectOption("top");
   await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(6);
+  await fsOverview.selectOption("mid");
+  await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(12);
   await fsOverview.selectOption("detail");
 
   // チーム別 -> 既定チーム 10 タスク
