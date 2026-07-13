@@ -114,6 +114,16 @@ export default function globalSetup() {
     `DELETE FROM channel_router_members WHERE event_action_id='e2e-cr';`,
     `INSERT INTO channel_router_members (id,event_action_id,slack_user_id,display_name,status,first_seen_at,updated_at) VALUES ('e2e-cr-m1','e2e-cr','UE2ECR01','E2E運営メンバー','pending','${now}','${now}');`,
     `INSERT INTO channel_router_members (id,event_action_id,slack_user_id,display_name,status,first_seen_at,updated_at) VALUES ('e2e-cr-m2','e2e-cr','UE2ECR02','E2E参加者メンバー','pending','${now}','${now}');`,
+
+    // 自動分類タブ (auto-classify) E2E 用。専用イベントで他テストと干渉させない。
+    // role_management (ac-roles) は毎回ロールを空にリセット → seed ボタンが必ず出る。
+    // workspaceId は dummy workspace を指すので classify-preview (Slack users.list)
+    // は失敗し「抽出できません + users:read 必要」の親切表示を踏む (Slack 資格情報なし)。
+    `INSERT OR REPLACE INTO events (id,type,name,config,status,created_at) VALUES ('hackit-ac','hackathon','AutoClassify E2E','{}','active','${now}');`,
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('ac-roles','hackit-ac','role_management','{"workspaceId":"e2e-cr-ws"}',1,'${now}','${now}');`,
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('ac-roster','hackit-ac','member_roster','{}',1,'${now}','${now}');`,
+    `DELETE FROM slack_role_members WHERE role_id IN (SELECT id FROM slack_roles WHERE event_action_id='ac-roles');`,
+    `DELETE FROM slack_roles WHERE event_action_id='ac-roles';`,
   ].join("\n");
 
   const dir = mkdtempSync(join(tmpdir(), "lmb-e2e-"));

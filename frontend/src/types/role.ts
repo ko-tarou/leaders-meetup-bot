@@ -43,6 +43,36 @@ export type SlackUser = {
   imageUrl?: string;
 };
 
+// 命名規則ベースの自動分類 (classify-preview)。
+// BE: GET /orgs/:eventId/actions/:actionId/classify-preview
+export type RoleCategory = "participant" | "staff" | "sponsor" | "judge";
+
+export type ClassifiedMember = {
+  id: string;
+  displayName: string;
+  category: RoleCategory | null;
+  categoryLabel: string | null;
+  matchedLabel: string | null;
+  // 名簿 (member_roster) に載っているか。
+  inRoster: boolean;
+  // gated カテゴリ (運営/スポンサー) だが名簿に無い = 誤爆候補。
+  needsReview: boolean;
+};
+
+export type ClassificationSummary = {
+  total: number;
+  byCategory: Record<RoleCategory, number>;
+  unclassified: number;
+  needsReview: number;
+};
+
+export type ClassifyPreviewResponse = {
+  workspaceId: string;
+  rosterActionFound: boolean;
+  summary: ClassificationSummary;
+  members: ClassifiedMember[];
+};
+
 // 1 channel あたりの sync diff (期待 vs 現状)。
 // BE の ChannelSyncDiff (src/services/role-sync.ts) と同型。
 // error が入っているときは toInvite/toKick は空でも UI 側で「取得失敗」表示する。
