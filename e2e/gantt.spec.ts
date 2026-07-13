@@ -120,6 +120,22 @@ test("バーをドラッグすると開始/終了日が変わる", async ({ page
   await expect(page.locator('[data-testid="gantt-start-1.1"]')).toHaveText("2026-07-02");
 });
 
+test("抽象度切替 (通常): 全体 <-> チーム別 で表示タスク数が切り替わる", async ({ page }) => {
+  await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
+  // 既定は「全体」= 60 タスク全部
+  await expect(page.locator('[data-testid="gantt-scope-all"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+
+  // 「チーム別」に切替 -> チーム選択が出て、既定チーム (10 タスク) に絞られる
+  await page.locator('[data-testid="gantt-scope-team"]').click();
+  await expect(page.locator('[data-testid="gantt-team-select"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(10);
+
+  // 「全体」に戻すと 60 に戻る
+  await page.locator('[data-testid="gantt-scope-all"]').click();
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+});
+
 test("別画面で開く: ボタンからガント全画面ルートが別タブで開く", async ({ page, context }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
   const openBtn = page.locator('[data-testid="gantt-open-fullscreen"]');
