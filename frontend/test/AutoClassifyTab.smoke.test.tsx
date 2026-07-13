@@ -67,7 +67,10 @@ const PREVIEW = {
 
 type Call = { url: string; method: string; body?: string };
 
-function installFetch(rolesList: typeof ROLES = ROLES): Call[] {
+function installFetch(
+  rolesList: typeof ROLES = ROLES,
+  preview: typeof PREVIEW = PREVIEW,
+): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
@@ -83,7 +86,7 @@ function installFetch(rolesList: typeof ROLES = ROLES): Call[] {
           headers: { "Content-Type": "application/json" },
         });
 
-      if (path.endsWith("/classify-preview")) return json(PREVIEW);
+      if (path.endsWith("/classify-preview")) return json(preview);
       // getMembers: 運営ロールに U4 が既に居る。他は空。
       const mMembers = path.match(/\/roles\/([^/]+)\/members$/);
       if (mMembers && method === "GET") {
@@ -190,5 +193,50 @@ describe("AutoClassifyTab 自動割り当てのフィードバック", () => {
       (c) => c.method === "POST" && /\/roles\/[^/]+\/members$/.test(c.url),
     );
     expect(posts.length).toBe(0);
+  });
+
+  it("HackIT2026相当(名簿空で全員要確認): 0件の内訳を明示し要確認まとめ追加で救済", async () => {
+    // 抽出はあるが全 staff が needsReview (名簿0件) + 未分類あり = 0件追加の実態。
+    const preview = {
+      workspaceId: "ws1",
+      rosterActionFound: true,
+      summary: {
+        total: 3,
+        byCategory: { participant: 0, staff: 2, sponsor: 0, judge: 0 },
+        unclassified: 1,
+        needsReview: 2,
+      },
+      members: [
+        { id: "S1", displayName: "(運営)甲", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: false, needsReview: true },
+        { id: "S2", displayName: "(運営)乙", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: false, needsReview: true },
+        { id: "P1", displayName: "名無し", category: null, categoryLabel: null, matchedLabel: null, inRoster: false, needsReview: false },
+      ],
+    } as typeof PREVIEW;
+    const calls = installFetch(ROLES, preview);
+    renderTab();
+
+    // 「自動割り当てを適用」= gated 全除外で 0 件。内訳バナーを出す。
+    await userEvent.click(await screen.findByTestId("apply-auto-btn"));
+    const banner = await screen.findByTestId("apply-result");
+    expect(banner).toHaveTextContent("追加した人はいませんでした");
+    expect(banner).toHaveTextContent("要確認除外 2");
+    expect(banner).toHaveTextContent("未分類 1");
+
+    // 「要確認 2 人をまとめて追加」で救済 (確認ダイアログ承認)。
+    await userEvent.click(screen.getByTestId("assign-review-btn"));
+    await userEvent.click(await screen.findByRole("button", { name: "2 人を追加" }));
+
+    // 救済後は成功バナー (added>0) に切り替わり、運営に 2 人反映。
+    await waitFor(() =>
+      expect(screen.getByTestId("apply-result")).toHaveTextContent(
+        "2 人に割り当てました",
+      ),
+    );
+    expect(screen.getByTestId("apply-result")).toHaveTextContent("運営 2");
+    const staffPost = calls.find(
+      (c) => c.method === "POST" && c.url.includes("/roles/r-staff/"),
+    );
+    expect(staffPost?.body).toContain("S1");
+    expect(staffPost?.body).toContain("S2");
   });
 });

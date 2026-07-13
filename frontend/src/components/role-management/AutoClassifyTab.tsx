@@ -307,6 +307,81 @@ export function AutoClassifyTab({ eventId, action }: Props) {
     }
   };
 
+  // 名簿ゲートで「要確認」になった人 (運営/スポンサーだが名簿に無い) を、名簿が
+  // まだ無い/未整備の場合に、表示名の判定どおり明示的にまとめて追加するオーバー
+  // ライド。1 回の確認で承知の上で追加する (誤爆リスクは本人判断)。
+  const handleAssignNeedsReview = async () => {
+    if (!preview || !membership) return;
+    if (!allCategoryRolesExist) {
+      toast.error("先に「ロールを初期化」を押してください");
+      return;
+    }
+    const perCat: Record<RoleCategory, string[]> = {
+      participant: [],
+      staff: [],
+      sponsor: [],
+      judge: [],
+    };
+    for (const m of preview.members) {
+      if (!m.needsReview || m.category === null) continue;
+      if (membership[m.category].has(m.id)) continue;
+      perCat[m.category].push(m.id);
+    }
+    const total = CATEGORY_ORDER.reduce((n, c) => n + perCat[c].length, 0);
+    if (total === 0) {
+      toast.success("要確認の追加対象はいません");
+      return;
+    }
+    const ok = await confirm({
+      message: `名簿で確認できない「要確認」${total} 人を、表示名の判定どおりに追加します (名簿が未整備の場合の手動確定)。よろしいですか？`,
+      variant: "danger",
+      confirmLabel: `${total} 人を追加`,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setApplyResult(null);
+    const next: Record<RoleCategory, Set<string>> = {
+      participant: new Set(membership.participant),
+      staff: new Set(membership.staff),
+      sponsor: new Set(membership.sponsor),
+      judge: new Set(membership.judge),
+    };
+    try {
+      let added = 0;
+      for (const cat of CATEGORY_ORDER) {
+        const role = categoryRole.get(cat);
+        if (!role || perCat[cat].length === 0) continue;
+        await api.roles.addMembers(eventId, action.id, role.id, perCat[cat]);
+        for (const id of perCat[cat]) next[cat].add(id);
+        added += perCat[cat].length;
+      }
+      setMembership(next);
+      setApplyResult({
+        perCategory: perCat,
+        added,
+        skippedReview: 0,
+        skippedExisting: 0,
+        classifiedTotal: added,
+        error: null,
+      });
+      toast.success(`要確認 ${added} 人を追加しました`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "追加に失敗しました";
+      setMembership(next);
+      setApplyResult({
+        perCategory: perCat,
+        added: 0,
+        skippedReview: 0,
+        skippedExisting: 0,
+        classifiedTotal: 0,
+        error: msg,
+      });
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleSync = async () => {
     const ok = await confirm({
       message:
@@ -423,6 +498,16 @@ export function AutoClassifyTab({ eventId, action }: Props) {
             >
               {busy ? "適用中..." : "自動割り当てを適用 (名簿ゲート)"}
             </button>
+            {preview.summary.needsReview > 0 && (
+              <button
+                onClick={handleAssignNeedsReview}
+                disabled={busy}
+                style={s.secondaryBtn}
+                data-testid="assign-review-btn"
+              >
+                要確認 {preview.summary.needsReview} 人をまとめて追加
+              </button>
+            )}
             <button
               onClick={handleSync}
               disabled={busy}
@@ -462,10 +547,33 @@ export function AutoClassifyTab({ eventId, action }: Props) {
                 </span>
               ) : (
                 <span>
-                  追加した人はいませんでした。分類済 {applyResult.classifiedTotal}{" "}
-                  人 (既存 {applyResult.skippedExisting} / 要確認除外{" "}
-                  {applyResult.skippedReview})。抽出が 0 人の場合は Slack{" "}
-                  <code>users:read</code> 権限をご確認ください。
+                  追加した人はいませんでした。抽出 {preview.summary.total} 人の内訳:
+                  追加 0 / 既存 {applyResult.skippedExisting} / 要確認除外{" "}
+                  {applyResult.skippedReview} / 未分類{" "}
+                  {preview.summary.unclassified}。
+                  {applyResult.skippedReview > 0 && (
+                    <>
+                      {" "}
+                      運営・スポンサーは名簿に無いと「要確認」で除外されます。名簿
+                      (メンバー名簿タブ) を投入するか、上の「要確認 N
+                      人をまとめて追加」で確定できます。
+                    </>
+                  )}
+                  {preview.summary.unclassified > 0 && (
+                    <>
+                      {" "}
+                      未分類の {preview.summary.unclassified}{" "}
+                      人は表示名の先頭に「(運営)/(参加者)」等が無いためです (各行の
+                      チェックで手動割り当てできます)。
+                    </>
+                  )}
+                  {preview.summary.total === 0 && (
+                    <>
+                      {" "}
+                      抽出 0 人です。Slack <code>users:read</code>{" "}
+                      権限をご確認ください。
+                    </>
+                  )}
                 </span>
               )}
             </div>
