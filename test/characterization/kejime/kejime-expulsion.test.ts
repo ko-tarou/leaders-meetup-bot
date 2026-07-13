@@ -56,7 +56,7 @@ beforeEach(async () => {
 
 async function setup(opts: {
   points?: number; ramen?: number; expelledAt?: string | null;
-  channel?: boolean;
+  channel?: boolean; morningChannelId?: string;
 } = {}) {
   const ev = await makeEvent();
   const tracker = await makeEventAction(ev.id, {
@@ -68,7 +68,10 @@ async function setup(opts: {
   });
   const morning = await makeEventAction(ev.id, {
     actionType: "morning_standup",
-    config: JSON.stringify({ schemaVersion: 1, roleId: "r-exp" }),
+    config: JSON.stringify({
+      schemaVersion: 1, roleId: "r-exp",
+      ...(opts.morningChannelId ? { channelId: opts.morningChannelId } : {}),
+    }),
   });
   const role = await makeSlackRole(tracker.id, { id: "r-exp", name: "朝活" });
   await makeSlackRoleMember(role.id, "U1");
@@ -111,6 +114,43 @@ describe("checkAndExpelIfNeeded", () => {
     expect(posts[0].args[0]).toBe("C-KEJIME");
     expect(posts[0].args[1]).toContain("<@U1>");
     expect(posts[0].args[1]).toContain("除名");
+  });
+
+  it("朝活会チャンネル (morning_standup.channelId) から Slack kick する", async () => {
+    const { tracker } = await setup({ ramen: 3, morningChannelId: "C-ASAKATSU" });
+    const slack = new MockSlackClient();
+    const res = await checkAndExpelIfNeeded(
+      env.DB, slack as unknown as SlackClient, tracker.id, "km-u1",
+    );
+    expect(res.expelled).toBe(true);
+    const kicks = slack.callsOf("conversationsKick");
+    expect(kicks).toHaveLength(1);
+    expect(kicks[0].args).toEqual(["C-ASAKATSU", "U1"]);
+  });
+
+  it("kick が失敗しても除名記録は確定する (fail-soft)", async () => {
+    const { tracker } = await setup({ ramen: 3, morningChannelId: "C-ASAKATSU" });
+    const slack = new MockSlackClient();
+    slack.setFailure("conversationsKick", new Error("slack down"));
+    const res = await checkAndExpelIfNeeded(
+      env.DB, slack as unknown as SlackClient, tracker.id, "km-u1",
+    );
+    expect(res.expelled).toBe(true);
+    const m = await testDb().select().from(kejimeMembers)
+      .where(eq(kejimeMembers.id, "km-u1")).get();
+    expect(m?.expelledAt).toBeTruthy();
+    // 通知はその後も実行される (kick 失敗が後続を止めない)。
+    expect(slack.callsOf("postMessage")).toHaveLength(1);
+  });
+
+  it("morning チャンネル未設定なら kick しない (除名は成立)", async () => {
+    const { tracker } = await setup({ ramen: 3 });
+    const slack = new MockSlackClient();
+    const res = await checkAndExpelIfNeeded(
+      env.DB, slack as unknown as SlackClient, tracker.id, "km-u1",
+    );
+    expect(res.expelled).toBe(true);
+    expect(slack.callsOf("conversationsKick")).toHaveLength(0);
   });
 
   it("激辛 2 杯 (閾値未満) → 何もしない", async () => {
