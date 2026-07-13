@@ -30,6 +30,29 @@ jobs:
       - name: Run tests (vitest + miniflare D1)
         run: npm run test
 
+  # 006-cd: ビルドゲート。フロントの vite build と worker の型付きバンドルが
+  # 壊れていないかを CD 前に PR で保証する。wrangler --dry-run はアップロードせず
+  # ローカルでバンドルするだけなので secret 不要 (本番には一切接続しない)。
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend assets
+        run: npm run build:frontend
+
+      # public/ を読み込んで worker をバンドル検証する (dry-run: 実 deploy はしない)。
+      - name: Bundle worker (wrangler dry-run)
+        run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-dry
+
   # Phase4-0: FE 安全網ジョブ。BE job (workerd pool) とは別 job に分離し、
   # jsdom 実行環境が BE と干渉しないようにする。secrets 不要
   # (API は fetch を stub。本番 D1 / Cloudflare / Slack には接続しない)。
