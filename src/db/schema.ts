@@ -100,8 +100,32 @@ export const tasks = sqliteTable(
     createdBySlackId: text("created_by_slack_id").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    // gantt_tracker (migration 0077): すべて NULL 許容 = 既存アクションと後方互換
+    team: text("team"),
+    phase: text("phase"), // フェーズ id (例 "F1")
+    wbs: text("wbs"), // WBS 番号 (例 "3.2")
+    progressPct: integer("progress_pct"), // 0-100, NULL = 未設定
   },
   (t) => [index("idx_tasks_event_id").on(t.eventId)],
+);
+
+// タスク依存 (gantt_tracker, migration 0077)。「taskId は dependsOnTaskId の後」を表す。
+export const taskDependencies = sqliteTable(
+  "task_dependencies",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id),
+    dependsOnTaskId: text("depends_on_task_id")
+      .notNull()
+      .references(() => tasks.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_task_dependencies_pair").on(t.taskId, t.dependsOnTaskId),
+    index("idx_task_dependencies_task_id").on(t.taskId),
+  ],
 );
 
 // タスク担当者（多対多、ADR-0002 Geminiレビューで正規化採用）
@@ -1251,3 +1275,52 @@ export const cottageContent = sqliteTable("cottage_content", {
   // クライアント同期判定用の更新時刻 (ISO 8601 UTC)。
   updatedAt: text("updated_at").notNull(),
 });
+
+// ADR-0011: channel_router (Slack チャンネル自動振り分け) のルール表 (migration 0090)。
+// 「この対象 (運営ロール or 参加者) はこのチャンネルへ」の 1 対応 = 1 行。
+//   - target_kind='role': role_id が同一イベントの role_management 配下 slack_roles を指す
+//   - target_kind='participant': 名簿 (slack_roles) に居ないメンバー向け。role_id は NULL
+// UNIQUE は migration 側で coalesce(role_id,'') を含む式インデックスとして表現する
+// (SQLite の UNIQUE は NULL を別値扱いするため。schema 上は通常 index のみ)。
+export const channelRouterRules = sqliteTable(
+  "channel_router_rules",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").notNull(), // 'role' | 'participant'
+    roleId: text("role_id").references(() => slackRoles.id, {
+      onDelete: "cascade",
+    }),
+    channelId: text("channel_id").notNull(),
+    channelName: text("channel_name"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [index("idx_channel_router_rules_action").on(t.eventActionId)],
+);
+
+// ADR-0011: 手動同期 (users.list) / 将来の team_join で検出したメンバーのスナップショット。
+// status: 'pending' (未振り分け) | 'ignored' (対象外にした) | 'routed' (招待実行済み・次フェーズ)
+export const channelRouterMembers = sqliteTable(
+  "channel_router_members",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    slackUserId: text("slack_user_id").notNull(),
+    displayName: text("display_name"),
+    status: text("status").notNull().default("pending"),
+    firstSeenAt: text("first_seen_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("channel_router_members_action_user_uniq").on(
+      t.eventActionId,
+      t.slackUserId,
+    ),
+    index("idx_channel_router_members_status").on(t.eventActionId, t.status),
+  ],
+);
