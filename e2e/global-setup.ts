@@ -52,6 +52,9 @@ export default function globalSetup() {
     `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-roster','cottage','member_roster','{}',1,'${now}','${now}');`,
     // add/delete 動線テスト用の type は毎回まっさらにする (schedule_polling を使う)。
     `DELETE FROM event_actions WHERE event_id='cottage' AND action_type='schedule_polling';`,
+    // channel_router を「+新規追加」モーダルから追加する再現テスト用。毎回まっさらに
+    // して cottage には未登録の状態から始める (モーダルが選択肢に出す前提)。
+    `DELETE FROM event_actions WHERE event_id='cottage' AND action_type='channel_router';`,
     // サンプルデータ プリロード検証用:
     // - タイムテーブルは決定的な 2 日/3 項目の fixture に毎回リセット
     //   (0074 の seed は INSERT...SELECT で旧テーブル依存のため直接は再実行できない)。
