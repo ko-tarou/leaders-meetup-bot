@@ -37,6 +37,8 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "app_management",
   // gantt_tracker: カンファレンス等のガント/タスク管理 (ADR-0009)。
   "gantt_tracker",
+  // channel_router: 新規参加メンバーのチャンネル自動振り分け (ADR-0011)。
+  "channel_router",
 ];
 
 type Props = {

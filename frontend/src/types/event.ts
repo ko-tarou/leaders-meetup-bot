@@ -36,7 +36,10 @@ export type EventActionType =
   // config.links = [{label, url}] でエディタページへの導線を持つ (BE #352)。
   | "app_management"
   // カンファレンス等の長期プロジェクトのガント/タスク管理 (ADR-0009 gantt モジュール)。
-  | "gantt_tracker";
+  | "gantt_tracker"
+  // ADR-0011: チャンネル自動振り分け (HackIT)。新規参加メンバーを運営名簿の
+  // 役割に応じたチャンネルへ振り分ける。PR1 はルール表 + ドライランまで。
+  | "channel_router";
 
 export type EventAction = {
   id: string;

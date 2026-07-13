@@ -92,6 +92,25 @@ export default function globalSetup() {
     `INSERT INTO kejime_penalties (id,event_action_id,member_id,slack_user_id,date,theme,theme_key,points,required_chars,status,late_event_id,created_at) VALUES ('e2e-pen1','e2e-kejime','e2e-km2','UE2E0002','${todayJst}','E2Eテーマ',NULL,2,2000,'open','e2e-late1','${now}');`,
     `DELETE FROM morning_attendance WHERE event_action_id='e2e-morning';`,
     `INSERT INTO morning_attendance (id,event_action_id,date,slack_user_id,status,recorded_at) VALUES ('e2e-ma1','e2e-morning','${todayJst}','UE2E0002','late','${now}');`,
+    // ADR-0011 channel_router E2E 用 seed (hackit-e2e イベント)。
+    // - 運営名簿: role_management (e2e-cr-roles) + ロール「運営」(e2e-cr-role-ops) にメンバー UE2ECR01。
+    // - channel_router action (e2e-cr): config.workspaceId は 'e2e-cr-ws' (workspaces 行は
+    //   ダミー。sync / チャンネル一覧はローカルで動かない前提 = 手入力フォールバックを踏む)。
+    // - 検出済みメンバー 2 名 (運営 UE2ECR01 / 参加者 UE2ECR02) を pending で直接 seed。
+    // - 「運営 -> #ops」ルールは seed 済み。参加者ルールは E2E が UI から追加する
+    //   (毎回リセットして決定的にする)。
+    `INSERT OR REPLACE INTO events (id,type,name,config,status,created_at) VALUES ('hackit-e2e','hackathon','HackIt E2E','{}','active','${now}');`,
+    `INSERT OR REPLACE INTO workspaces (id,name,slack_team_id,bot_token,signing_secret,created_at) VALUES ('e2e-cr-ws','HackIT (E2E)','TE2ECR','dummy','dummy','${now}');`,
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-cr-roles','hackit-e2e','role_management','{"workspaceId":"e2e-cr-ws"}',1,'${now}','${now}');`,
+    `INSERT OR REPLACE INTO slack_roles (id,event_action_id,name,created_at,updated_at) VALUES ('e2e-cr-role-ops','e2e-cr-roles','運営','${now}','${now}');`,
+    `DELETE FROM slack_role_members WHERE role_id='e2e-cr-role-ops';`,
+    `INSERT INTO slack_role_members (role_id,slack_user_id,added_at) VALUES ('e2e-cr-role-ops','UE2ECR01','${now}');`,
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-cr','hackit-e2e','channel_router','{"schemaVersion":1,"workspaceId":"e2e-cr-ws"}',1,'${now}','${now}');`,
+    `DELETE FROM channel_router_rules WHERE event_action_id='e2e-cr';`,
+    `INSERT INTO channel_router_rules (id,event_action_id,target_kind,role_id,channel_id,channel_name,created_at,updated_at) VALUES ('e2e-cr-rule-ops','e2e-cr','role','e2e-cr-role-ops','CE2EOPS','ops','${now}','${now}');`,
+    `DELETE FROM channel_router_members WHERE event_action_id='e2e-cr';`,
+    `INSERT INTO channel_router_members (id,event_action_id,slack_user_id,display_name,status,first_seen_at,updated_at) VALUES ('e2e-cr-m1','e2e-cr','UE2ECR01','E2E運営メンバー','pending','${now}','${now}');`,
+    `INSERT INTO channel_router_members (id,event_action_id,slack_user_id,display_name,status,first_seen_at,updated_at) VALUES ('e2e-cr-m2','e2e-cr','UE2ECR02','E2E参加者メンバー','pending','${now}','${now}');`,
   ].join("\n");
 
   const dir = mkdtempSync(join(tmpdir(), "lmb-e2e-"));

@@ -240,6 +240,9 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // gantt_tracker: カンファレンス等の長期プロジェクトのガント/タスク管理
     // (ADR-0009 モジュラーモノリス第 1 号)。config = GanttConfig (teams/phases/summaryGroups)。
     "gantt_tracker",
+    // ADR-0011: channel_router。新規参加メンバーを役割 (運営名簿) に応じた
+    // チャンネルへ振り分ける。PR1 はルール表 + 手動同期 + ドライランまで。
+    "channel_router",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
@@ -280,6 +283,8 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
   // member_roster は schemaVersion を持たせて将来の論理マイグレーションに備える。
   const DEFAULT_CONFIG: Record<string, string> = {
     member_roster: JSON.stringify({ schemaVersion: 1 }),
+    // channel_router: workspaceId はメインタブの picker で後から設定する。
+    channel_router: JSON.stringify({ schemaVersion: 1, workspaceId: null }),
     morning_standup: JSON.stringify({
       schemaVersion: 1,
       channelId: null,

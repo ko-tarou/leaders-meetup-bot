@@ -1276,6 +1276,7 @@ export const cottageContent = sqliteTable("cottage_content", {
   updatedAt: text("updated_at").notNull(),
 });
 
+
 // ADR-0011: channel_router (Slack チャンネル自動振り分け) のルール表 (migration 0090)。
 // 「この対象 (運営ロール or 参加者) はこのチャンネルへ」の 1 対応 = 1 行。
 //   - target_kind='role': role_id が同一イベントの role_management 配下 slack_roles を指す

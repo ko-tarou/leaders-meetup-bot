@@ -98,6 +98,15 @@ export function getSubTabs(
       { id: "settings", label: "設定" },
     ];
   }
+  // ADR-0011: channel_router は「メイン (未振り分け + ドライラン) / 振り分けルール /
+  // その他設定」の 3 sub-tab。
+  if (actionType === "channel_router") {
+    return [
+      { id: "main", label: "メイン" },
+      { id: "rules", label: "振り分けルール" },
+      { id: "settings", label: "その他設定" },
+    ];
+  }
   return [
     { id: "main", label: "メイン" },
     { id: "settings", label: "設定" },

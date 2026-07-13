@@ -10,6 +10,7 @@ import { CalendarTab } from "../components/member-application/CalendarTab";
 import { NotificationsTab } from "../components/member-application/NotificationsTab";
 import { ParticipationFormsTab } from "../components/member-application/ParticipationFormsTab";
 import { RolesTab } from "../components/role-management/RolesTab";
+import { ChannelRouterRulesTab } from "../components/channel-router/ChannelRouterRulesTab";
 import { RoleMembersTab } from "../components/role-management/RoleMembersTab";
 import { RoleSyncTab } from "../components/role-management/RoleSyncTab";
 import { WeeklyReminderListPage } from "./WeeklyReminderListPage";
@@ -199,6 +200,9 @@ export function ActionDetailPage() {
       )}
       {subTab === "roles" && actionType === "role_management" && (
         <RolesTab eventId={eventId} action={action} />
+      )}
+      {subTab === "rules" && actionType === "channel_router" && (
+        <ChannelRouterRulesTab eventId={eventId} action={action} />
       )}
       {subTab === "members" && actionType === "role_management" && (
         <RoleMembersTab eventId={eventId} action={action} />
