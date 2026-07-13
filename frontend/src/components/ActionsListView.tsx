@@ -35,6 +35,8 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "stale_pr_nudge",
   // app_management: イベント連動アプリの表示コンテンツ管理 (エディタリンク集)。
   "app_management",
+  // channel_router: 新規参加メンバーのチャンネル自動振り分け (ADR-0011)。
+  "channel_router",
 ];
 
 type Props = {

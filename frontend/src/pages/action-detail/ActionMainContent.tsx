@@ -12,6 +12,7 @@ import { GoalReminderMainTab } from "../../components/goal-reminder/GoalReminder
 import { TutorialMainTab } from "../../components/tutorial/TutorialMainTab";
 import { RosterPage } from "../roster/RosterPage";
 import { AppManagementTab } from "../../components/app-management/AppManagementTab";
+import { ChannelRouterMainTab } from "../../components/channel-router/ChannelRouterMainTab";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
 
@@ -71,6 +72,14 @@ export function ActionMainContent({
     case "tutorial":
       return (
         <TutorialMainTab eventId={eventId} actionId={action.id} action={action} />
+      );
+    case "channel_router":
+      return (
+        <ChannelRouterMainTab
+          eventId={eventId}
+          action={action}
+          onChanged={onChanged ?? (() => {})}
+        />
       );
     case "app_management":
       return (
