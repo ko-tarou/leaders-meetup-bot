@@ -35,6 +35,8 @@ export function GanttScopeView({
   // 月別モードの月ドロップダウン (null = 全て)。選択肢は GanttMonthlyTab から通知。
   const [monthSel, setMonthSel] = useState<string | null>(null);
   const [months, setMonths] = useState<string[]>([]);
+  // 全体モードの抽象度ドロップダウン: 詳細 (全タスク) / 最上位 (WBS トップ集約)。
+  const [overview, setOverview] = useState<"detail" | "top">("detail");
 
   // 「チーム別」の選択肢はタスクの team 属性 (∪ config.teams) から作る。
   // config.teams の順を優先し、config 外の実在チームを後ろに並べる。
@@ -81,6 +83,17 @@ export function GanttScopeView({
             </button>
           ))}
         </div>
+        {scope === "all" && (
+          <select
+            data-testid="gantt-overview-select"
+            value={overview}
+            onChange={(e) => setOverview(e.target.value as "detail" | "top")}
+            style={dropdownStyle}
+          >
+            <option value="detail">詳細 (全タスク)</option>
+            <option value="top">最上位 (WBS トップ集約)</option>
+          </select>
+        )}
         {scope === "team" && teams.length > 0 && (
           <select
             data-testid="gantt-team-select"
@@ -123,6 +136,7 @@ export function GanttScopeView({
           action={action}
           fullscreen={fullscreen}
           teamFilter={scope === "team" ? team : null}
+          rollup={scope === "all" && overview === "top"}
         />
       )}
     </div>
