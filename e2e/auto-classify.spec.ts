@@ -172,3 +172,61 @@ test("HackIt2026 再現: 運営ロールのみで適用を押すと無反応で�
   await expect(banner).toContainText("ロールを初期化");
   await page.screenshot({ path: "test-results/auto-classify-5-uninit-feedback.png" });
 });
+
+test("HackIT2026相当: 名簿空で全員要確認 -> 0件内訳明示 -> 要確認まとめ追加で救済", async ({
+  page,
+}) => {
+  // 抽出はあるが全 staff が needsReview (名簿0) + 未分類あり = 本人が踏んだ「追加0」。
+  const preview = {
+    workspaceId: "ws1",
+    rosterActionFound: true,
+    summary: {
+      total: 3,
+      byCategory: { participant: 0, staff: 2, sponsor: 0, judge: 0 },
+      unclassified: 1,
+      needsReview: 2,
+    },
+    members: [
+      { id: "S1", displayName: "(運営)甲", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: false, needsReview: true },
+      { id: "S2", displayName: "(運営)乙", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: false, needsReview: true },
+      { id: "P1", displayName: "名無し", category: null, categoryLabel: null, matchedLabel: null, inRoster: false, needsReview: false },
+    ],
+  };
+  const posted: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const url = req.url().split("?")[0];
+    const json = (v: unknown) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(v) });
+    if (url.endsWith("/classify-preview")) return json(preview);
+    const mM = url.match(/\/roles\/([^/]+)\/members$/);
+    if (mM && req.method() === "POST") {
+      posted.push(`${mM[1]}:${req.postData() ?? ""}`);
+      return json({ ok: true, added: 1 });
+    }
+    if (mM && req.method() === "GET") return json([]);
+    if (url.endsWith("/roles")) return json(ROLES);
+    return route.continue();
+  });
+
+  await gotoSpa(page, "/events/hackit-ac/actions/role_management");
+  await page.getByRole("button", { name: "自動分類", exact: true }).click();
+
+  // 「適用」= 全員要確認除外で 0 件。内訳バナーで理由を明示。
+  await page.getByTestId("apply-auto-btn").click();
+  const banner = page.getByTestId("apply-result");
+  await expect(banner).toContainText("追加した人はいませんでした");
+  await expect(banner).toContainText("要確認除外 2");
+  await expect(banner).toContainText("未分類 1");
+  await page.screenshot({ path: "test-results/auto-classify-6-zero-breakdown.png" });
+
+  // 「要確認 2 人をまとめて追加」で救済 -> 確認 -> 反映。
+  await page.getByTestId("assign-review-btn").click();
+  await page.getByRole("button", { name: "2 人を追加" }).click();
+  await expect(banner).toContainText("2 人に割り当てました");
+  await page.screenshot({ path: "test-results/auto-classify-7-review-rescued.png" });
+
+  const staffPost = posted.find((p) => p.startsWith("r-staff:"));
+  expect(staffPost).toContain("S1");
+  expect(staffPost).toContain("S2");
+});
