@@ -32,6 +32,8 @@ import { slackReadRouter } from "./api/slack-read";
 import { cottageRouter } from "./api/cottage";
 import { cottageContentRouter } from "./api/cottage-content";
 import { eventsTimetableRouter } from "./api/events-timetable";
+// ADR-0009: モジュール（src/modules/*）の import は index 経由・この api.ts のみで行う。
+import { ganttRouter } from "../modules/gantt";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -177,5 +179,8 @@ api.route("/", cottageRouter);
 api.route("/", cottageContentRouter);
 // 汎用イベント タイムテーブル: イベント CRUD (admin) + 公開 GET /events/:id/timetable。
 api.route("/", eventsTimetableRouter);
+// gantt_tracker (ADR-0009 モジュール第 1 号): サマリー/月別のサーバ導出 + 依存 CRUD。
+// /gantt/:eventId/* で adminAuth に保護される。
+api.route("/", ganttRouter);
 
 export { api };
