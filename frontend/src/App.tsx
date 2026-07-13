@@ -138,6 +138,12 @@ function AppShell() {
   const granted = usePublicGranted();
   const isPublic = publicMode !== null;
   const isMobile = useIsMobile();
+  const { pathname } = useLocation();
+  // ガント (gantt_tracker) は表 + タイムラインが横に広く、800px の本文幅では
+  // 常に横スクロールが必要で可読性が低かった。ガント表示中だけ本文の最大幅を
+  // 広げ、サイドバーと画面右端の間を目一杯使えるようにする (Excel 的な見やすさ)。
+  const isGanttWide =
+    !isMobile && pathname.includes("/actions/gantt_tracker");
   if (tokenInvalid) {
     return <AdminTokenPrompt message={fetchError ?? undefined} />;
   }
@@ -193,7 +199,8 @@ function AppShell() {
       style={{
         flex: 1,
         minWidth: 0,
-        maxWidth: 800,
+        // 通常は 800px センタリング。ガント表示中は 1600px まで広げる。
+        maxWidth: isGanttWide ? 1600 : 800,
         // desktop で sidebar と本文の間に余白を入れる。mobile は中央寄せ。
         margin: isMobile || isPublic ? "0 auto" : "0 auto 0 0",
         width: "100%",
