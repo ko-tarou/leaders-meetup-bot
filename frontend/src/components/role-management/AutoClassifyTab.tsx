@@ -247,8 +247,25 @@ export function AutoClassifyTab({ eventId, action }: Props) {
   // gated (運営/スポンサー) は needsReview を除外し安全側に倒す。
   const handleApplyAuto = async () => {
     if (!preview || !membership) return;
+    // ロール未初期化 (このイベントに 4 カテゴリロールが無い) 時は、無反応ではなく
+    // 明示のバナー + トーストで「初期化してください」を出す (旧: ボタン disabled で
+    // 押しても何も起きなかった = HackIt2026 等の未 seed イベントで詰む原因)。
     if (!allCategoryRolesExist) {
-      toast.error("先に「ロールを初期化」してください");
+      const missing = CATEGORY_ORDER.filter((c) => !categoryRole.get(c)).map(
+        (c) => CATEGORY_LABELS[c],
+      );
+      const msg = `このイベントにはロールが未初期化です (未作成: ${missing.join(
+        " / ",
+      )})。上の「ロールを初期化」を押してから、もう一度「適用」してください。`;
+      toast.error("ロールが未初期化です。先に「ロールを初期化」を押してください");
+      setApplyResult({
+        perCategory: { participant: [], staff: [], sponsor: [], judge: [] },
+        added: 0,
+        skippedReview: 0,
+        skippedExisting: 0,
+        classifiedTotal: 0,
+        error: msg,
+      });
       return;
     }
     setBusy(true);
@@ -400,7 +417,7 @@ export function AutoClassifyTab({ eventId, action }: Props) {
           <div style={{ display: "flex", gap: "0.5rem", margin: "0.75rem 0" }}>
             <button
               onClick={handleApplyAuto}
-              disabled={busy || !allCategoryRolesExist}
+              disabled={busy}
               style={s.primaryBtn}
               data-testid="apply-auto-btn"
             >
