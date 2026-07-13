@@ -870,6 +870,9 @@ export const kejimeMembers = sqliteTable(
     displayName: text("display_name").notNull(),
     currentPoints: integer("current_points").notNull().default(0),
     ramenCount: integer("ramen_count").notNull().default(0),
+    // migration 0076: 激辛 3 杯到達で自動除名した時刻。NULL = 在籍。
+    // 手動復帰 = 激辛リセット (expelled_at を NULL に戻す) + ロール再追加。
+    expelledAt: text("expelled_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
