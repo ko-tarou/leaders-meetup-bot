@@ -59,9 +59,14 @@ export function ActionMainContent({
     case "member_roster":
       return <RosterPage eventId={eventId} actionId={action.id} />;
     case "gantt_tracker":
-      // 通常タブは 全体 / チーム別 を切替 (月別は既存サブタブがある)。
+      // 全体 / チーム別 / 月別 を 1 つの切替軸に統一 (全画面と同じ体験)。
+      // 各モードで右側に文脈依存ドロップダウン (抽象度 / チーム / 月) が出る。
       return (
-        <GanttScopeView eventId={eventId} action={action} scopes={["all", "team"]} />
+        <GanttScopeView
+          eventId={eventId}
+          action={action}
+          scopes={["all", "team", "monthly"]}
+        />
       );
     case "kejime_tracker":
       return <KejimeAdminTab eventId={eventId} actionId={action.id} />;
