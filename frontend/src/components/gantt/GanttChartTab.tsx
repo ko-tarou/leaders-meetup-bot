@@ -49,20 +49,42 @@ type DragState = {
   deltaDays: number;
 };
 
-// 「最上位抽象度」ロールアップ: WBS トップレベル (major) ごとに 1 本へ集約する。
-// 本データは WBS が "major.minor" のフラット構造 (親タスクを持たない) なので major が
-// トップレベル階層に相当する。開始=最小/終了=最大/進捗=平均/状態=導出の表示専用
-// 合成タスク (id="rollup:<major>") を返す。ドラッグ/編集はしない。
-function rollupByWbsTop(tasks: Task[], config: GanttConfig): Task[] {
+export type RollupLevel = "none" | "mid" | "top";
+
+// minor を 5 番刻みでまとめる中分類ブロック ("1.7" -> 2)。
+const MID_BLOCK = 5;
+function midBlock(wbs: string | null): number {
+  const minor = wbs ? Number.parseInt(wbs.split(".")[1] ?? "", 10) : NaN;
+  return Number.isNaN(minor) ? 1 : Math.ceil(minor / MID_BLOCK);
+}
+
+// 抽象度ロールアップ (表示専用・ドラッグ/編集不可)。本データは WBS が "major.minor"
+// のフラット構造 (親タスク未使用) なので:
+//   - top: WBS トップレベル (major) ごとに 1 本へ集約 (最上位)。
+//   - mid: (major, minor を 5 番刻みでまとめた中分類) ごとに集約 (最上位と詳細の中間)。
+//     major と team が 1:1 の当データでは team/minor 集約は最上位/詳細と粒度が重複する
+//     ため、minor を粗くまとめた中分類を採用 (major あたり複数本 < 全タスク)。
+// 開始=最小/終了=最大/進捗=平均/状態=導出。
+function rollupTasks(
+  tasks: Task[],
+  config: GanttConfig,
+  level: "mid" | "top",
+): Task[] {
+  const keyOf = (t: Task): string => {
+    const major = t.wbs ? t.wbs.split(".")[0] : "その他";
+    return level === "top" ? major : `${major}.${midBlock(t.wbs)}`;
+  };
   const groups = new Map<string, Task[]>();
   for (const t of tasks) {
-    const key = t.wbs ? t.wbs.split(".")[0] : "その他";
+    const key = keyOf(t);
     const arr = groups.get(key);
     if (arr) arr.push(t);
     else groups.set(key, [t]);
   }
   const out: Task[] = [];
-  for (const [key, members] of groups) {
+  for (const [key, group] of groups) {
+    const members = [...group].sort((a, b) => compareWbs(a.wbs, b.wbs));
+    const major = key.split(".")[0];
     const starts = members.map((m) => m.startAt).filter((v): v is string => !!v);
     const dues = members.map((m) => m.dueAt).filter((v): v is string => !!v);
     const progs = members.map((m) => m.progressPct ?? (m.status === "done" ? 100 : 0));
@@ -72,11 +94,15 @@ function rollupByWbsTop(tasks: Task[], config: GanttConfig): Task[] {
       : members.some((m) => m.status === "doing") || progressPct > 0
         ? "doing"
         : "todo";
+    const base =
+      config.phases.find((p) => p.id === `F${major}`)?.label ??
+      (major === "その他" ? "その他" : `WBS ${major}`);
+    const first = members[0]?.wbs ?? major;
+    const last = members[members.length - 1]?.wbs ?? major;
     const label =
-      config.phases.find((p) => p.id === `F${key}`)?.label ??
-      (key === "その他" ? "その他" : `WBS ${key}`);
+      level === "top" ? base : `${base} (${first}-${last})`;
     out.push({
-      id: `rollup:${key}`,
+      id: `rollup:${level}:${key}`,
       eventId: members[0].eventId,
       parentTaskId: null,
       title: `${label} (${members.length}件)`,
@@ -90,7 +116,8 @@ function rollupByWbsTop(tasks: Task[], config: GanttConfig): Task[] {
       updatedAt: "",
       team: members[0].team,
       phase: null,
-      wbs: key,
+      // top は major、mid は先頭メンバーの wbs を代表値にして左表/並びを自然にする。
+      wbs: level === "top" ? major : first,
       progressPct,
     });
   }
@@ -103,7 +130,7 @@ export function GanttChartTab({
   fullscreen = false,
   teamFilter = null,
   monthFilter = null,
-  rollup = false,
+  rollupLevel = "none",
 }: {
   eventId: string;
   action: EventAction;
@@ -116,9 +143,11 @@ export function GanttChartTab({
   // 「月別」表示の対象月 ("YYYY-MM")。指定月にかかる (期間が重なる) タスクだけに絞る。
   // null なら月で絞らない。全体/チーム別と同じガント描画をそのまま使う。
   monthFilter?: string | null;
-  // 「最上位抽象度」表示。true なら WBS トップレベルごとに 1 本へ集約 (表示専用)。
-  rollup?: boolean;
+  // 全体モードの抽象度: none=詳細(全タスク) / mid=中間(WBS 中分類) / top=最上位(major 集約)。
+  // mid/top は表示専用 (ドラッグ/編集不可)。
+  rollupLevel?: RollupLevel;
 }) {
+  const rollup = rollupLevel !== "none";
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,10 +211,13 @@ export function GanttChartTab({
     return list;
   }, [tasks, teamFilter, monthFilter]);
 
-  // 表示タスク: 最上位抽象度なら WBS トップレベルへ集約、通常はそのまま。
+  // 表示タスク: 中間/最上位なら WBS で集約、詳細 (none) はそのまま。
   const displayTasks = useMemo(
-    () => (rollup ? rollupByWbsTop(visibleTasks, config) : visibleTasks),
-    [rollup, visibleTasks, config],
+    () =>
+      rollupLevel === "none"
+        ? visibleTasks
+        : rollupTasks(visibleTasks, config, rollupLevel),
+    [rollupLevel, visibleTasks, config],
   );
 
   // チーム順 (config.teams -> 未知チーム -> チームなし) に WBS 順で並べる
@@ -537,7 +569,7 @@ export function GanttChartTab({
       </div>
       <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
         {rollup
-          ? "最上位抽象度: WBS トップレベルごとに集約した表示専用ビューです。右上のドロップダウンで「詳細」に戻すと編集できます。"
+          ? "抽象度ビュー: WBS で集約した表示専用ビューです。右上のドロップダウンで「詳細」に戻すと編集できます。"
           : "バーをドラッグで期間ごと移動・両端ドラッグで開始/終了日を変更。行クリックで選択し、上の依存パネルで先行タスクを設定できます。"}
       </p>
     </div>
