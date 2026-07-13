@@ -4,6 +4,7 @@ import { api } from "../../api";
 import { useToast } from "../ui/Toast";
 import { colors } from "../../styles/tokens";
 import { compareWbs, parseGanttConfig, DAY_MS, dateLabel } from "./ganttUtils";
+import { GanttAddTaskForm } from "./GanttAddTaskForm";
 
 // gantt_tracker メイン画面 (ADR-0009):
 // 左 = タスクテーブル (状態/進捗を直接編集)、右 = SVG タイムライン
@@ -24,6 +25,16 @@ const TEAM_COLORS = [
   "#65a30d", // lime
 ];
 const STATUS_LABEL: Record<string, string> = { todo: "未着手", doing: "進行中", done: "完了" };
+
+const toolbarBtnStyle: React.CSSProperties = {
+  fontSize: 13,
+  padding: "6px 12px",
+  border: `1px solid ${colors.borderStrong}`,
+  borderRadius: 4,
+  background: colors.surface,
+  color: colors.text,
+  cursor: "pointer",
+};
 
 type Row =
   | { kind: "team"; team: string }
@@ -60,6 +71,7 @@ export function GanttChartTab({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
   const toast = useToast();
 
   const config: GanttConfig = useMemo(
@@ -260,10 +272,18 @@ export function GanttChartTab({
 
   return (
     <div>
-      {/* 全画面 (別タブ) で開く導線。Excel のように広く見たいニーズ向け。
-          fullscreen 表示中は再帰しないよう出さない。 */}
-      {!fullscreen && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+      {/* ツールバー: タスク追加 (全画面でも使える) + 別画面で開く (通常のみ)。 */}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
+        <button
+          type="button"
+          data-testid="gantt-add-task-toggle"
+          onClick={() => setShowAdd((v) => !v)}
+          style={toolbarBtnStyle}
+        >
+          {showAdd ? "タスク追加を閉じる" : "タスク追加"}
+        </button>
+        {/* 全画面 (別タブ) で開く導線。fullscreen 表示中は再帰しないよう出さない。 */}
+        {!fullscreen && (
           <button
             type="button"
             data-testid="gantt-open-fullscreen"
@@ -273,19 +293,22 @@ export function GanttChartTab({
                 "_blank",
               )
             }
-            style={{
-              fontSize: 13,
-              padding: "6px 12px",
-              border: `1px solid ${colors.borderStrong}`,
-              borderRadius: 4,
-              background: colors.surface,
-              color: colors.text,
-              cursor: "pointer",
-            }}
+            style={toolbarBtnStyle}
           >
             別画面で開く
           </button>
-        </div>
+        )}
+      </div>
+      {showAdd && (
+        <GanttAddTaskForm
+          eventId={eventId}
+          defaultTeam={teamFilter}
+          onAdded={() => {
+            setShowAdd(false);
+            reload();
+          }}
+          onCancel={() => setShowAdd(false)}
+        />
       )}
       <DependencyPanel
         eventId={eventId}
