@@ -4,13 +4,12 @@ import { api } from "../../api";
 import { colors } from "../../styles/tokens";
 import { parseGanttConfig } from "./ganttUtils";
 import { GanttChartTab } from "./GanttChartTab";
-import { GanttMonthlyTab } from "./GanttMonthlyTab";
 
 // ガントの抽象度切替 (全体 / チーム別 / 月別) を担う共通コンポーネント。
-// 通常タブと全画面 (GanttFullscreenPage) の両方から再利用し、どちらでも同じ軸で
-// 切り替えられるようにする。scopes で出す選択肢を制御する:
-//   - 通常タブ: ["all", "team"] (月別は既存サブタブがあるため)
-//   - 全画面:   ["all", "team", "monthly"] (全画面にはサブタブが無いため全部)
+// 3 モードとも描画は単一の GanttChartTab に統一し、右ドロップダウンで選んだ対象を
+// フィルタ (全件 / チーム / 月 / 最上位集約) として渡すだけ。モードごとの別レンダリング
+// (旧 GanttMonthlyTab の details トグル等) は持たず、見た目・操作を完全に揃える。
+// 通常タブ・全画面 (GanttFullscreenPage) の両方から scopes 指定で再利用する。
 export type GanttScope = "all" | "team" | "monthly";
 const SCOPE_LABEL: Record<GanttScope, string> = {
   all: "全体",
@@ -149,17 +148,16 @@ export function GanttScopeView({
           </select>
         )}
       </div>
-      {scope === "monthly" ? (
-        <GanttMonthlyTab eventId={eventId} monthFilter={monthSel} />
-      ) : (
-        <GanttChartTab
-          eventId={eventId}
-          action={action}
-          fullscreen={fullscreen}
-          teamFilter={scope === "team" ? team : null}
-          rollup={scope === "all" && overview === "top"}
-        />
-      )}
+      {/* 全体 / チーム別 / 月別 は同じ GanttChartTab (左タスク行 + 右タイムライン
+          バー) にフィルタを渡すだけ。モードごとに別レンダリングは持たない。 */}
+      <GanttChartTab
+        eventId={eventId}
+        action={action}
+        fullscreen={fullscreen}
+        teamFilter={scope === "team" ? team : null}
+        monthFilter={scope === "monthly" ? monthSel : null}
+        rollup={scope === "all" && overview === "top"}
+      />
     </div>
   );
 }
