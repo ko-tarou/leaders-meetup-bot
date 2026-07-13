@@ -55,3 +55,84 @@ test("自動分類タブ: 表示 -> ロール初期化 -> 抽出失敗の案内"
   await expect(page.getByText("運営統括", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("スポンサー", { exact: false }).first()).toBeVisible();
 });
+
+// classify-preview (Slack) を page.route で差し替え、実ブラウザで
+// 「自動割り当てを適用」の押下 -> loading -> 結果バナー -> addMembers 反映
+// までを検証する (E2E 環境に Slack 資格情報が無いため API はブラウザで stub)。
+const ROLES = [
+  { id: "r-participant", name: "参加者", parentRoleId: null },
+  { id: "r-staff", name: "運営", parentRoleId: null },
+  { id: "r-sponsor", name: "スポンサー", parentRoleId: null },
+  { id: "r-judge", name: "審査員", parentRoleId: null },
+].map((r) => ({
+  ...r,
+  description: null,
+  membersCount: 0,
+  channelsCount: 0,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+}));
+
+const PREVIEW = {
+  workspaceId: "ws1",
+  rosterActionFound: true,
+  summary: {
+    total: 4,
+    byCategory: { participant: 1, staff: 3, sponsor: 0, judge: 0 },
+    unclassified: 1,
+    needsReview: 1,
+  },
+  members: [
+    { id: "U1", displayName: "(運営)一致", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: true, needsReview: false },
+    { id: "U2", displayName: "(運営)詐称", category: "staff", categoryLabel: "運営", matchedLabel: "運営", inRoster: false, needsReview: true },
+    { id: "U3", displayName: "(参加者)花子", category: "participant", categoryLabel: "参加者", matchedLabel: "参加者", inRoster: false, needsReview: false },
+    { id: "U5", displayName: "名無し", category: null, categoryLabel: null, matchedLabel: null, inRoster: false, needsReview: false },
+  ],
+};
+
+test("自動割り当てを適用: 押下 -> 結果バナー -> addMembers 反映 (Slack stub)", async ({
+  page,
+}) => {
+  const posted: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const req = route.request();
+    const url = req.url().split("?")[0];
+    const method = req.method();
+    const json = (v: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(v),
+      });
+    if (url.endsWith("/classify-preview")) return json(PREVIEW);
+    const mMembers = url.match(/\/roles\/([^/]+)\/members$/);
+    if (mMembers && method === "POST") {
+      posted.push(`${mMembers[1]}:${req.postData() ?? ""}`);
+      return json({ ok: true, added: 1 });
+    }
+    if (mMembers && method === "GET") return json([]);
+    if (url.endsWith("/roles")) return json(ROLES);
+    // その他の API (アクション解決・イベント一覧等) は実バックエンドへ通す。
+    return route.continue();
+  });
+
+  await gotoSpa(page, "/events/hackit-ac/actions/role_management");
+  await page.getByRole("button", { name: "自動分類", exact: true }).click();
+
+  const applyBtn = page.getByTestId("apply-auto-btn");
+  await expect(applyBtn).toBeVisible();
+  await page.screenshot({ path: "test-results/auto-classify-3-before-apply.png" });
+  await applyBtn.click();
+
+  // 結果バナーで成功 + 内訳 + スキップ理由が明示される。
+  const banner = page.getByTestId("apply-result");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("2 人に割り当てました");
+  await expect(banner).toContainText("要確認 1 人");
+  await page.screenshot({ path: "test-results/auto-classify-4-apply-result.png" });
+
+  // addMembers が正しい targets で呼ばれた (U1 は追加, U2 要確認は除外)。
+  const staffPost = posted.find((p) => p.startsWith("r-staff:"));
+  expect(staffPost).toContain("U1");
+  expect(staffPost).not.toContain("U2");
+});
