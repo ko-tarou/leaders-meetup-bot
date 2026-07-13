@@ -89,12 +89,12 @@ export function getSubTabs(
       { id: "manual", label: "手動アクション" },
     ];
   }
-  // gantt_tracker: ガント本体 + サーバ導出ビュー 2 つ (全体サマリー / 月別)。
+  // gantt_tracker: ガント本体 (全体/チーム別/月別 は main 内の切替軸に統一) +
+  // サーバ導出の全体サマリー + 設定。月別は main の切替軸へ移動したためサブタブから撤去。
   if (actionType === "gantt_tracker") {
     return [
       { id: "main", label: "ガント" },
       { id: "summary", label: "全体サマリー" },
-      { id: "monthly", label: "月別" },
       { id: "settings", label: "設定" },
     ];
   }

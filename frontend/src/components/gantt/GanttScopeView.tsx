@@ -32,6 +32,9 @@ export function GanttScopeView({
   const [scope, setScope] = useState<GanttScope>(scopes[0] ?? "all");
   const [team, setTeam] = useState<string | null>(null);
   const [teams, setTeams] = useState<string[]>([]);
+  // 月別モードの月ドロップダウン (null = 全て)。選択肢は GanttMonthlyTab から通知。
+  const [monthSel, setMonthSel] = useState<string | null>(null);
+  const [months, setMonths] = useState<string[]>([]);
 
   // 「チーム別」の選択肢はタスクの team 属性 (∪ config.teams) から作る。
   // config.teams の順を優先し、config 外の実在チームを後ろに並べる。
@@ -83,7 +86,7 @@ export function GanttScopeView({
             data-testid="gantt-team-select"
             value={team ?? ""}
             onChange={(e) => setTeam(e.target.value)}
-            style={teamSelect}
+            style={dropdownStyle}
           >
             {teams.map((t) => (
               <option key={t} value={t}>
@@ -92,9 +95,28 @@ export function GanttScopeView({
             ))}
           </select>
         )}
+        {scope === "monthly" && months.length > 0 && (
+          <select
+            data-testid="gantt-month-select"
+            value={monthSel ?? ""}
+            onChange={(e) => setMonthSel(e.target.value || null)}
+            style={dropdownStyle}
+          >
+            <option value="">全ての月</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {m.replace("-", "年")}月
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       {scope === "monthly" ? (
-        <GanttMonthlyTab eventId={eventId} />
+        <GanttMonthlyTab
+          eventId={eventId}
+          monthFilter={monthSel}
+          onMonthsChange={setMonths}
+        />
       ) : (
         <GanttChartTab
           eventId={eventId}
@@ -133,7 +155,7 @@ const segmentActive: React.CSSProperties = {
   background: colors.primary,
   color: colors.textInverse,
 };
-const teamSelect: React.CSSProperties = {
+const dropdownStyle: React.CSSProperties = {
   fontSize: 13,
   padding: "5px 8px",
   border: `1px solid ${colors.borderStrong}`,
