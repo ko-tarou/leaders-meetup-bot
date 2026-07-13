@@ -73,6 +73,7 @@ export function getSubTabs(
     return [
       { id: "main", label: "メイン" },
       { id: "roles", label: "ロール" },
+      { id: "auto-classify", label: "自動分類" },
       { id: "members", label: "メンバー名簿" },
       { id: "sync", label: "同期" },
       { id: "settings", label: "その他設定" },

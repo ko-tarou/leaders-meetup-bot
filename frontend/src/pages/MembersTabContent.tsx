@@ -5,6 +5,7 @@ import { colors } from "../styles/tokens";
 import { RosterPage } from "./roster/RosterPage";
 import { RoleMainTab } from "../components/role-management/RoleMainTab";
 import { RolesTab } from "../components/role-management/RolesTab";
+import { AutoClassifyTab } from "../components/role-management/AutoClassifyTab";
 import { RoleMembersTab } from "../components/role-management/RoleMembersTab";
 import { RoleSyncTab } from "../components/role-management/RoleSyncTab";
 import { ActionSettingsContent } from "./action-detail/ActionSettingsContent";
@@ -33,11 +34,18 @@ type SubTab = "roster" | "roles";
 
 // role_management の level-2 サブタブ。ActionDetailPage の subTabs と
 // id を合わせて、将来統合しやすい状態を保つ。
-type RoleSubTab = "main" | "roles" | "members" | "sync" | "settings";
+type RoleSubTab =
+  | "main"
+  | "roles"
+  | "auto-classify"
+  | "members"
+  | "sync"
+  | "settings";
 
 const ROLE_SUB_TABS: { id: RoleSubTab; label: string }[] = [
   { id: "main", label: "サマリ" },
   { id: "roles", label: "ロール" },
+  { id: "auto-classify", label: "自動分類" },
   { id: "members", label: "メンバー" },
   { id: "sync", label: "同期" },
   { id: "settings", label: "設定" },
@@ -182,6 +190,9 @@ export function MembersTabContent({
             )}
             {roleSubTab === "roles" && (
               <RolesTab eventId={eventId} action={roleAction} />
+            )}
+            {roleSubTab === "auto-classify" && (
+              <AutoClassifyTab eventId={eventId} action={roleAction} />
             )}
             {roleSubTab === "members" && (
               <RoleMembersTab eventId={eventId} action={roleAction} />

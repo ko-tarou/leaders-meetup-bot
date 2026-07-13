@@ -1,4 +1,5 @@
 import type {
+  ClassifyPreviewResponse,
   SlackRole,
   SlackRoleChannelRow,
   SlackRoleMemberRow,
@@ -99,6 +100,24 @@ export const roles = {
   workspaceMembers: (eventId: string, actionId: string) =>
     request<SlackUser[]>(
       `/orgs/${eventId}/actions/${actionId}/workspace-members`,
+    ),
+
+  // 命名規則ベースの自動分類プレビュー (抽出→4分類→名簿ゲート)。
+  // DB 書き込み・招待はしない read-only なプレビュー。
+  classifyPreview: (eventId: string, actionId: string) =>
+    request<ClassifyPreviewResponse>(
+      `/orgs/${eventId}/actions/${actionId}/classify-preview`,
+    ),
+
+  // 既定ロール (4カテゴリ+運営子ロール) を冪等に seed する。
+  seedDefaultRoles: (
+    eventId: string,
+    actionId: string,
+    body?: { staffLead?: string; teams?: string[]; grades?: string[] },
+  ) =>
+    request<{ created: string[]; skipped: string[] }>(
+      `/orgs/${eventId}/actions/${actionId}/seed-default-roles`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
     ),
 
   // 003 PR8: event/action コンテキスト無しの cross-event 単体 lookup。
