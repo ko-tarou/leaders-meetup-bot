@@ -16,6 +16,7 @@ import { publicTokens, roles } from "./roles";
 import { roster } from "./roster";
 import { slack } from "./slack";
 import { tasks } from "./tasks";
+import { gantt } from "./gantt";
 import { applications } from "./applications";
 import { sponsor } from "./sponsor";
 import { workspaces } from "./workspaces";
@@ -33,6 +34,7 @@ export const api = {
   ...slack,
   events,
   tasks,
+  gantt,
   prReviews,
   applications,
   sponsor,
