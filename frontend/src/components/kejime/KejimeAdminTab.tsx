@@ -6,7 +6,9 @@ import { colors } from "../../styles/tokens";
 // 4 セクション (激辛ランキング / メンバー状況 / 申請待ち / 履歴) を flat に並べる。
 
 type Member = { id: string; displayName: string; slackUserId: string;
-  currentPoints: number; ramenCount: number; displayPoints: number };
+  currentPoints: number; ramenCount: number; displayPoints: number;
+  // 激辛 3 杯到達の自動除名時刻。null = 在籍。復帰は激辛リセット + ロール再追加。
+  expelledAt?: string | null };
 type EventRow = { id: string; type: string; pointsDelta: number; ramenDelta: number;
   ref: string | null; note: string | null; decidedBy: string | null; occurredAt: string };
 type Article = { id: string; memberId: string; memberDisplayName: string;
@@ -83,7 +85,10 @@ function MemberRow({ m, busy, onEdit }: {
     return (
       <div style={s.row}>
         <span style={{ flex: 1 }}>{m.displayName}</span>
-        <span style={s.meta}>{m.currentPoints} / {m.displayPoints} / {m.ramenCount}</span>
+        {m.expelledAt && <span style={s.expelledBadge}>🚫 除名済</span>}
+        <span style={s.meta} aria-label={`${m.displayName} の状況`}>
+          {m.currentPoints} / {m.displayPoints} / {m.ramenCount}
+        </span>
         <button className="btn btn-ghost btn-sm" disabled={busy}
           aria-label={`${m.displayName} のポイントを編集`}
           onClick={() => { setValue(String(m.currentPoints)); setEditing(true); }}>
@@ -363,4 +368,7 @@ const s: Record<string, CSSProperties> = {
   lgtmDone: { padding: "0.125rem 0.375rem", background: colors.primarySubtle,
     color: colors.primaryHover, borderRadius: "0.25rem",
     fontSize: "0.75rem", fontWeight: 700 },
+  expelledBadge: { padding: "0.125rem 0.375rem", background: colors.dangerSubtle,
+    color: colors.danger, borderRadius: "0.25rem",
+    fontSize: "0.75rem", fontWeight: 600 },
 };
