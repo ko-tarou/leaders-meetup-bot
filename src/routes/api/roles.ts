@@ -65,6 +65,7 @@ import {
   CATEGORY_LABELS,
   type ClassifyMemberInput,
 } from "../../domain/role/name-classify";
+import { buildDefaultRoleSpecs } from "../../domain/role/default-roles";
 
 export const rolesRouter = new Hono<{ Bindings: Env }>();
 
@@ -353,6 +354,79 @@ rolesRouter.post(
     };
     await db.insert(slackRoles).values(row);
     return c.json(row, 201);
+  },
+);
+
+/**
+ * POST /orgs/:eventId/actions/:actionId/seed-default-roles
+ *
+ *   4 カテゴリ (参加者/運営/スポンサー/審査員) のルートロールと、運営配下の
+ *   詳細ロール (運営統括 / 各チーム / 学年) を**冪等に**作成する。
+ *   既に同名ロールがあればスキップ (作成済みを壊さない)。子ロールは親「運営」を
+ *   名前で解決して parentRoleId を張る。
+ *
+ *   body (任意): { staffLead?: string, teams?: string[], grades?: string[] }
+ *     未確定のチーム名/学年をここで差し替えられる (既定は domain の暫定値)。
+ *
+ *   返却: { created: string[], skipped: string[] }
+ */
+rolesRouter.post(
+  "/orgs/:eventId/actions/:actionId/seed-default-roles",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    const body = await c.req
+      .json<{ staffLead?: string; teams?: string[]; grades?: string[] }>()
+      .catch(() => ({}) as { staffLead?: string; teams?: string[]; grades?: string[] });
+    const specs = buildDefaultRoleSpecs({
+      staffLead: body.staffLead,
+      teams: Array.isArray(body.teams) ? body.teams : undefined,
+      grades: Array.isArray(body.grades) ? body.grades : undefined,
+    });
+
+    // 既存ロールを name -> id で引けるようにする (冪等性の核)。
+    const existing = await db
+      .select()
+      .from(slackRoles)
+      .where(eq(slackRoles.eventActionId, actionId))
+      .all();
+    const idByName = new Map(existing.map((r) => [r.name, r.id]));
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    // ルート → 子の順に作る (親を name で解決するため親を先に確定させる)。
+    const ordered = [...specs].sort((a, b) =>
+      a.parentName === null ? -1 : b.parentName === null ? 1 : 0,
+    );
+    for (const spec of ordered) {
+      if (idByName.has(spec.name)) {
+        skipped.push(spec.name);
+        continue;
+      }
+      const parentRoleId = spec.parentName
+        ? idByName.get(spec.parentName) ?? null
+        : null;
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      await db.insert(slackRoles).values({
+        id,
+        eventActionId: actionId,
+        name: spec.name,
+        description: spec.description,
+        parentRoleId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      idByName.set(spec.name, id);
+      created.push(spec.name);
+    }
+    return c.json({ created, skipped });
   },
 );
 
