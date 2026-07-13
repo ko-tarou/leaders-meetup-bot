@@ -67,7 +67,7 @@ const PREVIEW = {
 
 type Call = { url: string; method: string; body?: string };
 
-function installFetch(): Call[] {
+function installFetch(rolesList: typeof ROLES = ROLES): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
@@ -93,7 +93,7 @@ function installFetch(): Call[] {
         return json(rows);
       }
       if (mMembers && method === "POST") return json({ ok: true, added: 1 });
-      if (path.endsWith("/roles")) return json(ROLES);
+      if (path.endsWith("/roles")) return json(rolesList);
       return json([]);
     }),
   );
@@ -167,5 +167,28 @@ describe("AutoClassifyTab 自動割り当てのフィードバック", () => {
     expect(staffPost?.body).toContain("U1");
     expect(staffPost?.body).not.toContain("U2"); // 要確認は送らない
     expect(partPost?.body).toContain("U3");
+  });
+
+  it("ロール未初期化 (運営のみ) で押すと無反応でなく明示バナーを出す (HackIt2026 再現)", async () => {
+    // HackIt2026 の状態: 4 カテゴリのうち「運営」しか存在しない。
+    const onlyStaff = ROLES.filter((r) => r.name === "運営");
+    const calls = installFetch(onlyStaff);
+    renderTab();
+
+    const applyBtn = await screen.findByTestId("apply-auto-btn");
+    // 旧実装のように disabled で無反応にしない。
+    expect(applyBtn).not.toBeDisabled();
+    await userEvent.click(applyBtn);
+
+    // 明示のエラーバナーで「未初期化 → 初期化してください」を案内する。
+    const banner = await screen.findByTestId("apply-result");
+    expect(banner).toHaveTextContent("未初期化");
+    expect(banner).toHaveTextContent("ロールを初期化");
+
+    // 未初期化なので addMembers は 1 度も呼ばない。
+    const posts = calls.filter(
+      (c) => c.method === "POST" && /\/roles\/[^/]+\/members$/.test(c.url),
+    );
+    expect(posts.length).toBe(0);
   });
 });
