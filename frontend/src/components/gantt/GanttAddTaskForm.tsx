@@ -33,6 +33,22 @@ export function GanttAddTaskForm({
   const [due, setDue] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // フィールド定義を 1 箇所にまとめ、描画は map で回す (重複を避ける)。
+  const fields: {
+    label: string;
+    value: string;
+    set: (v: string) => void;
+    testid: string;
+    type?: string;
+    placeholder?: string;
+  }[] = [
+    { label: "タスク名 *", value: title, set: setTitle, testid: "gantt-add-title", placeholder: "例: 会場下見" },
+    { label: "WBS", value: wbs, set: setWbs, testid: "gantt-add-wbs", placeholder: "例: 1.5" },
+    { label: "チーム", value: team, set: setTeam, testid: "gantt-add-team", placeholder: "例: チームA" },
+    { label: "開始", value: start, set: setStart, testid: "gantt-add-start", type: "date" },
+    { label: "終了", value: due, set: setDue, testid: "gantt-add-due", type: "date" },
+  ];
+
   const submit = async () => {
     if (!title.trim()) {
       toast.error("タスク名を入力してください");
@@ -65,56 +81,19 @@ export function GanttAddTaskForm({
   return (
     <div data-testid="gantt-add-task-form" style={panel}>
       <div style={grid}>
-        <label style={labelStyle}>
-          タスク名 *
-          <input
-            data-testid="gantt-add-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="例: 会場下見"
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          WBS
-          <input
-            data-testid="gantt-add-wbs"
-            value={wbs}
-            onChange={(e) => setWbs(e.target.value)}
-            placeholder="例: 1.5"
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          チーム
-          <input
-            data-testid="gantt-add-team"
-            value={team}
-            onChange={(e) => setTeam(e.target.value)}
-            placeholder="例: チームA"
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          開始
-          <input
-            type="date"
-            data-testid="gantt-add-start"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            style={inputStyle}
-          />
-        </label>
-        <label style={labelStyle}>
-          終了
-          <input
-            type="date"
-            data-testid="gantt-add-due"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-            style={inputStyle}
-          />
-        </label>
+        {fields.map((f) => (
+          <label key={f.testid} style={labelStyle}>
+            {f.label}
+            <input
+              type={f.type ?? "text"}
+              data-testid={f.testid}
+              value={f.value}
+              placeholder={f.placeholder}
+              onChange={(e) => f.set(e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+        ))}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <button
@@ -141,11 +120,7 @@ const panel: React.CSSProperties = {
   marginBottom: 10,
   background: colors.surface,
 };
-const grid: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 12,
-};
+const grid: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 12 };
 const labelStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",

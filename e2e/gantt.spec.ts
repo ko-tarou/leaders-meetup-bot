@@ -35,7 +35,11 @@ function cli<T>(...args: string[]): T {
 }
 
 type EventRow = { id: string; name: string };
-type TaskRow = { id: string; wbs: string | null };
+type TaskRow = { id: string; wbs: string | null; title?: string };
+
+// タスク追加 E2E で使う固定タイトル。ローカル D1 は永続するため、前回の残骸が
+// 「60 タスク」系アサートを壊さないよう beforeAll で必ず掃除してから始める。
+const ADD_TASK_TITLE = "E2E追加タスク";
 
 let eventId = "";
 let task11Id = "";
@@ -67,9 +71,14 @@ test.beforeAll(() => {
   );
   expect(result.created + result.skipped).toBe(60);
 
+  // タスク追加 E2E の残骸 (前回失敗時など) を掃除し、seed を 60 に戻す。
+  for (const t of cli<TaskRow[]>("tasks", "list", eventId)) {
+    if (t.title === ADD_TASK_TITLE) cli("tasks", "delete", t.id);
+  }
+
   // ドラッグ対象 (1.1) は毎回同じ日付にリセットして決定的にする
   const tasks = cli<TaskRow[]>("tasks", "list", eventId);
-  expect(tasks.length).toBeGreaterThanOrEqual(60);
+  expect(tasks.length).toBe(60);
   const t11 = tasks.find((t) => t.wbs === "1.1");
   expect(t11).toBeTruthy();
   task11Id = t11!.id;
@@ -175,6 +184,32 @@ test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のま
   // 月別 -> 月セクションが出る
   await popup.locator('[data-testid="gantt-scope-monthly"]').click();
   await expect(popup.locator('[data-testid="gantt-monthly"]')).toBeVisible();
+});
+
+test("タスク追加: フォームから追加するとガントに即反映される", async ({ page }) => {
+  await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+
+  // フォームを開いて入力 -> 追加
+  await page.locator('[data-testid="gantt-add-task-toggle"]').click();
+  await expect(page.locator('[data-testid="gantt-add-task-form"]')).toBeVisible();
+  await page.locator('[data-testid="gantt-add-title"]').fill(ADD_TASK_TITLE);
+  await page.locator('[data-testid="gantt-add-wbs"]').fill("9.9");
+  await page.locator('[data-testid="gantt-add-team"]').fill("チームZ");
+  await page.locator('[data-testid="gantt-add-start"]').fill("2026-07-01");
+  await page.locator('[data-testid="gantt-add-due"]').fill("2026-07-20");
+  await page.locator('[data-testid="gantt-add-submit"]').click();
+
+  // 即反映: 行が 61 に増え、追加タイトルが表示される (API 経由で永続)
+  await expect(page.getByText(ADD_TASK_TITLE).first()).toBeVisible();
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(61);
+
+  // 後始末: 追加分を削除して seed を 60 に戻す (ローカル D1 が永続するため)
+  const created = cli<TaskRow[]>("tasks", "list", eventId).find(
+    (t) => t.title === ADD_TASK_TITLE,
+  );
+  expect(created).toBeTruthy();
+  cli("tasks", "delete", created!.id);
 });
 
 test("全体サマリー: 6 グループがロールアップ表示される", async ({ page }) => {
