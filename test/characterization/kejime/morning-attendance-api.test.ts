@@ -293,12 +293,158 @@ describe("POST /morning-attendance (手動 attend)", () => {
         body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1" }) },
     );
     expect(res.status).toBe(201);
-    // penalty は cleared になり、本人のガチャ一覧から消える。
+    // penalty は物理削除され、本人のガチャ一覧から消える (削除により同日を
+    // 再び欠席へ訂正しても UNIQUE(action,user,date) と衝突しない)。
     const pen = await db.select().from(kejimePenalties)
       .where(eq(kejimePenalties.id, "pen-u1")).get();
-    expect(pen?.status).toBe("cleared");
-    expect(pen?.clearedAt).toBeTruthy();
+    expect(pen).toBeUndefined();
     expect(await listMyPendingGachas(env.DB, "U1")).toEqual([]);
+  });
+
+  it("ガチャ抽選済み (2pt) の欠席→出席: 実際に付いた 2pt を巻き戻す", async () => {
+    const { ev, morning, tracker } = await setupBasic({
+      roleMembers: ["U1"],
+      attended: [{ user: "U1", date: "2026-05-18", status: "late" }],
+    });
+    const db = testDb();
+    await db.insert(kejimeMembers).values({
+      id: "km-u1", eventActionId: tracker.id, slackUserId: "U1",
+      displayName: "U1", currentPoints: 2, ramenCount: 0,
+      createdAt: "x", updatedAt: "x",
+    });
+    // 抽選後の note 形式 "auto: <ymd> (gacha 2pt)" + open penalty (points=2)。
+    await db.insert(kejimeEvents).values({
+      id: "ke-late", memberId: "km-u1", type: "late", pointsDelta: 2, ramenDelta: 0,
+      note: "auto: 2026-05-18 (gacha 2pt)", occurredAt: "2026-05-18T23:00:00.000Z",
+    });
+    await db.insert(kejimePenalties).values({
+      id: "pen-u1", eventActionId: tracker.id, memberId: "km-u1", slackUserId: "U1",
+      date: "2026-05-18", theme: "t", themeKey: "mon",
+      points: 2, requiredChars: 2000, status: "open",
+      lateEventId: "ke-late", createdAt: "2026-05-18T23:00:00.000Z",
+    });
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1" }) },
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json() as {
+      revoked: { lateEventId: string | null; pointsReverted: number } | null;
+    };
+    expect(body.revoked?.lateEventId).toBe("ke-late");
+    expect(body.revoked?.pointsReverted).toBe(2);
+    // late event / open penalty とも削除され、ポイントは 2 -> 0。
+    expect(await db.select().from(kejimeEvents)
+      .where(eq(kejimeEvents.id, "ke-late")).get()).toBeUndefined();
+    expect(await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, "pen-u1")).get()).toBeUndefined();
+    const m = await db.select().from(kejimeMembers)
+      .where(eq(kejimeMembers.id, "km-u1")).get();
+    expect(m?.currentPoints).toBe(0);
+    expect(m?.ramenCount).toBe(0);
+  });
+
+  it("記事で消化済み (cleared) の日は何も巻き戻さない (二重返金しない)", async () => {
+    const { ev, morning, tracker } = await setupBasic({
+      roleMembers: ["U1"],
+      attended: [{ user: "U1", date: "2026-05-18", status: "late" }],
+    });
+    const db = testDb();
+    await db.insert(kejimeMembers).values({
+      id: "km-u1", eventActionId: tracker.id, slackUserId: "U1",
+      displayName: "U1", currentPoints: 0, ramenCount: 0,
+      createdAt: "x", updatedAt: "x",
+    });
+    await db.insert(kejimeEvents).values({
+      id: "ke-late", memberId: "km-u1", type: "late", pointsDelta: 2, ramenDelta: 0,
+      note: "auto: 2026-05-18 (gacha 2pt)", occurredAt: "2026-05-18T23:00:00.000Z",
+    });
+    await db.insert(kejimePenalties).values({
+      id: "pen-u1", eventActionId: tracker.id, memberId: "km-u1", slackUserId: "U1",
+      date: "2026-05-18", theme: "t", themeKey: "mon",
+      points: 2, requiredChars: 2000, status: "cleared",
+      clearedAt: "2026-05-19T00:00:00.000Z",
+      lateEventId: "ke-late", createdAt: "2026-05-18T23:00:00.000Z",
+    });
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1" }) },
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json() as { revoked: unknown }).revoked).toBeNull();
+    // late event / cleared penalty / ポイントとも据え置き (帳尻は既に合っている)。
+    expect(await db.select().from(kejimeEvents)
+      .where(eq(kejimeEvents.id, "ke-late")).get()).toBeDefined();
+    expect(await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, "pen-u1")).get()).toBeDefined();
+    const m = await db.select().from(kejimeMembers)
+      .where(eq(kejimeMembers.id, "km-u1")).get();
+    expect(m?.currentPoints).toBe(0);
+  });
+
+  it("status:'late' で出席→欠席の訂正: late event + 未抽選 penalty を作る", async () => {
+    const { ev, morning, tracker } = await setupBasic({
+      roleMembers: ["U1"],
+      attended: [{ user: "U1", date: "2026-05-18", status: "attended" }],
+    });
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1", status: "late" }) },
+    );
+    expect(res.status).toBe(201);
+    const body = await res.json() as {
+      lateMarked: { memberId: string; lateEventId: string; penaltyId: string } | null;
+    };
+    expect(body.lateMarked?.penaltyId).toBeTruthy();
+    const db = testDb();
+    const ma = await db.select().from(morningAttendance).where(and(
+      eq(morningAttendance.eventActionId, morning.id),
+      eq(morningAttendance.date, "2026-05-18"),
+      eq(morningAttendance.slackUserId, "U1"),
+    )).get();
+    expect(ma?.status).toBe("late");
+    // member lazy-create + late event (pointsDelta=0) + pending penalty (未抽選)。
+    const member = await db.select().from(kejimeMembers).where(and(
+      eq(kejimeMembers.eventActionId, tracker.id),
+      eq(kejimeMembers.slackUserId, "U1"),
+    )).get();
+    expect(member?.currentPoints).toBe(0);
+    const lateEv = await db.select().from(kejimeEvents)
+      .where(eq(kejimeEvents.id, body.lateMarked!.lateEventId)).get();
+    expect(lateEv?.type).toBe("late");
+    expect(lateEv?.pointsDelta).toBe(0);
+    const pen = await db.select().from(kejimePenalties)
+      .where(eq(kejimePenalties.id, body.lateMarked!.penaltyId)).get();
+    expect(pen?.status).toBe("pending");
+    // 本人のガチャ一覧に出る = ガチャ抽選確定でポイントが付く通常フローに乗る。
+    expect((await listMyPendingGachas(env.DB, "U1")).map((g) => g.penaltyId))
+      .toEqual([body.lateMarked!.penaltyId]);
+    // 冪等: もう一度 late 訂正しても penalty は増えない。
+    const res2 = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1", status: "late" }) },
+    );
+    expect(res2.status).toBe(201);
+    expect(await db.select().from(kejimePenalties).all()).toHaveLength(1);
+  });
+
+  it("不正 status → 400", async () => {
+    const { ev, morning } = await setupBasic({ roleMembers: ["U1"] });
+    const res = await req(
+      `/api/orgs/${ev.id}/actions/${morning.id}/morning-attendance`,
+      { method: "POST",
+        headers: { "x-admin-token": TOKEN, "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-05-18", slackUserId: "U1", status: "absent" }) },
+    );
+    expect(res.status).toBe(400);
   });
 
   it("別日の pending penalty は残す (訂正した日だけ取り消す)", async () => {

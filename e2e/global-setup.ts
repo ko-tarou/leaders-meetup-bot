@@ -35,6 +35,9 @@ export default function globalSetup() {
   run("npx wrangler d1 migrations apply leaders-meetup-bot --local");
 
   const now = "2026-01-01T00:00:00.000Z";
+  // 出席ダッシュボードの日付入力は「今日 (JST)」が既定・上限なので、遡及修正 E2E の
+  // seed (late 出席行 / penalty) は実行時の JST 今日で作る。
+  const todayJst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   const amConfig = JSON.stringify({
     schemaVersion: 1,
     links: [
@@ -68,12 +71,27 @@ export default function globalSetup() {
     seedInsertsFrom("0075_cottage_content.sql"),
     // けじめ管理タブ (申請待ち + 申請履歴) 検証用。件数アサートを決定的にするため
     // action 配下の申請/メンバーを毎回リセットして 2 件 (pending / approved) にする。
-    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-kejime','cottage','kejime_tracker','{}',1,'${now}','${now}');`,
+    // config.roleId は出席遡及修正 / 除名 E2E 用の朝活名簿 (e2e-role) を指す。
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-kejime','cottage','kejime_tracker','{"schemaVersion":1,"roleId":"e2e-role"}',1,'${now}','${now}');`,
     `DELETE FROM kejime_article_requests WHERE event_action_id='e2e-kejime';`,
     `DELETE FROM kejime_members WHERE event_action_id='e2e-kejime';`,
     `INSERT INTO kejime_members (id,event_action_id,slack_user_id,display_name,current_points,ramen_count,created_at,updated_at) VALUES ('e2e-km1','e2e-kejime','UE2E0001','E2Eメンバー',2,0,'${now}','${now}');`,
     `INSERT INTO kejime_article_requests (id,event_action_id,member_id,qiita_url,body_length,status,created_at) VALUES ('e2e-ar-pending','e2e-kejime','e2e-km1','https://qiita.com/e2e/items/pending1',600,'pending','${now}');`,
     `INSERT INTO kejime_article_requests (id,event_action_id,member_id,qiita_url,body_length,status,decided_by,decided_at,created_at) VALUES ('e2e-ar-approved','e2e-kejime','e2e-km1','https://qiita.com/e2e/items/approved1',800,'approved','admin','${now}','${now}');`,
+    // 出席の遡及修正 (欠席<->出席) + 激辛 3 杯除名 E2E 用 seed。
+    // - e2e-morning: 出席ダッシュボード (morning_standup)。名簿は e2e-role。
+    // - E2E遅刻者 (UE2E0002): 今日 late + ガチャ抽選済み 2pt (open penalty)。
+    // - E2E激辛者 (UE2E0003): 0pt。edit-points で 15pt に上げ除名を発火させる。
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-morning','cottage','morning_standup','{"schemaVersion":1,"roleId":"e2e-role"}',1,'${now}','${now}');`,
+    `INSERT OR REPLACE INTO slack_roles (id,event_action_id,name,created_at,updated_at) VALUES ('e2e-role','e2e-kejime','朝活E2E','${now}','${now}');`,
+    `DELETE FROM slack_role_members WHERE role_id='e2e-role';`,
+    `INSERT INTO slack_role_members (role_id,slack_user_id,added_at) VALUES ('e2e-role','UE2E0002','${now}'),('e2e-role','UE2E0003','${now}');`,
+    `INSERT INTO kejime_members (id,event_action_id,slack_user_id,display_name,current_points,ramen_count,created_at,updated_at) VALUES ('e2e-km2','e2e-kejime','UE2E0002','E2E遅刻者',2,0,'${now}','${now}');`,
+    `INSERT INTO kejime_members (id,event_action_id,slack_user_id,display_name,current_points,ramen_count,created_at,updated_at) VALUES ('e2e-km3','e2e-kejime','UE2E0003','E2E激辛者',0,0,'${now}','${now}');`,
+    `INSERT INTO kejime_events (id,member_id,type,points_delta,ramen_delta,note,occurred_at) VALUES ('e2e-late1','e2e-km2','late',2,0,'auto: ${todayJst} (gacha 2pt)','${now}');`,
+    `INSERT INTO kejime_penalties (id,event_action_id,member_id,slack_user_id,date,theme,theme_key,points,required_chars,status,late_event_id,created_at) VALUES ('e2e-pen1','e2e-kejime','e2e-km2','UE2E0002','${todayJst}','E2Eテーマ',NULL,2,2000,'open','e2e-late1','${now}');`,
+    `DELETE FROM morning_attendance WHERE event_action_id='e2e-morning';`,
+    `INSERT INTO morning_attendance (id,event_action_id,date,slack_user_id,status,recorded_at) VALUES ('e2e-ma1','e2e-morning','${todayJst}','UE2E0002','late','${now}');`,
   ].join("\n");
 
   const dir = mkdtempSync(join(tmpdir(), "lmb-e2e-"));
