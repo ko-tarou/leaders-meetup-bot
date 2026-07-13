@@ -205,10 +205,10 @@ test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のま
   await expect(popup.locator('[data-testid="gantt-team-select"]')).toBeVisible();
   await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(10);
 
-  // 月別 -> 月セクション + 右側に月ドロップダウンが出る (全画面でも同じ挙動)
+  // 月別 -> 右側に月ドロップダウンが出て、既定は単月表示 (全画面でも同じ挙動)
   await popup.locator('[data-testid="gantt-scope-monthly"]').click();
-  await expect(popup.locator('[data-testid="gantt-monthly"]')).toBeVisible();
   await expect(popup.locator('[data-testid="gantt-month-select"]')).toBeVisible();
+  await expect(popup.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
 });
 
 test("タスク追加: フォームから追加するとガントに即反映される", async ({ page }) => {
@@ -246,22 +246,30 @@ test("全体サマリー: 6 グループがロールアップ表示される", a
   await expect(rows.first()).toContainText("10件");
 });
 
-test("月別ビュー: 切替軸の月別で月セクションが出て、月ドロップダウンで単一月に絞れる", async ({ page }) => {
+test("月別ビュー: 既定は単月表示で、右ドロップダウンで別の月に切り替えられる", async ({ page }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
   // 月別モードに切替 (通常タブでも切替軸に統一されている)
   await page.locator('[data-testid="gantt-scope-monthly"]').click();
-  const sections = page.locator('[data-testid="gantt-monthly"] details');
-  await expect(sections.first()).toBeVisible();
-  expect(await sections.count()).toBeGreaterThanOrEqual(10);
 
-  // 右側に月ドロップダウンが出て、1 月を選ぶとその月だけになる
+  // 右側に月ドロップダウンが出て (他モードと同じ位置/見た目)、既定は単月表示。
   const monthSel = page.locator('[data-testid="gantt-month-select"]');
   await expect(monthSel).toBeVisible();
-  const firstMonth = (await monthSel.locator("option").nth(1).getAttribute("value")) ?? "";
-  expect(firstMonth).not.toBe("");
-  await monthSel.selectOption(firstMonth);
   await expect(page.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
-  // 「全ての月」に戻すと複数月に戻る
+  // 既定で 1 つの月 (空でない値) が選択されている。
+  const selected = await monthSel.inputValue();
+  expect(selected).not.toBe("");
+
+  // 別の月を選んでも単月のまま切り替わる。
+  const otherMonth =
+    (await monthSel
+      .locator(`option:not([value="${selected}"]):not([value=""])`)
+      .first()
+      .getAttribute("value")) ?? "";
+  expect(otherMonth).not.toBe("");
+  await monthSel.selectOption(otherMonth);
+  await expect(page.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
+
+  // 「全ての月」を選ぶと複数月に展開する (任意の全体表示オプション)。
   await monthSel.selectOption("");
   expect(await page.locator('[data-testid="gantt-monthly"] details').count()).toBeGreaterThanOrEqual(10);
 });
