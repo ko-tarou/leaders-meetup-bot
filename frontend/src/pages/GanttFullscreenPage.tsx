@@ -2,14 +2,15 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { EventAction } from "../types";
 import { api } from "../api";
-import { GanttChartTab } from "../components/gantt/GanttChartTab";
+import { GanttScopeView } from "../components/gantt/GanttScopeView";
 import { colors } from "../styles/tokens";
 
 // ガント専用の全画面ルート (/events/:eventId/actions/gantt_tracker/fullscreen)。
 // App.tsx の早期分岐で EventProvider / ヘッダ / サイドバーを排して単独描画され、
 // Excel/スプレッドシートのようにガントだけを画面幅いっぱいで見せる。
-// gantt_tracker アクションを自前で 1 件取得し、通常タブと同じ GanttChartTab を
-// fullscreen フラグ付きで再利用する (「別画面で開く」ボタンは再帰しないよう隠す)。
+// gantt_tracker アクションを自前で 1 件取得し、GanttScopeView を全画面フラグ付きで
+// 描画する。全画面にはサブタブが無いので、抽象度は 全体/チーム別/月別 の 3 択を
+// この画面内で切り替えられるようにする (「別画面で開く」ボタンは再帰しないよう隠す)。
 export function GanttFullscreenPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const [action, setAction] = useState<EventAction | null>(null);
@@ -91,7 +92,12 @@ export function GanttFullscreenPage() {
         </div>
       )}
       {!loading && !error && action && (
-        <GanttChartTab eventId={eventId} action={action} fullscreen />
+        <GanttScopeView
+          eventId={eventId}
+          action={action}
+          scopes={["all", "team", "monthly"]}
+          fullscreen
+        />
       )}
     </div>
   );
