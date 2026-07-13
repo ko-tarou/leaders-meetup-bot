@@ -6,6 +6,11 @@ import { events, tasks, taskAssignees } from "../../db/schema";
 
 export const tasksRouter = new Hono<{ Bindings: Env }>();
 
+// gantt_tracker (0077): 進捗 % は 0-100 の整数のみ許可
+function isValidProgressPct(v: number | null): boolean {
+  return v === null || (Number.isInteger(v) && v >= 0 && v <= 100);
+}
+
 // --- Tasks (ADR-0002) ---
 
 // 005-16: N+1 解消のため、フィルタを SQL に寄せる + assignees を batch SELECT で埋め込む。
@@ -95,6 +100,11 @@ tasksRouter.post("/tasks", async (c) => {
     priority?: "low" | "mid" | "high";
     parentTaskId?: string;
     createdBySlackId: string;
+    // gantt_tracker (0077): 未指定なら null = 既存クライアントと後方互換
+    team?: string;
+    phase?: string;
+    wbs?: string;
+    progressPct?: number;
   }>();
 
   // バリデーション
@@ -127,6 +137,10 @@ tasksRouter.post("/tasks", async (c) => {
   if (body.startAt && !body.startAt.endsWith("Z")) {
     return c.json({ error: "startAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
   }
+  // gantt_tracker: progressPct は 0-100 の整数
+  if (body.progressPct !== undefined && !isValidProgressPct(body.progressPct)) {
+    return c.json({ error: "progressPct must be an integer between 0 and 100" }, 400);
+  }
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -143,6 +157,10 @@ tasksRouter.post("/tasks", async (c) => {
     createdBySlackId: body.createdBySlackId,
     createdAt: now,
     updatedAt: now,
+    team: body.team ?? null,
+    phase: body.phase ?? null,
+    wbs: body.wbs ?? null,
+    progressPct: body.progressPct ?? null,
   };
   await db.insert(tasks).values(task);
   return c.json(task, 201);
@@ -159,6 +177,11 @@ tasksRouter.put("/tasks/:id", async (c) => {
     status?: "todo" | "doing" | "done";
     priority?: "low" | "mid" | "high";
     parentTaskId?: string | null;
+    // gantt_tracker (0077): null で明示クリア可
+    team?: string | null;
+    phase?: string | null;
+    wbs?: string | null;
+    progressPct?: number | null;
   }>();
 
   const existing = await db.select().from(tasks).where(eq(tasks.id, id)).get();
@@ -176,6 +199,9 @@ tasksRouter.put("/tasks/:id", async (c) => {
   }
   if (body.startAt !== undefined && body.startAt !== null && !body.startAt.endsWith("Z")) {
     return c.json({ error: "startAt must be UTC ISO 8601 with 'Z' suffix" }, 400);
+  }
+  if (body.progressPct !== undefined && !isValidProgressPct(body.progressPct)) {
+    return c.json({ error: "progressPct must be an integer between 0 and 100" }, 400);
   }
   if (body.parentTaskId !== undefined && body.parentTaskId !== null) {
     if (body.parentTaskId === id) return c.json({ error: "task cannot be its own parent" }, 400);
@@ -201,6 +227,10 @@ tasksRouter.put("/tasks/:id", async (c) => {
   if (body.status !== undefined) updates.status = body.status;
   if (body.priority !== undefined) updates.priority = body.priority;
   if (body.parentTaskId !== undefined) updates.parentTaskId = body.parentTaskId;
+  if (body.team !== undefined) updates.team = body.team;
+  if (body.phase !== undefined) updates.phase = body.phase;
+  if (body.wbs !== undefined) updates.wbs = body.wbs;
+  if (body.progressPct !== undefined) updates.progressPct = body.progressPct;
 
   await db.update(tasks).set(updates).where(eq(tasks.id, id));
   const updated = await db.select().from(tasks).where(eq(tasks.id, id)).get();
