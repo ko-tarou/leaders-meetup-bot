@@ -145,6 +145,23 @@ test("抽象度切替 (通常): 全体 <-> チーム別 で表示タスク数が
   await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
 });
 
+test("抽象度切替 (全体): 詳細/最上位 ドロップダウンで集約表示に切り替わる", async ({ page }) => {
+  await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
+  // 全体モードの右側に抽象度ドロップダウンが出る。既定「詳細」= 60 行
+  const overview = page.locator('[data-testid="gantt-overview-select"]');
+  await expect(overview).toBeVisible();
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+
+  // 「最上位」= WBS トップレベル 6 グループに集約 (集約バーも表示)
+  await overview.selectOption("top");
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(6);
+  await expect(page.locator('[data-testid="gantt-bar-1"]')).toBeVisible();
+
+  // 「詳細」に戻すと 60 行
+  await overview.selectOption("detail");
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+});
+
 test("別画面で開く: ボタンからガント全画面ルートが別タブで開く", async ({ page, context }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
   const openBtn = page.locator('[data-testid="gantt-open-fullscreen"]');
@@ -175,6 +192,13 @@ test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のま
   await expect(popup.locator('[data-testid="gantt-scope-all"]')).toBeVisible();
   await expect(popup.locator('[data-testid="gantt-scope-monthly"]')).toBeVisible();
   await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
+
+  // 全体モードの抽象度ドロップダウンも全画面に出て、最上位で集約される
+  const fsOverview = popup.locator('[data-testid="gantt-overview-select"]');
+  await expect(fsOverview).toBeVisible();
+  await fsOverview.selectOption("top");
+  await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(6);
+  await fsOverview.selectOption("detail");
 
   // チーム別 -> 既定チーム 10 タスク
   await popup.locator('[data-testid="gantt-scope-team"]').click();
