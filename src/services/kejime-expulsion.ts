@@ -6,7 +6,8 @@
 //     「通知前に遡及修正で 3 未満へ戻る」窓は実質存在しない。
 //   - 除名 = expelled_at 記録 + kejime_events(type='expulsion') 追記 +
 //     朝活ロール名簿 (slack_role_members) から削除 +
-//     朝活会チャンネル (morning_standup.config.channelId) から Slack kick +
+//     朝活会 (morning_standup.config.channelId) + けじめ
+//     (kejime_tracker.config.kejimeChannelId) の両チャンネルから Slack kick +
 //     けじめチャンネルへ通知。
 //   - 遡及修正で後から 3 未満に戻っても自動復帰しない (通知済み扱い)。
 //     手動復帰 = 激辛リセット (expelled_at を NULL に戻す) + ロール再追加。
@@ -86,29 +87,36 @@ export async function checkAndExpelIfNeeded(
     }
   }
 
-  // 朝活会チャンネルから Slack kick する (名簿削除だけでは実チャンネルに残るため)。
+  // 朝活会 (morning_standup.channelId) + けじめ (kejime_tracker.kejimeChannelId) の
+  // 両チャンネルから Slack kick する (名簿削除だけでは実チャンネルに残るため)。
   // fail-soft: kick 失敗 (scope 不足 / bot 未参加 / already-kicked 等) でも除名記録は確定。
   // not_in_channel は既に居ない = 冪等成功として扱い warn しない。
-  if (morningChannelId && slackClient) {
-    try {
-      const res = await slackClient.conversationsKick(morningChannelId, member.slackUserId);
-      if (!res.ok && res.error !== "not_in_channel") {
-        console.warn(
-          `kejime expulsion: kick failed (channel=${morningChannelId}, ` +
-            `member=${memberId}): ${res.error ?? "unknown"}`,
-        );
+  const kejimeChannelId = parseKey(tracker?.config, "kejimeChannelId");
+  const kickChannels = new Set<string>();
+  if (morningChannelId) kickChannels.add(morningChannelId);
+  if (kejimeChannelId) kickChannels.add(kejimeChannelId);
+  if (slackClient) {
+    for (const ch of kickChannels) {
+      try {
+        const res = await slackClient.conversationsKick(ch, member.slackUserId);
+        if (!res.ok && res.error !== "not_in_channel") {
+          console.warn(
+            `kejime expulsion: kick failed (channel=${ch}, member=${memberId}): ` +
+              `${res.error ?? "unknown"}`,
+          );
+        }
+      } catch (e) {
+        console.warn(`kejime expulsion: kick threw (channel=${ch}, member=${memberId}):`, e);
       }
-    } catch (e) {
-      console.warn(`kejime expulsion: kick threw (member=${memberId}):`, e);
     }
   }
 
   // 除名通知: kejime_tracker.config.kejimeChannelId (status post と同じ経路)。
-  const channelId = parseKey(tracker?.config, "kejimeChannelId");
-  if (channelId && slackClient) {
+  // 通知は kick 後も残す (チャンネルに残るメンバーへの周知目的)。
+  if (kejimeChannelId && slackClient) {
     try {
       await slackClient.postMessage(
-        channelId,
+        kejimeChannelId,
         `:rotating_light: *除名通知* <@${member.slackUserId}> さんは激辛ラーメンが` +
           `${member.ramenCount} 杯貯まったため、朝活会から除名となりました。` +
           "復帰は管理者にご相談ください。",
