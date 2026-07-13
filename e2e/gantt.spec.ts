@@ -120,6 +120,25 @@ test("バーをドラッグすると開始/終了日が変わる", async ({ page
   await expect(page.locator('[data-testid="gantt-start-1.1"]')).toHaveText("2026-07-02");
 });
 
+test("別画面で開く: ボタンからガント全画面ルートが別タブで開く", async ({ page, context }) => {
+  await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
+  const openBtn = page.locator('[data-testid="gantt-open-fullscreen"]');
+  await expect(openBtn).toBeVisible();
+
+  // window.open(_blank) で新規タブが開く
+  const [popup] = await Promise.all([
+    context.waitForEvent("page"),
+    openBtn.click(),
+  ]);
+  await popup.waitForLoadState();
+  await expect(popup).toHaveURL(/\/actions\/gantt_tracker\/fullscreen$/);
+  // 全画面側にもガント本体 (タイムライン) が描画される
+  await expect(popup.locator('[data-testid="gantt-timeline"]')).toBeVisible();
+  await expect(popup.locator('[data-testid^="gantt-bar-"]')).toHaveCount(60);
+  // 全画面側では「別画面で開く」ボタンは出さない (自己再帰防止)
+  await expect(popup.locator('[data-testid="gantt-open-fullscreen"]')).toHaveCount(0);
+});
+
 test("全体サマリー: 6 グループがロールアップ表示される", async ({ page }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker?tab=summary`);
   const rows = page.locator('[data-testid="gantt-summary-table"] tbody tr');

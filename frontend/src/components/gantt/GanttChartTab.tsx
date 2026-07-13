@@ -41,9 +41,13 @@ type DragState = {
 export function GanttChartTab({
   eventId,
   action,
+  fullscreen = false,
 }: {
   eventId: string;
   action: EventAction;
+  // 全画面ルート (GanttFullscreenPage) から再利用する時は true。
+  // 「別画面で開く」ボタンを隠して自己再帰的な導線を出さない。
+  fullscreen?: boolean;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
@@ -243,6 +247,33 @@ export function GanttChartTab({
 
   return (
     <div>
+      {/* 全画面 (別タブ) で開く導線。Excel のように広く見たいニーズ向け。
+          fullscreen 表示中は再帰しないよう出さない。 */}
+      {!fullscreen && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <button
+            type="button"
+            data-testid="gantt-open-fullscreen"
+            onClick={() =>
+              window.open(
+                `/events/${eventId}/actions/gantt_tracker/fullscreen`,
+                "_blank",
+              )
+            }
+            style={{
+              fontSize: 13,
+              padding: "6px 12px",
+              border: `1px solid ${colors.borderStrong}`,
+              borderRadius: 4,
+              background: colors.surface,
+              color: colors.text,
+              cursor: "pointer",
+            }}
+          >
+            別画面で開く
+          </button>
+        </div>
+      )}
       <DependencyPanel
         eventId={eventId}
         tasks={tasks}
