@@ -34,8 +34,8 @@ export function GanttScopeView({
   // 月別モードの月ドロップダウン。既定は単月 (下の effect で設定)。null = 全ての月。
   const [monthSel, setMonthSel] = useState<string | null>(null);
   const [months, setMonths] = useState<string[]>([]);
-  // 全体モードの抽象度ドロップダウン: 詳細 (全タスク) / 最上位 (WBS トップ集約)。
-  const [overview, setOverview] = useState<"detail" | "top">("detail");
+  // 全体モードの抽象度ドロップダウン: 詳細(全タスク) / 中間(WBS 中分類) / 最上位(major 集約)。
+  const [overview, setOverview] = useState<"detail" | "mid" | "top">("detail");
 
   // 「チーム別」の選択肢はタスクの team 属性 (∪ config.teams) から作る。
   // config.teams の順を優先し、config 外の実在チームを後ろに並べる。
@@ -111,10 +111,11 @@ export function GanttScopeView({
           <select
             data-testid="gantt-overview-select"
             value={overview}
-            onChange={(e) => setOverview(e.target.value as "detail" | "top")}
+            onChange={(e) => setOverview(e.target.value as "detail" | "mid" | "top")}
             style={dropdownStyle}
           >
             <option value="detail">詳細 (全タスク)</option>
+            <option value="mid">中間 (WBS 中分類)</option>
             <option value="top">最上位 (WBS トップ集約)</option>
           </select>
         )}
@@ -156,7 +157,7 @@ export function GanttScopeView({
         fullscreen={fullscreen}
         teamFilter={scope === "team" ? team : null}
         monthFilter={scope === "monthly" ? monthSel : null}
-        rollup={scope === "all" && overview === "top"}
+        rollupLevel={scope === "all" && overview !== "detail" ? overview : "none"}
       />
     </div>
   );
