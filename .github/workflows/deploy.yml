@@ -1,0 +1,50 @@
+name: deploy
+
+# 006-cd: 本番 CD。main へ push (= PR マージ) された時のみ発火し、
+# D1 マイグレーション適用 -> フロントビルド -> wrangler deploy を行う。
+#
+# 必須 secret (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN  ... Workers/D1 の編集権限を持つ API トークン。未登録だと
+#                             このジョブは失敗する (deploy 手前で fail closed)。
+# 任意 secret:
+#   CLOUDFLARE_ACCOUNT_ID ... トークンが複数アカウントに跨る場合のみ必要。
+#
+# secret 未登録の初回は、Cloudflare ダッシュボードで token を発行し repo secret に
+# 登録するまで CD は赤になる (workflow 自体は enabled)。CI (test.yml) は secret 不要。
+
+on:
+  push:
+    branches: ["main"]
+
+# 同時 deploy を禁止 (後続 push が来たら前を待たず最新だけ流す)。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 本番 D1 に未適用のマイグレーションを先に流す (スキーマ後方互換前提)。
+      - name: Apply D1 migrations (remote)
+        run: npx wrangler d1 migrations apply leaders-meetup-bot --remote
+
+      # public/ (Workers Assets) は gitignore のため deploy 前に必ずビルドする。
+      - name: Build frontend assets
+        run: npm run build:frontend
+
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
