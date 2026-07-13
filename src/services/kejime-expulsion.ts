@@ -5,7 +5,9 @@
 //     ポイント直接編集 (edit-points)。判定と通知は同一処理内で行うため
 //     「通知前に遡及修正で 3 未満へ戻る」窓は実質存在しない。
 //   - 除名 = expelled_at 記録 + kejime_events(type='expulsion') 追記 +
-//     朝活ロール名簿 (slack_role_members) から削除 + けじめチャンネルへ通知。
+//     朝活ロール名簿 (slack_role_members) から削除 +
+//     朝活会チャンネル (morning_standup.config.channelId) から Slack kick +
+//     けじめチャンネルへ通知。
 //   - 遡及修正で後から 3 未満に戻っても自動復帰しない (通知済み扱い)。
 //     手動復帰 = 激辛リセット (expelled_at を NULL に戻す) + ロール再追加。
 //   - 二重除名は expelled_at IS NULL 条件の atomic UPDATE で防ぐ。
@@ -62,6 +64,8 @@ export async function checkAndExpelIfNeeded(
   const roleIds = new Set<string>();
   const trackerRole = parseKey(tracker?.config, "roleId");
   if (trackerRole) roleIds.add(trackerRole);
+  // 朝活会チャンネル (kick 対象) は morning_standup.config.channelId が正典。
+  let morningChannelId: string | null = null;
   if (tracker) {
     const morning = await d1.select().from(eventActions).where(and(
       eq(eventActions.eventId, tracker.eventId),
@@ -69,6 +73,7 @@ export async function checkAndExpelIfNeeded(
     )).get();
     const morningRole = parseKey(morning?.config, "roleId");
     if (morningRole) roleIds.add(morningRole);
+    morningChannelId = parseKey(morning?.config, "channelId");
   }
   for (const roleId of roleIds) {
     try {
@@ -78,6 +83,23 @@ export async function checkAndExpelIfNeeded(
       ));
     } catch (e) {
       console.warn(`kejime expulsion: roster delete failed (role=${roleId}):`, e);
+    }
+  }
+
+  // 朝活会チャンネルから Slack kick する (名簿削除だけでは実チャンネルに残るため)。
+  // fail-soft: kick 失敗 (scope 不足 / bot 未参加 / already-kicked 等) でも除名記録は確定。
+  // not_in_channel は既に居ない = 冪等成功として扱い warn しない。
+  if (morningChannelId && slackClient) {
+    try {
+      const res = await slackClient.conversationsKick(morningChannelId, member.slackUserId);
+      if (!res.ok && res.error !== "not_in_channel") {
+        console.warn(
+          `kejime expulsion: kick failed (channel=${morningChannelId}, ` +
+            `member=${memberId}): ${res.error ?? "unknown"}`,
+        );
+      }
+    } catch (e) {
+      console.warn(`kejime expulsion: kick threw (member=${memberId}):`, e);
     }
   }
 
