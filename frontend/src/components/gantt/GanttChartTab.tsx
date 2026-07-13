@@ -42,12 +42,16 @@ export function GanttChartTab({
   eventId,
   action,
   fullscreen = false,
+  teamFilter = null,
 }: {
   eventId: string;
   action: EventAction;
   // 全画面ルート (GanttFullscreenPage) から再利用する時は true。
   // 「別画面で開く」ボタンを隠して自己再帰的な導線を出さない。
   fullscreen?: boolean;
+  // 「チーム別」表示の絞り込み対象チーム名。null なら全チーム (全体ガント)。
+  // (チームなし) 行は "(チームなし)" を渡す。
+  teamFilter?: string | null;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
@@ -88,17 +92,26 @@ export function GanttChartTab({
 
   const reload = () => setRefreshKey((k) => k + 1);
 
+  // 「チーム別」表示: teamFilter が指定された時だけ、そのチームのタスクに絞る。
+  // 全体 (null) は全タスク。rows / 範囲 / タイムラインはこの絞り込み後を基準に
+  // することで、チーム別でもバーが横幅いっぱいに読める (deps は tasks 全体を
+  // 参照するので他チーム宛の矢印は行が無ければ描かれないだけ)。
+  const visibleTasks = useMemo(() => {
+    if (!teamFilter) return tasks;
+    return tasks.filter((t) => (t.team ?? "(チームなし)") === teamFilter);
+  }, [tasks, teamFilter]);
+
   // チーム順 (config.teams -> 未知チーム -> チームなし) に WBS 順で並べる
   const rows: Row[] = useMemo(() => {
     const knownTeams = config.teams;
     const teamOf = (t: Task) => t.team ?? "(チームなし)";
     const teamNames = [
       ...knownTeams,
-      ...[...new Set(tasks.map(teamOf))].filter((t) => !knownTeams.includes(t)),
+      ...[...new Set(visibleTasks.map(teamOf))].filter((t) => !knownTeams.includes(t)),
     ];
     const out: Row[] = [];
     for (const team of teamNames) {
-      const members = tasks
+      const members = visibleTasks
         .filter((t) => teamOf(t) === team)
         .sort((a, b) => compareWbs(a.wbs, b.wbs));
       if (members.length === 0) continue;
@@ -106,7 +119,7 @@ export function GanttChartTab({
       for (const t of members) out.push({ kind: "task", task: t });
     }
     return out;
-  }, [tasks, config.teams]);
+  }, [visibleTasks, config.teams]);
 
   const teamColor = useMemo(() => {
     const map = new Map<string, string>();
@@ -122,8 +135,8 @@ export function GanttChartTab({
 
   // タイムライン範囲: 前後 1 ヶ月マージンの月境界に丸める
   const range = useMemo(() => {
-    const starts = tasks.map((t) => t.startAt).filter((v): v is string => !!v);
-    const dues = tasks.map((t) => t.dueAt).filter((v): v is string => !!v);
+    const starts = visibleTasks.map((t) => t.startAt).filter((v): v is string => !!v);
+    const dues = visibleTasks.map((t) => t.dueAt).filter((v): v is string => !!v);
     const min = starts.length ? starts.reduce((a, b) => (a < b ? a : b)) : new Date().toISOString();
     const max = dues.length ? dues.reduce((a, b) => (a > b ? a : b)) : min;
     const start = new Date(min);
@@ -131,7 +144,7 @@ export function GanttChartTab({
     const rangeStart = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1);
     const rangeEnd = Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 2, 1);
     return { start: rangeStart, end: rangeEnd };
-  }, [tasks]);
+  }, [visibleTasks]);
 
   const totalDays = Math.max(1, Math.round((range.end - range.start) / DAY_MS));
   const chartW = totalDays * DAY_W;
