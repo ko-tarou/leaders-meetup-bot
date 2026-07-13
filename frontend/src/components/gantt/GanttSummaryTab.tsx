@@ -76,7 +76,8 @@ export function GanttSummaryTab({ eventId }: { eventId: string }) {
                 <td style={{ ...td, fontWeight: 600, color: colors.textSecondary }}>
                   {phaseTop ? `${r.phase} ${r.phaseLabel}` : ""}
                 </td>
-                <td style={{ ...td, whiteSpace: "normal" }}>{r.label}</td>
+                {/* 項目だけ折返し可 + minWidth (無いと他列の nowrap に潰されて 1 文字ずつ縦に折れる) */}
+                <td style={{ ...td, whiteSpace: "normal", minWidth: 220 }}>{r.label}</td>
                 <td style={td}>{r.team}</td>
                 <td style={td}>
                   <span style={{ background: meta.bg, color: meta.color, borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 600 }}>
