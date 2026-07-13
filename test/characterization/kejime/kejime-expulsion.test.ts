@@ -116,7 +116,7 @@ describe("checkAndExpelIfNeeded", () => {
     expect(posts[0].args[1]).toContain("除名");
   });
 
-  it("朝活会チャンネル (morning_standup.channelId) から Slack kick する", async () => {
+  it("朝活会 + けじめ の両チャンネルから Slack kick する", async () => {
     const { tracker } = await setup({ ramen: 3, morningChannelId: "C-ASAKATSU" });
     const slack = new MockSlackClient();
     const res = await checkAndExpelIfNeeded(
@@ -124,11 +124,27 @@ describe("checkAndExpelIfNeeded", () => {
     );
     expect(res.expelled).toBe(true);
     const kicks = slack.callsOf("conversationsKick");
-    expect(kicks).toHaveLength(1);
-    expect(kicks[0].args).toEqual(["C-ASAKATSU", "U1"]);
+    expect(kicks).toHaveLength(2);
+    const channels = kicks.map((k) => k.args[0]).sort();
+    // 朝活会 (morning) + けじめ (tracker) の両方、対象は member。
+    expect(channels).toEqual(["C-ASAKATSU", "C-KEJIME"]);
+    expect(kicks.every((k) => k.args[1] === "U1")).toBe(true);
   });
 
-  it("kick が失敗しても除名記録は確定する (fail-soft)", async () => {
+  it("片方が not_in_channel でも冪等成功・除名は成立する", async () => {
+    const { tracker } = await setup({ ramen: 3, morningChannelId: "C-ASAKATSU" });
+    const slack = new MockSlackClient();
+    // 既に居ない channel は not_in_channel を返すが warn せず続行する。
+    slack.setResponse("conversationsKick", { ok: false, error: "not_in_channel" });
+    const res = await checkAndExpelIfNeeded(
+      env.DB, slack as unknown as SlackClient, tracker.id, "km-u1",
+    );
+    expect(res.expelled).toBe(true);
+    expect(slack.callsOf("conversationsKick")).toHaveLength(2);
+    expect(slack.callsOf("postMessage")).toHaveLength(1);
+  });
+
+  it("kick が throw しても除名記録は確定する (fail-soft)", async () => {
     const { tracker } = await setup({ ramen: 3, morningChannelId: "C-ASAKATSU" });
     const slack = new MockSlackClient();
     slack.setFailure("conversationsKick", new Error("slack down"));
@@ -143,8 +159,9 @@ describe("checkAndExpelIfNeeded", () => {
     expect(slack.callsOf("postMessage")).toHaveLength(1);
   });
 
-  it("morning チャンネル未設定なら kick しない (除名は成立)", async () => {
-    const { tracker } = await setup({ ramen: 3 });
+  it("両チャンネル未設定なら kick しない (除名は成立)", async () => {
+    // morningChannelId なし + kejimeChannelId なし (channel:false)。
+    const { tracker } = await setup({ ramen: 3, channel: false });
     const slack = new MockSlackClient();
     const res = await checkAndExpelIfNeeded(
       env.DB, slack as unknown as SlackClient, tracker.id, "km-u1",
