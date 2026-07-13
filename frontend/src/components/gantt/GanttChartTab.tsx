@@ -49,11 +49,60 @@ type DragState = {
   deltaDays: number;
 };
 
+// 「最上位抽象度」ロールアップ: WBS トップレベル (major) ごとに 1 本へ集約する。
+// 本データは WBS が "major.minor" のフラット構造 (親タスクを持たない) なので major が
+// トップレベル階層に相当する。開始=最小/終了=最大/進捗=平均/状態=導出の表示専用
+// 合成タスク (id="rollup:<major>") を返す。ドラッグ/編集はしない。
+function rollupByWbsTop(tasks: Task[], config: GanttConfig): Task[] {
+  const groups = new Map<string, Task[]>();
+  for (const t of tasks) {
+    const key = t.wbs ? t.wbs.split(".")[0] : "その他";
+    const arr = groups.get(key);
+    if (arr) arr.push(t);
+    else groups.set(key, [t]);
+  }
+  const out: Task[] = [];
+  for (const [key, members] of groups) {
+    const starts = members.map((m) => m.startAt).filter((v): v is string => !!v);
+    const dues = members.map((m) => m.dueAt).filter((v): v is string => !!v);
+    const progs = members.map((m) => m.progressPct ?? (m.status === "done" ? 100 : 0));
+    const progressPct = Math.round(progs.reduce((a, b) => a + b, 0) / progs.length);
+    const status: Task["status"] = members.every((m) => m.status === "done")
+      ? "done"
+      : members.some((m) => m.status === "doing") || progressPct > 0
+        ? "doing"
+        : "todo";
+    const label =
+      config.phases.find((p) => p.id === `F${key}`)?.label ??
+      (key === "その他" ? "その他" : `WBS ${key}`);
+    out.push({
+      id: `rollup:${key}`,
+      eventId: members[0].eventId,
+      parentTaskId: null,
+      title: `${label} (${members.length}件)`,
+      description: null,
+      startAt: starts.length ? starts.reduce((a, b) => (a < b ? a : b)) : null,
+      dueAt: dues.length ? dues.reduce((a, b) => (a > b ? a : b)) : null,
+      status,
+      priority: "mid",
+      createdBySlackId: "",
+      createdAt: "",
+      updatedAt: "",
+      team: members[0].team,
+      phase: null,
+      wbs: key,
+      progressPct,
+    });
+  }
+  return out;
+}
+
 export function GanttChartTab({
   eventId,
   action,
   fullscreen = false,
   teamFilter = null,
+  rollup = false,
 }: {
   eventId: string;
   action: EventAction;
@@ -63,6 +112,8 @@ export function GanttChartTab({
   // 「チーム別」表示の絞り込み対象チーム名。null なら全チーム (全体ガント)。
   // (チームなし) 行は "(チームなし)" を渡す。
   teamFilter?: string | null;
+  // 「最上位抽象度」表示。true なら WBS トップレベルごとに 1 本へ集約 (表示専用)。
+  rollup?: boolean;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deps, setDeps] = useState<TaskDependency[]>([]);
@@ -113,17 +164,23 @@ export function GanttChartTab({
     return tasks.filter((t) => (t.team ?? "(チームなし)") === teamFilter);
   }, [tasks, teamFilter]);
 
+  // 表示タスク: 最上位抽象度なら WBS トップレベルへ集約、通常はそのまま。
+  const displayTasks = useMemo(
+    () => (rollup ? rollupByWbsTop(visibleTasks, config) : visibleTasks),
+    [rollup, visibleTasks, config],
+  );
+
   // チーム順 (config.teams -> 未知チーム -> チームなし) に WBS 順で並べる
   const rows: Row[] = useMemo(() => {
     const knownTeams = config.teams;
     const teamOf = (t: Task) => t.team ?? "(チームなし)";
     const teamNames = [
       ...knownTeams,
-      ...[...new Set(visibleTasks.map(teamOf))].filter((t) => !knownTeams.includes(t)),
+      ...[...new Set(displayTasks.map(teamOf))].filter((t) => !knownTeams.includes(t)),
     ];
     const out: Row[] = [];
     for (const team of teamNames) {
-      const members = visibleTasks
+      const members = displayTasks
         .filter((t) => teamOf(t) === team)
         .sort((a, b) => compareWbs(a.wbs, b.wbs));
       if (members.length === 0) continue;
@@ -131,7 +188,7 @@ export function GanttChartTab({
       for (const t of members) out.push({ kind: "task", task: t });
     }
     return out;
-  }, [visibleTasks, config.teams]);
+  }, [displayTasks, config.teams]);
 
   const teamColor = useMemo(() => {
     const map = new Map<string, string>();
@@ -147,8 +204,8 @@ export function GanttChartTab({
 
   // タイムライン範囲: 前後 1 ヶ月マージンの月境界に丸める
   const range = useMemo(() => {
-    const starts = visibleTasks.map((t) => t.startAt).filter((v): v is string => !!v);
-    const dues = visibleTasks.map((t) => t.dueAt).filter((v): v is string => !!v);
+    const starts = displayTasks.map((t) => t.startAt).filter((v): v is string => !!v);
+    const dues = displayTasks.map((t) => t.dueAt).filter((v): v is string => !!v);
     const min = starts.length ? starts.reduce((a, b) => (a < b ? a : b)) : new Date().toISOString();
     const max = dues.length ? dues.reduce((a, b) => (a > b ? a : b)) : min;
     const start = new Date(min);
@@ -156,7 +213,7 @@ export function GanttChartTab({
     const rangeStart = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1);
     const rangeEnd = Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 2, 1);
     return { start: rangeStart, end: rangeEnd };
-  }, [visibleTasks]);
+  }, [displayTasks]);
 
   const totalDays = Math.max(1, Math.round((range.end - range.start) / DAY_MS));
   const chartW = totalDays * DAY_W;
@@ -310,13 +367,16 @@ export function GanttChartTab({
           onCancel={() => setShowAdd(false)}
         />
       )}
-      <DependencyPanel
-        eventId={eventId}
-        tasks={tasks}
-        deps={deps}
-        selected={selected}
-        onChanged={reload}
-      />
+      {/* 最上位抽象度は表示専用なので依存編集パネルは出さない。 */}
+      {!rollup && (
+        <DependencyPanel
+          eventId={eventId}
+          tasks={tasks}
+          deps={deps}
+          selected={selected}
+          onChanged={reload}
+        />
+      )}
       <div style={{ display: "flex", border: `1px solid ${colors.border}`, borderRadius: 8, overflow: "hidden" }}>
         {/* 左: タスクテーブル */}
         <div style={{ flexShrink: 0, borderRight: `2px solid ${colors.borderStrong}` }}>
@@ -338,6 +398,7 @@ export function GanttChartTab({
                 key={r.task.id}
                 task={r.task}
                 selected={r.task.id === selectedId}
+                editable={!rollup}
                 onSelect={() => setSelectedId(r.task.id)}
                 onCommit={commitTask}
               />
@@ -433,19 +494,23 @@ export function GanttChartTab({
                     fill={color}
                     fillOpacity={r.task.status === "done" ? 0.35 : 0.75}
                     stroke={r.task.id === selectedId ? colors.text : "none"}
-                    style={{ cursor: "grab" }}
+                    style={{ cursor: rollup ? "default" : "grab" }}
                     data-testid={`gantt-bar-${key}`}
-                    onPointerDown={(e) => onBarPointerDown(e, r.task, "move")}
-                    onPointerMove={onBarPointerMove}
-                    onPointerUp={onBarPointerUp}
+                    onPointerDown={rollup ? undefined : (e) => onBarPointerDown(e, r.task, "move")}
+                    onPointerMove={rollup ? undefined : onBarPointerMove}
+                    onPointerUp={rollup ? undefined : onBarPointerUp}
                   >
                     <title>{`${r.task.wbs ?? ""} ${r.task.title}\n${dateLabel(new Date(span.startMs).toISOString())} - ${dateLabel(new Date(span.dueMs).toISOString())} (${STATUS_LABEL[r.task.status] ?? r.task.status} ${progress}%)`}</title>
                   </rect>
                   {/* 進捗の塗り */}
                   <rect x={x} y={y} width={(w * Math.min(100, progress)) / 100} height={h} rx={3} fill={color} pointerEvents="none" />
-                  {/* 端のリサイズハンドル */}
-                  <rect x={x - 3} y={y} width={6} height={h} fill="transparent" style={{ cursor: "ew-resize" }} onPointerDown={(e) => onBarPointerDown(e, r.task, "start")} onPointerMove={onBarPointerMove} onPointerUp={onBarPointerUp} />
-                  <rect x={x + w - 3} y={y} width={6} height={h} fill="transparent" style={{ cursor: "ew-resize" }} onPointerDown={(e) => onBarPointerDown(e, r.task, "end")} onPointerMove={onBarPointerMove} onPointerUp={onBarPointerUp} />
+                  {/* 端のリサイズハンドル (最上位抽象度は表示専用なので出さない) */}
+                  {!rollup && (
+                    <>
+                      <rect x={x - 3} y={y} width={6} height={h} fill="transparent" style={{ cursor: "ew-resize" }} onPointerDown={(e) => onBarPointerDown(e, r.task, "start")} onPointerMove={onBarPointerMove} onPointerUp={onBarPointerUp} />
+                      <rect x={x + w - 3} y={y} width={6} height={h} fill="transparent" style={{ cursor: "ew-resize" }} onPointerDown={(e) => onBarPointerDown(e, r.task, "end")} onPointerMove={onBarPointerMove} onPointerUp={onBarPointerUp} />
+                    </>
+                  )}
                 </g>
               );
             })}
@@ -453,7 +518,9 @@ export function GanttChartTab({
         </div>
       </div>
       <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
-        バーをドラッグで期間ごと移動・両端ドラッグで開始/終了日を変更。行クリックで選択し、上の依存パネルで先行タスクを設定できます。
+        {rollup
+          ? "最上位抽象度: WBS トップレベルごとに集約した表示専用ビューです。右上のドロップダウンで「詳細」に戻すと編集できます。"
+          : "バーをドラッグで期間ごと移動・両端ドラッグで開始/終了日を変更。行クリックで選択し、上の依存パネルで先行タスクを設定できます。"}
       </p>
     </div>
   );
@@ -462,11 +529,14 @@ export function GanttChartTab({
 function TaskRow({
   task,
   selected,
+  editable = true,
   onSelect,
   onCommit,
 }: {
   task: Task;
   selected: boolean;
+  // false のとき状態/進捗を編集不可のテキスト表示にする (最上位抽象度の集約行)。
+  editable?: boolean;
   onSelect: () => void;
   onCommit: (taskId: string, updates: Parameters<typeof api.tasks.update>[1], label: string) => void;
 }) {
@@ -491,7 +561,7 @@ function TaskRow({
   return (
     <div
       data-testid={`gantt-row-${key}`}
-      onClick={onSelect}
+      onClick={editable ? onSelect : undefined}
       style={{
         display: "flex",
         alignItems: "center",
@@ -499,7 +569,7 @@ function TaskRow({
         fontSize: 12,
         borderBottom: `1px solid ${colors.border}`,
         background: selected ? colors.primarySubtle : colors.background,
-        cursor: "pointer",
+        cursor: editable ? "pointer" : "default",
         boxSizing: "border-box",
       }}
     >
@@ -508,30 +578,38 @@ function TaskRow({
         {task.title}
       </span>
       <span style={{ width: 92 }}>
-        <select
-          value={task.status}
-          onChange={(e) => onCommit(task.id, { status: e.target.value as Task["status"] }, "状態")}
-          onClick={(e) => e.stopPropagation()}
-          style={{ fontSize: 12, width: 86 }}
-        >
-          <option value="todo">未着手</option>
-          <option value="doing">進行中</option>
-          <option value="done">完了</option>
-        </select>
+        {editable ? (
+          <select
+            value={task.status}
+            onChange={(e) => onCommit(task.id, { status: e.target.value as Task["status"] }, "状態")}
+            onClick={(e) => e.stopPropagation()}
+            style={{ fontSize: 12, width: 86 }}
+          >
+            <option value="todo">未着手</option>
+            <option value="doing">進行中</option>
+            <option value="done">完了</option>
+          </select>
+        ) : (
+          <span style={{ color: colors.textSecondary }}>{STATUS_LABEL[task.status] ?? task.status}</span>
+        )}
       </span>
       <span style={{ width: 64 }}>
-        <input
-          type="number"
-          min={0}
-          max={100}
-          value={progress}
-          placeholder="-"
-          onChange={(e) => setProgress(e.target.value)}
-          onBlur={commitProgress}
-          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-          onClick={(e) => e.stopPropagation()}
-          style={{ width: 50, fontSize: 12 }}
-        />
+        {editable ? (
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={progress}
+            placeholder="-"
+            onChange={(e) => setProgress(e.target.value)}
+            onBlur={commitProgress}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 50, fontSize: 12 }}
+          />
+        ) : (
+          <span style={{ color: colors.textSecondary }}>{task.progressPct ?? 0}%</span>
+        )}
       </span>
       <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
         {dateLabel(task.startAt)}
