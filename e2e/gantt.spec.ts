@@ -205,10 +205,15 @@ test("抽象度切替 (全画面): 全体/チーム別/月別 を全画面のま
   await expect(popup.locator('[data-testid="gantt-team-select"]')).toBeVisible();
   await expect(popup.locator('[data-testid^="gantt-row-"]')).toHaveCount(10);
 
-  // 月別 -> 右側に月ドロップダウンが出て、既定は単月表示 (全画面でも同じ挙動)
+  // 月別 -> 他モードと同じガントバー描画 (タイムライン) + 右に月ドロップダウン。
+  // 単月に絞られ全 60 未満、旧トグル (details) は存在しない (全画面でも同じ)。
   await popup.locator('[data-testid="gantt-scope-monthly"]').click();
   await expect(popup.locator('[data-testid="gantt-month-select"]')).toBeVisible();
-  await expect(popup.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
+  await expect(popup.locator('[data-testid="gantt-timeline"]')).toBeVisible();
+  await expect(popup.locator("details")).toHaveCount(0);
+  const fsMonthRows = await popup.locator('[data-testid^="gantt-row-"]').count();
+  expect(fsMonthRows).toBeGreaterThan(0);
+  expect(fsMonthRows).toBeLessThan(60);
 });
 
 test("タスク追加: フォームから追加するとガントに即反映される", async ({ page }) => {
@@ -246,20 +251,27 @@ test("全体サマリー: 6 グループがロールアップ表示される", a
   await expect(rows.first()).toContainText("10件");
 });
 
-test("月別ビュー: 既定は単月表示で、右ドロップダウンで別の月に切り替えられる", async ({ page }) => {
+test("月別ビュー: 他モードと同じガントバー描画で単月表示され、トグルが無い", async ({ page }) => {
   await gotoSpa(page, `/events/${eventId}/actions/gantt_tracker`);
-  // 月別モードに切替 (通常タブでも切替軸に統一されている)
   await page.locator('[data-testid="gantt-scope-monthly"]').click();
 
-  // 右側に月ドロップダウンが出て (他モードと同じ位置/見た目)、既定は単月表示。
+  // 全体/チーム別と同じガント描画 (左タスク行 + 右タイムラインバー) で出る。
+  await expect(page.locator('[data-testid="gantt-timeline"]')).toBeVisible();
+  await expect(page.locator('[data-testid^="gantt-bar-"]').first()).toBeVisible();
+  // 旧「月別」の details トグル (折りたたみ) は存在しない。
+  await expect(page.locator("details")).toHaveCount(0);
+
+  // 右に月ドロップダウン (他モードと同位置/同見た目)、既定は単月 (空でない値)。
   const monthSel = page.locator('[data-testid="gantt-month-select"]');
   await expect(monthSel).toBeVisible();
-  await expect(page.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
-  // 既定で 1 つの月 (空でない値) が選択されている。
   const selected = await monthSel.inputValue();
   expect(selected).not.toBe("");
+  // 単月なので対象月にかかるタスクのみ = 全 60 未満に絞られる。
+  const monthRows = await page.locator('[data-testid^="gantt-row-"]').count();
+  expect(monthRows).toBeGreaterThan(0);
+  expect(monthRows).toBeLessThan(60);
 
-  // 別の月を選んでも単月のまま切り替わる。
+  // 別の月を選んでもガントバー描画のまま切り替わる。
   const otherMonth =
     (await monthSel
       .locator(`option:not([value="${selected}"]):not([value=""])`)
@@ -267,9 +279,10 @@ test("月別ビュー: 既定は単月表示で、右ドロップダウンで別
       .getAttribute("value")) ?? "";
   expect(otherMonth).not.toBe("");
   await monthSel.selectOption(otherMonth);
-  await expect(page.locator('[data-testid="gantt-monthly"] details')).toHaveCount(1);
+  await expect(page.locator('[data-testid="gantt-timeline"]')).toBeVisible();
+  await expect(page.locator("details")).toHaveCount(0);
 
-  // 「全ての月」を選ぶと複数月に展開する (任意の全体表示オプション)。
+  // 「全ての月」を選ぶと全 60 タスクがガント表示される (任意の全体オプション)。
   await monthSel.selectOption("");
-  expect(await page.locator('[data-testid="gantt-monthly"] details').count()).toBeGreaterThanOrEqual(10);
+  await expect(page.locator('[data-testid^="gantt-row-"]')).toHaveCount(60);
 });
