@@ -254,12 +254,12 @@ export function GanttChartTab({
         {/* 左: タスクテーブル */}
         <div style={{ flexShrink: 0, borderRight: `2px solid ${colors.borderStrong}` }}>
           <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
-            <span style={{ width: 44, paddingLeft: 6 }}>WBS</span>
-            <span style={{ width: 240 }}>タスク</span>
-            <span style={{ width: 74 }}>状態</span>
-            <span style={{ width: 58 }}>進捗%</span>
-            <span style={{ width: 78 }}>開始</span>
-            <span style={{ width: 78 }}>終了</span>
+            <span style={{ width: 48, paddingLeft: 6 }}>WBS</span>
+            <span style={{ width: 340 }}>タスク</span>
+            <span style={{ width: 92 }}>状態</span>
+            <span style={{ width: 64 }}>進捗%</span>
+            <span style={{ width: 104 }}>開始</span>
+            <span style={{ width: 104 }}>終了</span>
           </div>
           {rows.map((r, i) =>
             r.kind === "team" ? (
@@ -436,23 +436,23 @@ function TaskRow({
         boxSizing: "border-box",
       }}
     >
-      <span style={{ width: 44, paddingLeft: 6, color: colors.textSecondary }}>{task.wbs}</span>
-      <span style={{ width: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.title}>
+      <span style={{ width: 48, paddingLeft: 6, color: colors.textSecondary }}>{task.wbs}</span>
+      <span style={{ width: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.title}>
         {task.title}
       </span>
-      <span style={{ width: 74 }}>
+      <span style={{ width: 92 }}>
         <select
           value={task.status}
           onChange={(e) => onCommit(task.id, { status: e.target.value as Task["status"] }, "状態")}
           onClick={(e) => e.stopPropagation()}
-          style={{ fontSize: 12, width: 68 }}
+          style={{ fontSize: 12, width: 86 }}
         >
           <option value="todo">未着手</option>
           <option value="doing">進行中</option>
           <option value="done">完了</option>
         </select>
       </span>
-      <span style={{ width: 58 }}>
+      <span style={{ width: 64 }}>
         <input
           type="number"
           min={0}
@@ -463,13 +463,13 @@ function TaskRow({
           onBlur={commitProgress}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           onClick={(e) => e.stopPropagation()}
-          style={{ width: 44, fontSize: 12 }}
+          style={{ width: 50, fontSize: 12 }}
         />
       </span>
-      <span style={{ width: 78, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
+      <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
         {dateLabel(task.startAt)}
       </span>
-      <span style={{ width: 78, color: colors.textSecondary }} data-testid={`gantt-end-${key}`}>
+      <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-end-${key}`}>
         {dateLabel(task.dueAt)}
       </span>
     </div>
