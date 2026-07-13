@@ -30,6 +30,7 @@ import {
 import { ActionDetailPage } from "./pages/ActionDetailPage";
 import { EventIndexRedirect } from "./pages/EventIndexRedirect";
 import { EventTabPage } from "./pages/EventTabPage";
+import { GanttFullscreenPage } from "./pages/GanttFullscreenPage";
 import { HomePage } from "./pages/HomePage";
 import { MeetingDetailPage } from "./pages/MeetingDetailPage";
 import { WeeklyReminderDetailPage } from "./pages/WeeklyReminderDetailPage";
@@ -100,6 +101,25 @@ export function App() {
           {/* 005-feedback: 公開ページ (apply / interviewer-form / public)
               でも右下フィードバックウィジェットを表示する。 */}
           <FeedbackWidget />
+        </ConfirmProvider>
+      </ToastProvider>
+    );
+  }
+
+  // ガント全画面ルート: ヘッダ / サイドバー / EventProvider を排し、ガントだけを
+  // 画面幅いっぱいで単独描画する (Excel 的な全画面表示。別タブで開かれる)。
+  // 通常の /actions/:actionType ルートより 1 セグメント深いので AppShell の
+  // Routes には吸われない。ここで先に intercept する。
+  if (pathname.includes("/actions/gantt_tracker/fullscreen")) {
+    return (
+      <ToastProvider>
+        <ConfirmProvider>
+          <Routes>
+            <Route
+              path="/events/:eventId/actions/gantt_tracker/fullscreen"
+              element={<GanttFullscreenPage />}
+            />
+          </Routes>
         </ConfirmProvider>
       </ToastProvider>
     );
