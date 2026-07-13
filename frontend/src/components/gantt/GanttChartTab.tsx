@@ -102,6 +102,7 @@ export function GanttChartTab({
   action,
   fullscreen = false,
   teamFilter = null,
+  monthFilter = null,
   rollup = false,
 }: {
   eventId: string;
@@ -112,6 +113,9 @@ export function GanttChartTab({
   // 「チーム別」表示の絞り込み対象チーム名。null なら全チーム (全体ガント)。
   // (チームなし) 行は "(チームなし)" を渡す。
   teamFilter?: string | null;
+  // 「月別」表示の対象月 ("YYYY-MM")。指定月にかかる (期間が重なる) タスクだけに絞る。
+  // null なら月で絞らない。全体/チーム別と同じガント描画をそのまま使う。
+  monthFilter?: string | null;
   // 「最上位抽象度」表示。true なら WBS トップレベルごとに 1 本へ集約 (表示専用)。
   rollup?: boolean;
 }) {
@@ -160,9 +164,23 @@ export function GanttChartTab({
   // することで、チーム別でもバーが横幅いっぱいに読める (deps は tasks 全体を
   // 参照するので他チーム宛の矢印は行が無ければ描かれないだけ)。
   const visibleTasks = useMemo(() => {
-    if (!teamFilter) return tasks;
-    return tasks.filter((t) => (t.team ?? "(チームなし)") === teamFilter);
-  }, [tasks, teamFilter]);
+    let list = tasks;
+    if (teamFilter) {
+      list = list.filter((t) => (t.team ?? "(チームなし)") === teamFilter);
+    }
+    if (monthFilter) {
+      // 対象月にかかる (期間が重なる) タスクだけに絞る。ISO 文字列比較で判定:
+      // task.start < 翌月頭 かつ task.due >= 当月頭。日付なしタスクは除外。
+      const start = `${monthFilter}-01T00:00:00.000Z`;
+      const [y, m] = monthFilter.split("-").map(Number);
+      const nm = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+      const nextStart = `${nm}-01T00:00:00.000Z`;
+      list = list.filter(
+        (t) => !!t.startAt && !!t.dueAt && t.startAt < nextStart && t.dueAt >= start,
+      );
+    }
+    return list;
+  }, [tasks, teamFilter, monthFilter]);
 
   // 表示タスク: 最上位抽象度なら WBS トップレベルへ集約、通常はそのまま。
   const displayTasks = useMemo(
