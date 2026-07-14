@@ -829,6 +829,118 @@ rolesRouter.delete(
   },
 );
 
+/**
+ * POST /orgs/:eventId/actions/:actionId/roles/:roleId/add-from-channels
+ *
+ *   逆方向の同期: role に紐づく Slack チャンネルの**現在の在籍者**を、その role に
+ *   一括でロール付与する (role -> channel の invite/kick とは逆)。
+ *   まだ role を持たない在籍者だけ追加 (既存はスキップ・冪等)。bot は除外。
+ *
+ *   ?dryRun=1 で追加せず件数だけ返す (UI が確認ダイアログに件数を出すため)。
+ *   親ロールがある場合、親メンバーに含まれない在籍者は不変条件維持のため除外し
+ *   skippedNotInParent に数える。
+ *
+ *   返却: { ok, channelMemberCount, added, skippedExisting, skippedNotInParent, errors }
+ */
+rolesRouter.post(
+  "/orgs/:eventId/actions/:actionId/roles/:roleId/add-from-channels",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const roleId = c.req.param("roleId");
+    const dryRun = c.req.query("dryRun") === "1";
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+    const roleFound = await findRoleInAction(db, actionId, roleId);
+    if ("error" in roleFound)
+      return c.json({ error: roleFound.error }, roleFound.status);
+
+    const channelRows = await db
+      .select()
+      .from(slackRoleChannels)
+      .where(eq(slackRoleChannels.roleId, roleId))
+      .all();
+    if (channelRows.length === 0) {
+      return c.json({ error: "no channels bound to this role" }, 400);
+    }
+
+    const workspaceId = readWorkspaceId(found.action);
+    if (!workspaceId) {
+      return c.json({ error: "action.config.workspaceId is missing" }, 400);
+    }
+    const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+    if (!slack) {
+      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+    }
+
+    // bot 自身は在籍者に含まれるが付与対象にしない。
+    let botUserId: string | null = null;
+    try {
+      const auth = await slack.authTest();
+      botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
+    } catch {
+      /* auth 取得失敗時は bot 除外なしで続行 */
+    }
+
+    // 全紐付けチャンネルの在籍者を集約 (channel ごとの失敗は errors に集約)。
+    const channelUsers = new Set<string>();
+    const errors: Array<{ channelId: string; error: string }> = [];
+    for (const ch of channelRows) {
+      const res = await slack.listAllChannelMembers(ch.channelId);
+      if (!res.ok) {
+        errors.push({ channelId: ch.channelId, error: res.error ?? "fetch_failed" });
+        continue;
+      }
+      for (const u of res.members) if (u !== botUserId) channelUsers.add(u);
+    }
+
+    const existing = await memberIdSet(db, roleId);
+    const parentMembers = roleFound.role.parentRoleId
+      ? await memberIdSet(db, roleFound.role.parentRoleId)
+      : null;
+
+    let skippedExisting = 0;
+    let skippedNotInParent = 0;
+    const toAdd: string[] = [];
+    for (const u of channelUsers) {
+      if (existing.has(u)) {
+        skippedExisting += 1;
+        continue;
+      }
+      if (parentMembers && !parentMembers.has(u)) {
+        skippedNotInParent += 1;
+        continue;
+      }
+      toAdd.push(u);
+    }
+
+    if (!dryRun && toAdd.length > 0) {
+      const now = new Date().toISOString();
+      const CHUNK = 20;
+      for (let i = 0; i < toAdd.length; i += CHUNK) {
+        const chunk = toAdd.slice(i, i + CHUNK).map((slackUserId) => ({
+          roleId,
+          slackUserId,
+          addedAt: now,
+        }));
+        await db.insert(slackRoleMembers).values(chunk);
+      }
+    }
+    return c.json({
+      ok: true,
+      dryRun,
+      channelMemberCount: channelUsers.size,
+      added: toAdd.length,
+      skippedExisting,
+      skippedNotInParent,
+      errors,
+    });
+  },
+);
+
 // ----------------------------------------------------------------------------
 // Workspace members (Slack users.list 経由)
 // ----------------------------------------------------------------------------

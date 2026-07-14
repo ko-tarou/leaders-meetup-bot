@@ -96,6 +96,29 @@ export const roles = {
       { method: "DELETE" },
     ),
 
+  // 逆同期: role に紐づくチャンネルの在籍者を role に一括付与する。
+  // dryRun=true で件数だけ取得 (確認ダイアログ用)。
+  addFromChannels: (
+    eventId: string,
+    actionId: string,
+    roleId: string,
+    opts?: { dryRun?: boolean },
+  ) =>
+    request<{
+      ok: boolean;
+      dryRun: boolean;
+      channelMemberCount: number;
+      added: number;
+      skippedExisting: number;
+      skippedNotInParent: number;
+      errors: { channelId: string; error: string }[];
+    }>(
+      `/orgs/${eventId}/actions/${actionId}/roles/${roleId}/add-from-channels${
+        opts?.dryRun ? "?dryRun=1" : ""
+      }`,
+      { method: "POST" },
+    ),
+
   // メンバー削除: このイベントの全ロールから当該ユーザーの割当を外す。
   removeMemberFromAllRoles: (
     eventId: string,
