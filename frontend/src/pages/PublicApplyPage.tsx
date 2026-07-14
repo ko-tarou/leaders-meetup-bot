@@ -1,9 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { NameSplitInput } from "../components/NameSplitInput";
 import { WeekCalendarPicker } from "../components/WeekCalendarPicker";
 import { useIsMobile } from "../hooks/useIsMobile";
+import {
+  clearFormDraft,
+  loadFormDraft,
+  useFormDraft,
+} from "../hooks/useFormDraft";
 import {
   HOW_FOUND_LABEL,
   INTERVIEW_LOCATION_LABEL,
@@ -27,27 +32,95 @@ type Availability = {
   eventName?: string;
 };
 
+// 自動保存 (下書き) の対象フィールド。入力途中でリロード/離脱しても復元する。
+// 端末ローカル (localStorage) のみに保存し、送信成功・明示破棄でクリアする。
+type ApplyDraft = {
+  familyName: string;
+  givenName: string;
+  email: string;
+  studentId: string;
+  howFound: HowFound | "";
+  interviewLocation: InterviewLocation | "";
+  existingActivities: string;
+  slots: string[];
+};
+
+// 下書きに中身があるか (空フォームでは復元通知を出さないため)。
+function hasDraftContent(d: ApplyDraft): boolean {
+  return (
+    d.familyName !== "" ||
+    d.givenName !== "" ||
+    d.email !== "" ||
+    d.studentId !== "" ||
+    d.howFound !== "" ||
+    d.interviewLocation !== "" ||
+    d.existingActivities !== "" ||
+    d.slots.length > 0
+  );
+}
+
 export function PublicApplyPage() {
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  // イベント単位でキーを分け、別イベントの下書きと衝突しないようにする。
+  const draftKey = eventId ? `apply:${eventId}` : null;
+  // マウント時に一度だけ下書きを同期的に読み、初期値へ反映する。
+  const initialDraft = useMemo(
+    () => loadFormDraft<ApplyDraft>(draftKey),
+    [draftKey],
+  );
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [availability, setAvailability] = useState<Availability | null>(null);
   // 苗字/名前を分割入力。送信時に半角スペース結合で既存 `name` カラムに詰める。
-  const [familyName, setFamilyName] = useState("");
-  const [givenName, setGivenName] = useState("");
-  const [email, setEmail] = useState("");
+  const [familyName, setFamilyName] = useState(initialDraft?.familyName ?? "");
+  const [givenName, setGivenName] = useState(initialDraft?.givenName ?? "");
+  const [email, setEmail] = useState(initialDraft?.email ?? "");
   // Sprint 19 PR2: Google Form 準拠の新フィールド
-  const [studentId, setStudentId] = useState("");
-  const [howFound, setHowFound] = useState<HowFound | "">("");
+  const [studentId, setStudentId] = useState(initialDraft?.studentId ?? "");
+  const [howFound, setHowFound] = useState<HowFound | "">(
+    initialDraft?.howFound ?? "",
+  );
   const [interviewLocation, setInterviewLocation] = useState<
     InterviewLocation | ""
-  >("");
-  const [existingActivities, setExistingActivities] = useState("");
-  const [slots, setSlots] = useState<string[]>([]);
+  >(initialDraft?.interviewLocation ?? "");
+  const [existingActivities, setExistingActivities] = useState(
+    initialDraft?.existingActivities ?? "",
+  );
+  const [slots, setSlots] = useState<string[]>(initialDraft?.slots ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 前回入力を復元した場合の控えめな通知 (破棄で消せる)。
+  const [draftRestored, setDraftRestored] = useState(
+    !!initialDraft && hasDraftContent(initialDraft),
+  );
+
+  // 入力値の変化を debounce して下書き保存する (Google Form 的な自動保存)。
+  useFormDraft<ApplyDraft>(draftKey, {
+    familyName,
+    givenName,
+    email,
+    studentId,
+    howFound,
+    interviewLocation,
+    existingActivities,
+    slots,
+  });
+
+  // 明示的に下書きを破棄し、フォームを初期状態へ戻す。
+  const discardDraft = () => {
+    clearFormDraft(draftKey);
+    setFamilyName("");
+    setGivenName("");
+    setEmail("");
+    setStudentId("");
+    setHowFound("");
+    setInterviewLocation("");
+    setExistingActivities("");
+    setSlots([]);
+    setDraftRestored(false);
+  };
 
   // 005-hotfix: 公開エンドポイント経由で event を取得する。
   // 旧実装は api.events.get() を呼んでおり、これは admin auth (x-admin-token)
@@ -133,6 +206,8 @@ export function PublicApplyPage() {
       if (!res.ok) {
         throw new Error(res.error ?? "送信に失敗しました");
       }
+      // 送信成功: 端末ローカルの下書き (個人情報を含む) を破棄する。
+      clearFormDraft(draftKey);
       navigate(`/apply/${eventId}/thanks`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "送信に失敗しました");
@@ -195,6 +270,42 @@ export function PublicApplyPage() {
       <p style={{ color: colors.textSecondary, marginBottom: "1.5rem" }}>
         参加希望の方は以下のフォームにご記入ください。後ほどメールでご連絡いたします。
       </p>
+
+      {draftRestored && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+            padding: "0.625rem 0.75rem",
+            background: colors.primarySubtle,
+            color: colors.text,
+            borderRadius: "0.375rem",
+            marginBottom: "1rem",
+            fontSize: "0.875rem",
+          }}
+        >
+          <span>前回の入力を復元しました。</span>
+          <button
+            type="button"
+            onClick={discardDraft}
+            style={{
+              flexShrink: 0,
+              background: "transparent",
+              border: `1px solid ${colors.borderStrong}`,
+              borderRadius: "0.375rem",
+              padding: "0.25rem 0.625rem",
+              fontSize: "0.8rem",
+              color: colors.textSecondary,
+              cursor: "pointer",
+            }}
+          >
+            入力を破棄
+          </button>
+        </div>
+      )}
 
       {error && (
         <div
