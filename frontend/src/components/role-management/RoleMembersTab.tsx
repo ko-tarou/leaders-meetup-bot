@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { EventAction, SlackRole, SlackUser } from "../../types";
 import { api } from "../../api";
 import { colors } from "../../styles/tokens";
+import { useToast } from "../ui/Toast";
+import { useConfirm } from "../ui/ConfirmDialog";
 
 // Sprint 24 / role_management:
 // 「メンバー名簿」タブ。workspace 全員 + 各人の「保有ロール」を表示する。
@@ -31,6 +33,8 @@ type Props = {
 };
 
 export function RoleMembersTab({ eventId, action }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
   const cfg = parseConfig(action.config);
   const workspaceId = cfg.workspaceId;
   const [users, setUsers] = useState<SlackUser[] | null>(null);
@@ -42,6 +46,40 @@ export function RoleMembersTab({ eventId, action }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterRoleId, setFilterRoleId] = useState<string>("");
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // メンバー削除: このイベントの全ロールから当該ユーザーを外す。
+  // Slack ワークスペースからの kick はしない (それは「同期」タブの別操作)。
+  const handleRemove = async (u: SlackUser, roleNames: string[]) => {
+    const label = u.displayName || u.realName || u.name;
+    const ok = await confirm({
+      message: `「${label}」をこのイベントの全ロール (${roleNames.join(
+        " / ",
+      )}) から外しますか？Slack ワークスペースからは抜けません。`,
+      variant: "danger",
+      confirmLabel: "ロールから外す",
+    });
+    if (!ok) return;
+    setRemovingId(u.id);
+    try {
+      const res = await api.roles.removeMemberFromAllRoles(
+        eventId,
+        action.id,
+        u.id,
+      );
+      // ローカル state から当該ユーザーのロールを空にする (一覧では「ロールなし」表示)。
+      setRolesByUser((cur) => {
+        const next = new Map(cur);
+        next.delete(u.id);
+        return next;
+      });
+      toast.success(`${res.removed} 件のロール割当を外しました`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "削除に失敗しました");
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -209,6 +247,23 @@ export function RoleMembersTab({ eventId, action }: Props) {
                     })
                   )}
                 </div>
+                {userRoleIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleRemove(
+                        u,
+                        userRoleIds.map((rid) => roleById.get(rid)?.name ?? rid),
+                      )
+                    }
+                    disabled={removingId === u.id}
+                    style={s.removeBtn}
+                    data-testid={`remove-member-${u.id}`}
+                    aria-label={`${u.displayName || u.realName || u.name} をロールから外す`}
+                  >
+                    {removingId === u.id ? "削除中..." : "削除"}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -309,6 +364,16 @@ const s: Record<string, CSSProperties> = {
     borderRadius: "0.25rem",
     fontSize: "0.7rem",
     fontWeight: 500,
+  },
+  removeBtn: {
+    flexShrink: 0,
+    padding: "0.25rem 0.5rem",
+    border: `1px solid ${colors.danger}`,
+    background: colors.background,
+    color: colors.danger,
+    borderRadius: "0.25rem",
+    cursor: "pointer",
+    fontSize: "0.75rem",
   },
   input: {
     padding: "0.4rem 0.6rem",
