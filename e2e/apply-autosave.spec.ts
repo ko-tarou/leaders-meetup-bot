@@ -25,7 +25,8 @@ async function fillTextFields(page: Page): Promise<void> {
   await page.getByLabel("姓", { exact: true }).fill("山田");
   await page.getByLabel("名", { exact: true }).fill("太郎");
   await page.locator('input[type="email"]').fill("taro@example.com");
-  await page.getByPlaceholder("1 EP 1 - 1").fill("3 EP 2 - 26");
+  await page.getByPlaceholder("1400980").fill("1400980");
+  await page.getByPlaceholder("3EP2-26").fill("3EP2-26");
   await page.locator('input[name="howFound"]').first().check();
   await page.locator('input[name="interviewLocation"]').first().check();
   await page.locator('input[type="text"][maxlength="500"]').fill("既存サークルX");
@@ -58,7 +59,9 @@ test("入力途中でリロードしても下書きが復元される", async ({
   await expect(page.locator('input[type="email"]')).toHaveValue(
     "taro@example.com",
   );
-  await expect(page.getByPlaceholder("1 EP 1 - 1")).toHaveValue("3 EP 2 - 26");
+  // 学籍番号 / 名列番号 が別々のフィールドとして復元される。
+  await expect(page.getByPlaceholder("1400980")).toHaveValue("1400980");
+  await expect(page.getByPlaceholder("3EP2-26")).toHaveValue("3EP2-26");
   await expect(page.locator('input[name="howFound"]').first()).toBeChecked();
   await expect(
     page.locator('input[type="text"][maxlength="500"]'),
@@ -83,5 +86,6 @@ test("送信に成功すると下書きがクリアされ次回は空になる",
   await expect(page.getByText("前回の入力を復元しました。")).toHaveCount(0);
   await expect(page.getByLabel("姓", { exact: true })).toHaveValue("");
   await expect(page.locator('input[type="email"]')).toHaveValue("");
-  await expect(page.getByPlaceholder("1 EP 1 - 1")).toHaveValue("");
+  await expect(page.getByPlaceholder("1400980")).toHaveValue("");
+  await expect(page.getByPlaceholder("3EP2-26")).toHaveValue("");
 });
