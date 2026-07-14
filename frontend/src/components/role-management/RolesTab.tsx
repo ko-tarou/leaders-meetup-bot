@@ -139,6 +139,23 @@ export function RolesTab({ eventId, action }: Props) {
 
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
 
+  // Optimistic: 一覧を再フェッチせず、対象ロールのカウントだけ即時に増減する。
+  // 編集のたびに全体スピナー (roles=null) を出さないための楽観的更新。
+  const patchRoleCount = (
+    roleId: string,
+    field: "membersCount" | "channelsCount",
+    delta: number,
+  ) =>
+    setRoles((cur) =>
+      cur
+        ? cur.map((r) =>
+            r.id === roleId
+              ? { ...r, [field]: Math.max(0, r[field] + delta) }
+              : r,
+          )
+        : cur,
+    );
+
   const tree = useMemo(
     () => (roles ? toTreeOrder(roles) : []),
     [roles],
@@ -151,12 +168,15 @@ export function RolesTab({ eventId, action }: Props) {
       confirmLabel: "削除",
     });
     if (!ok) return;
+    // Optimistic: 先に一覧から除去して即反映。API 失敗時は元の一覧へ戻す。
+    const prev = roles;
+    setRoles((cur) => (cur ? cur.filter((r) => r.id !== role.id) : cur));
+    if (expanded?.roleId === role.id) setExpanded(null);
     try {
       await api.roles.delete(eventId, action.id, role.id);
-      if (expanded?.roleId === role.id) setExpanded(null);
       toast.success("ロールを削除しました");
-      triggerRefresh();
     } catch (e) {
+      setRoles(prev);
       toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     }
   };
@@ -265,7 +285,9 @@ export function RolesTab({ eventId, action }: Props) {
                   actionId={action.id}
                   role={r}
                   workspaceId={workspaceId}
-                  onChanged={triggerRefresh}
+                  onCountChange={(delta) =>
+                    patchRoleCount(r.id, "membersCount", delta)
+                  }
                 />
               )}
               {expanded?.roleId === r.id && expanded.view === "channels" && (
@@ -274,7 +296,12 @@ export function RolesTab({ eventId, action }: Props) {
                   actionId={action.id}
                   role={r}
                   workspaceId={workspaceId}
-                  onChanged={triggerRefresh}
+                  onCountChange={(delta) =>
+                    patchRoleCount(r.id, "channelsCount", delta)
+                  }
+                  onMembersCountChange={(delta) =>
+                    patchRoleCount(r.id, "membersCount", delta)
+                  }
                 />
               )}
             </div>
@@ -455,13 +482,14 @@ function RoleMembersSubView({
   actionId,
   role,
   workspaceId,
-  onChanged,
+  onCountChange,
 }: {
   eventId: string;
   actionId: string;
   role: SlackRole;
   workspaceId: string | undefined;
-  onChanged: () => void;
+  // Optimistic: 親一覧のメンバー数を再フェッチせず delta で即更新する。
+  onCountChange: (delta: number) => void;
 }) {
   const toast = useToast();
   const [allUsers, setAllUsers] = useState<SlackUser[] | null>(null);
@@ -471,7 +499,6 @@ function RoleMembersSubView({
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
 
   const parentRoleId = role.parentRoleId;
 
@@ -536,49 +563,49 @@ function RoleMembersSubView({
 
   const handleAdd = async () => {
     if (selected.size === 0) return;
-    setSubmitting(true);
+    // Optimistic: 先に割当済みへ反映し selection をクリア。失敗時に巻き戻す。
+    const ids = Array.from(selected);
+    setAssigned((cur) => {
+      const next = new Set(cur ?? []);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    setSelected(new Set());
+    onCountChange(ids.length);
     try {
-      await api.roles.addMembers(
-        eventId,
-        actionId,
-        role.id,
-        Array.from(selected),
-      );
-      toast.success(`${selected.size} 人を追加しました`);
-      // local state を更新 (再 fetch でもよいが round-trip 削減)
+      await api.roles.addMembers(eventId, actionId, role.id, ids);
+      toast.success(`${ids.length} 人を追加しました`);
+    } catch (e) {
+      // rollback: 追加分を取り消す。
       setAssigned((cur) => {
         const next = new Set(cur ?? []);
-        for (const id of selected) next.add(id);
+        for (const id of ids) next.delete(id);
         return next;
       });
-      setSelected(new Set());
-      onChanged();
-    } catch (e) {
+      onCountChange(-ids.length);
       const msg = e instanceof Error ? e.message : "追加に失敗しました";
       toast.error(
         /not in parent/i.test(msg)
           ? "親ロールに含まれないメンバーは追加できません"
           : msg,
       );
-    } finally {
-      setSubmitting(false);
     }
   };
 
   const handleRemove = async (slackUserId: string) => {
-    setSubmitting(true);
+    // Optimistic: 先に外して即反映。失敗時は戻す。
+    setAssigned((cur) => {
+      const next = new Set(cur ?? []);
+      next.delete(slackUserId);
+      return next;
+    });
+    onCountChange(-1);
     try {
       await api.roles.removeMember(eventId, actionId, role.id, slackUserId);
-      setAssigned((cur) => {
-        const next = new Set(cur ?? []);
-        next.delete(slackUserId);
-        return next;
-      });
-      onChanged();
     } catch (e) {
+      setAssigned((cur) => new Set(cur ?? []).add(slackUserId));
+      onCountChange(1);
       toast.error(e instanceof Error ? e.message : "削除に失敗しました");
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -625,7 +652,6 @@ function RoleMembersSubView({
               {u.displayName || u.realName || u.name}
               <button
                 onClick={() => handleRemove(u.id)}
-                disabled={submitting}
                 style={s.chipRemove}
                 aria-label={`${u.name} を外す`}
               >
@@ -647,7 +673,6 @@ function RoleMembersSubView({
         onChange={(e) => setSearch(e.target.value)}
         placeholder="名前で検索..."
         style={{ ...s.input, marginBottom: "0.5rem" }}
-        disabled={submitting}
       />
       <div style={s.listBox}>
         {filtered.length === 0 ? (
@@ -666,7 +691,6 @@ function RoleMembersSubView({
                     return next;
                   })
                 }
-                disabled={submitting}
               />
               <span style={{ flex: 1, minWidth: 0 }}>
                 {u.displayName || u.realName || u.name}{" "}
@@ -684,10 +708,10 @@ function RoleMembersSubView({
       <div style={{ marginTop: "0.5rem" }}>
         <button
           onClick={handleAdd}
-          disabled={submitting || selected.size === 0}
+          disabled={selected.size === 0}
           style={s.primaryBtn}
         >
-          {submitting ? "追加中..." : `${selected.size} 人を追加`}
+          {`${selected.size} 人を追加`}
         </button>
       </div>
     </div>
@@ -703,13 +727,16 @@ function RoleChannelsSubView({
   actionId,
   role,
   workspaceId,
-  onChanged,
+  onCountChange,
+  onMembersCountChange,
 }: {
   eventId: string;
   actionId: string;
   role: SlackRole;
   workspaceId: string | undefined;
-  onChanged: () => void;
+  // Optimistic: 親一覧のチャンネル数 / メンバー数を delta で即更新する。
+  onCountChange: (delta: number) => void;
+  onMembersCountChange: (delta: number) => void;
 }) {
   const toast = useToast();
   const { confirm } = useConfirm();
@@ -743,7 +770,8 @@ function RoleChannelsSubView({
       toast.success(
         `${res.added} 人をロールに追加しました (既存 ${res.skippedExisting} 人スキップ)`,
       );
-      onChanged();
+      // 再フェッチせず親のメンバー数だけ加算 (確認後の反映は楽観的)。
+      onMembersCountChange(res.added);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "追加に失敗しました");
     } finally {
@@ -798,29 +826,35 @@ function RoleChannelsSubView({
   }, [channels]);
 
   const handleAdd = async (channel: SlackChannelLike) => {
+    // Optimistic: 先に紐付け済みへ反映。API 失敗時に取り消す。
+    setAssigned((cur) => new Set(cur ?? []).add(channel.id));
+    onCountChange(1);
     try {
       await api.roles.addChannels(eventId, actionId, role.id, [channel.id]);
+    } catch (e) {
       setAssigned((cur) => {
         const next = new Set(cur ?? []);
-        next.add(channel.id);
+        next.delete(channel.id);
         return next;
       });
-      onChanged();
-    } catch (e) {
+      onCountChange(-1);
       toast.error(e instanceof Error ? e.message : "追加に失敗しました");
     }
   };
 
   const handleRemove = async (channelId: string) => {
+    // Optimistic: 先に外して即反映。失敗時は戻す。
+    setAssigned((cur) => {
+      const next = new Set(cur ?? []);
+      next.delete(channelId);
+      return next;
+    });
+    onCountChange(-1);
     try {
       await api.roles.removeChannel(eventId, actionId, role.id, channelId);
-      setAssigned((cur) => {
-        const next = new Set(cur ?? []);
-        next.delete(channelId);
-        return next;
-      });
-      onChanged();
     } catch (e) {
+      setAssigned((cur) => new Set(cur ?? []).add(channelId));
+      onCountChange(1);
       toast.error(e instanceof Error ? e.message : "削除に失敗しました");
     }
   };
