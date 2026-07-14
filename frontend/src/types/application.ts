@@ -42,7 +42,9 @@ export type Application = {
   motivation: string | null;
   introduction: string | null;
   // Sprint 19 PR2: Google Form 準拠の新フィールド（既存レコードは null）
+  // studentId=学籍番号(数字, 例 1400980), rosterNumber=名列番号(例 3EP2-26)
   studentId: string | null;
+  rosterNumber: string | null;
   howFound: HowFound | null;
   interviewLocation: InterviewLocation | null;
   existingActivities: string | null;

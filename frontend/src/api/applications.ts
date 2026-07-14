@@ -16,6 +16,7 @@ export const applications = {
       name: string;
       email: string;
       studentId: string;
+      rosterNumber: string;
       howFound: HowFound;
       interviewLocation: InterviewLocation;
       existingActivities?: string;

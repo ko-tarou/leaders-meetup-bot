@@ -500,6 +500,12 @@ function ApplicationDetailModal({
           </div>
         </Section>
 
+        <Section label="名列番号">
+          <div style={{ fontSize: "0.875rem" }}>
+            {application.rosterNumber || "（未記入）"}
+          </div>
+        </Section>
+
         <Section label="どこで知ったか">
           <div style={{ fontSize: "0.875rem" }}>
             {application.howFound
