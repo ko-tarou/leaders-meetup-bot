@@ -34,7 +34,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import {
   events,
@@ -664,6 +664,62 @@ rolesRouter.delete(
         );
     }
     return c.json({ ok: true });
+  },
+);
+
+/**
+ * DELETE /orgs/:eventId/actions/:actionId/members/:slackUserId
+ *
+ *   「メンバー削除」= このイベント (role_management action) 配下の**全ロール**から
+ *   その Slack ユーザーの割当を外す。lmb 上の管理からそのメンバーを消す操作。
+ *   Slack ワークスペースからの kick や名簿 (member_roster) の削除はしない
+ *   (それぞれ 同期タブ / 名簿タブの別操作)。
+ *
+ *   返却: { ok: true, removed: number }  removed = 外したロール割当の行数。
+ */
+rolesRouter.delete(
+  "/orgs/:eventId/actions/:actionId/members/:slackUserId",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const slackUserId = c.req.param("slackUserId");
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    // action 配下の全 role id を集め、その user の割当を一括削除する。
+    const roleRows = await db
+      .select({ id: slackRoles.id })
+      .from(slackRoles)
+      .where(eq(slackRoles.eventActionId, actionId))
+      .all();
+    if (roleRows.length === 0) return c.json({ ok: true, removed: 0 });
+    const roleIds = roleRows.map((r) => r.id);
+
+    // 削除対象行を数えてから消す (返却用・冪等: 0 でも 200)。
+    const existing = await db
+      .select()
+      .from(slackRoleMembers)
+      .where(
+        and(
+          inArray(slackRoleMembers.roleId, roleIds),
+          eq(slackRoleMembers.slackUserId, slackUserId),
+        ),
+      )
+      .all();
+    if (existing.length === 0) return c.json({ ok: true, removed: 0 });
+
+    await db
+      .delete(slackRoleMembers)
+      .where(
+        and(
+          inArray(slackRoleMembers.roleId, roleIds),
+          eq(slackRoleMembers.slackUserId, slackUserId),
+        ),
+      );
+    return c.json({ ok: true, removed: existing.length });
   },
 );
 

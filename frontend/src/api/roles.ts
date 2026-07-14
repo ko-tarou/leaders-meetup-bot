@@ -96,6 +96,17 @@ export const roles = {
       { method: "DELETE" },
     ),
 
+  // メンバー削除: このイベントの全ロールから当該ユーザーの割当を外す。
+  removeMemberFromAllRoles: (
+    eventId: string,
+    actionId: string,
+    slackUserId: string,
+  ) =>
+    request<{ ok: boolean; removed: number }>(
+      `/orgs/${eventId}/actions/${actionId}/members/${slackUserId}`,
+      { method: "DELETE" },
+    ),
+
   // workspace 全員 (action.config.workspaceId のワークスペース)
   workspaceMembers: (eventId: string, actionId: string) =>
     request<SlackUser[]>(
