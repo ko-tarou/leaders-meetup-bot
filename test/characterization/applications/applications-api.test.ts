@@ -98,7 +98,8 @@ function validBody(over: Record<string, unknown> = {}) {
   return {
     name: "応募 太郎",
     email: "taro@example.com",
-    studentId: "1EP1-1",
+    studentId: "1400980",
+    rosterNumber: "3EP2-26",
     howFound: "poster",
     interviewLocation: "online",
     availableSlots: ["2026-05-20T05:00:00.000Z"],
@@ -229,6 +230,7 @@ describe("POST /apply/:eventId 必須バリデーション (現状の status / �
     ["name 欠落", { name: "" }, "name is required"],
     ["email 欠落", { email: "" }, "email is required"],
     ["studentId 欠落", { studentId: "  " }, "studentId is required"],
+    ["rosterNumber 欠落", { rosterNumber: "  " }, "rosterNumber is required"],
     ["howFound 欠落", { howFound: "" }, "howFound is required"],
     ["howFound 不正値", { howFound: "tiktok" }, "invalid howFound"],
     [
@@ -310,7 +312,8 @@ describe("POST /apply/:eventId 正常系 (現状の DB 状態 + hook を固定)"
       eventId: ev.id,
       name: "応募 太郎",
       email: "taro@example.com",
-      studentId: "1EP1-1",
+      studentId: "1400980",
+      rosterNumber: "3EP2-26",
       howFound: "poster",
       interviewLocation: "online",
       existingActivities: "サークルA",

@@ -161,8 +161,10 @@ export const applications = sqliteTable(
     introduction: text("introduction"),
     // === Sprint 19 PR2 新規フィールド（Google Form 「DevelopersHub 面談フォーム」準拠） ===
     // ADR-0005 流儀: nullable + アプリ層で必須化（既存レコードと互換）
-    // 学籍番号（例: "1 EP 1 - 1"）
+    // 学籍番号（大学発行の数字, 例: "1400980"）
     studentId: text("student_id"),
+    // 名列番号（クラス-出席番号, 例: "3EP2-26"）。学籍番号(studentId)とは別項目。
+    rosterNumber: text("roster_number"),
     // どこで知ったか:
     //   'joint_briefing' | 'welcome_event' | 'poster' | 'campus_hp' | 'friend' | 'teacher' | 'other'
     howFound: text("how_found"),

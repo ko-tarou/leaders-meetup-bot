@@ -281,6 +281,7 @@ export function buildTemplateVars(
     email: application.email,
     appliedAt: utcToJstFormat(application.appliedAt),
     studentId: application.studentId ?? "",
+    rosterNumber: application.rosterNumber ?? "",
     howFound: application.howFound ?? "",
     interviewLocation: rawLocation,
     // 005-meet: 人間可読な面接場所ラベル (例: "オンライン (Google Meet)")

@@ -39,6 +39,7 @@ type ApplyDraft = {
   givenName: string;
   email: string;
   studentId: string;
+  rosterNumber: string;
   howFound: HowFound | "";
   interviewLocation: InterviewLocation | "";
   existingActivities: string;
@@ -52,6 +53,7 @@ function hasDraftContent(d: ApplyDraft): boolean {
     d.givenName !== "" ||
     d.email !== "" ||
     d.studentId !== "" ||
+    d.rosterNumber !== "" ||
     d.howFound !== "" ||
     d.interviewLocation !== "" ||
     d.existingActivities !== "" ||
@@ -78,7 +80,11 @@ export function PublicApplyPage() {
   const [givenName, setGivenName] = useState(initialDraft?.givenName ?? "");
   const [email, setEmail] = useState(initialDraft?.email ?? "");
   // Sprint 19 PR2: Google Form 準拠の新フィールド
+  // studentId=学籍番号(数字, 例 1400980), rosterNumber=名列番号(例 3EP2-26)
   const [studentId, setStudentId] = useState(initialDraft?.studentId ?? "");
+  const [rosterNumber, setRosterNumber] = useState(
+    initialDraft?.rosterNumber ?? "",
+  );
   const [howFound, setHowFound] = useState<HowFound | "">(
     initialDraft?.howFound ?? "",
   );
@@ -102,6 +108,7 @@ export function PublicApplyPage() {
     givenName,
     email,
     studentId,
+    rosterNumber,
     howFound,
     interviewLocation,
     existingActivities,
@@ -115,6 +122,7 @@ export function PublicApplyPage() {
     setGivenName("");
     setEmail("");
     setStudentId("");
+    setRosterNumber("");
     setHowFound("");
     setInterviewLocation("");
     setExistingActivities("");
@@ -172,8 +180,22 @@ export function PublicApplyPage() {
       setError("メールアドレスは必須です");
       return;
     }
+    // 学籍番号は数字のみ (緩め: 6〜8 桁)。厳しすぎない範囲で誤入力を弾く。
     if (!studentId.trim()) {
       setError("学籍番号を入力してください");
+      return;
+    }
+    if (!/^\d{6,8}$/.test(studentId.trim())) {
+      setError("学籍番号は数字で入力してください（例: 1400980）");
+      return;
+    }
+    // 名列番号は「クラス-番号」形式 (緩め: 英数字/空白 + '-' + 数字)。
+    if (!rosterNumber.trim()) {
+      setError("名列番号を入力してください");
+      return;
+    }
+    if (!/^[0-9A-Za-z\s]+-\s*\d+$/.test(rosterNumber.trim())) {
+      setError("名列番号は「クラス-番号」の形式で入力してください（例: 3EP2-26）");
       return;
     }
     if (!howFound) {
@@ -198,6 +220,7 @@ export function PublicApplyPage() {
         name,
         email: email.trim(),
         studentId: studentId.trim(),
+        rosterNumber: rosterNumber.trim(),
         howFound,
         interviewLocation,
         existingActivities: existingActivities.trim() || undefined,
@@ -341,14 +364,26 @@ export function PublicApplyPage() {
             style={inputStyle}
           />
         </Field>
-        <Field label="学籍番号 *" hint="例: 1 EP 1 - 1">
+        <Field label="学籍番号 *" hint="大学発行の数字（例: 1400980）">
           <input
             type="text"
+            inputMode="numeric"
             value={studentId}
             onChange={(e) => setStudentId(e.target.value)}
             required
+            maxLength={20}
+            placeholder="1400980"
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="名列番号 *" hint="クラス-出席番号（例: 3EP2-26）">
+          <input
+            type="text"
+            value={rosterNumber}
+            onChange={(e) => setRosterNumber(e.target.value)}
+            required
             maxLength={50}
-            placeholder="1 EP 1 - 1"
+            placeholder="3EP2-26"
             style={inputStyle}
           />
         </Field>
