@@ -712,11 +712,44 @@ function RoleChannelsSubView({
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const { confirm } = useConfirm();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWsId, setSelectedWsId] = useState<string>("");
   const [assigned, setAssigned] = useState<Set<string> | null>(null);
   const [channels, setChannels] = useState<SlackChannelLike[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [addingFromChannel, setAddingFromChannel] = useState(false);
+
+  // 逆同期: 紐付けチャンネルの在籍者をこのロールに一括付与する。
+  // 先に dryRun で件数を出し、確認ダイアログで確定させる (誤爆防止)。
+  const handleAddFromChannels = async () => {
+    setAddingFromChannel(true);
+    try {
+      const pre = await api.roles.addFromChannels(eventId, actionId, role.id, {
+        dryRun: true,
+      });
+      if (pre.added === 0) {
+        toast.success(
+          `追加対象はいません (在籍 ${pre.channelMemberCount} 人 / 既存 ${pre.skippedExisting} 人)`,
+        );
+        return;
+      }
+      const ok = await confirm({
+        message: `紐付けチャンネルの在籍者 ${pre.channelMemberCount} 人のうち、まだロール「${role.name}」を持たない ${pre.added} 人を追加します (既存 ${pre.skippedExisting} 人はスキップ)。よろしいですか？`,
+        confirmLabel: `${pre.added} 人を追加`,
+      });
+      if (!ok) return;
+      const res = await api.roles.addFromChannels(eventId, actionId, role.id);
+      toast.success(
+        `${res.added} 人をロールに追加しました (既存 ${res.skippedExisting} 人スキップ)`,
+      );
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "追加に失敗しました");
+    } finally {
+      setAddingFromChannel(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -832,6 +865,25 @@ function RoleChannelsSubView({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {assignedRows.length > 0 && (
+        <div style={{ marginTop: "0.5rem" }}>
+          <button
+            onClick={handleAddFromChannels}
+            disabled={addingFromChannel}
+            style={s.primaryBtn}
+            data-testid="add-from-channels-btn"
+          >
+            {addingFromChannel
+              ? "取得中..."
+              : "チャンネルの在籍者をこのロールに追加"}
+          </button>
+          <div style={{ ...s.meta, marginTop: "0.25rem" }}>
+            紐付けチャンネルの現在の在籍者を、このロールに一括で付与します
+            (逆同期・確認あり)。
+          </div>
         </div>
       )}
 
