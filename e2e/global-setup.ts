@@ -38,6 +38,27 @@ export default function globalSetup() {
   // 出席ダッシュボードの日付入力は「今日 (JST)」が既定・上限なので、遡及修正 E2E の
   // seed (late 出席行 / penalty) は実行時の JST 今日で作る。
   const todayJst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+  // 応募フォーム自動保存 E2E 用の面談候補 slot。
+  // WeekCalendarPicker は cell を「その JST 暦日 の hh:mm を toISOString した UTC」
+  // で表すため、seed 値も同じ規則で生成する (テストは timezoneId=Asia/Tokyo で実行)。
+  // 「翌日 12:00 JST」= 常に未来 かつ 当該週/翌週 に入るので、spec 側で週送りして拾える。
+  const jstShift = new Date(Date.now() + 9 * 3600 * 1000);
+  const applySlotUtc = new Date(
+    Date.UTC(
+      jstShift.getUTCFullYear(),
+      jstShift.getUTCMonth(),
+      jstShift.getUTCDate() + 1,
+      12 - 9, // 12:00 JST → 03:00 UTC
+      0,
+      0,
+      0,
+    ),
+  ).toISOString();
+  const applyConfig = JSON.stringify({
+    schemaVersion: 1,
+    leaderAvailableSlots: [applySlotUtc],
+  }).replace(/'/g, "''");
   const amConfig = JSON.stringify({
     schemaVersion: 1,
     links: [
@@ -124,6 +145,12 @@ export default function globalSetup() {
     `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('ac-roster','hackit-ac','member_roster','{}',1,'${now}','${now}');`,
     `DELETE FROM slack_role_members WHERE role_id IN (SELECT id FROM slack_roles WHERE event_action_id='ac-roles');`,
     `DELETE FROM slack_roles WHERE event_action_id='ac-roles';`,
+
+    // 応募フォーム 下書き自動保存 E2E 用。member_application を enabled にし、
+    // レガシー config.leaderAvailableSlots に未来 slot を 1 つだけ入れて
+    // 公開フォーム (/apply/apply-e2e) を描画可能にする (認証不要の公開エンドポイント)。
+    `INSERT OR REPLACE INTO events (id,type,name,config,status,created_at) VALUES ('apply-e2e','meetup','応募E2E','{}','active','${now}');`,
+    `INSERT OR REPLACE INTO event_actions (id,event_id,action_type,config,enabled,created_at,updated_at) VALUES ('e2e-apply-ma','apply-e2e','member_application','${applyConfig}',1,'${now}','${now}');`,
   ].join("\n");
 
   const dir = mkdtempSync(join(tmpdir(), "lmb-e2e-"));
