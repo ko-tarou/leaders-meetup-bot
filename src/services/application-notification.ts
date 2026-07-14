@@ -48,7 +48,7 @@ export type ApplicationNotificationConfig = {
   /**
    * 通知文テンプレ。未設定 or 空文字なら DEFAULT_TEMPLATE を使う。
    * placeholder: {mentions} {name} {email} {appliedAt} {studentId}
-   *              {howFound} {interviewLocation} {interviewAt}
+   *              {rosterNumber} {howFound} {interviewLocation} {interviewAt}
    */
   messageTemplate?: string;
 };
@@ -60,6 +60,8 @@ export type ApplicationLike = {
   // Sprint 19 PR2 以降の応募フォーム追加項目。
   // 通知テンプレ用に optional で受け取り、未設定なら空文字に置換する。
   studentId?: string | null;
+  // 名列番号 (クラス-出席番号)。studentId(学籍番号)とは別項目。
+  rosterNumber?: string | null;
   howFound?: string | null;
   interviewLocation?: string | null;
   interviewAt?: string | null;
@@ -119,6 +121,7 @@ export async function sendApplicationNotification(
       email: application.email,
       appliedAt: utcToJstFormat(application.appliedAt),
       studentId: application.studentId ?? "",
+      rosterNumber: application.rosterNumber ?? "",
       howFound: application.howFound ?? "",
       interviewLocation: application.interviewLocation ?? "",
       interviewAt: application.interviewAt

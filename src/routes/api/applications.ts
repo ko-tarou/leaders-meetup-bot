@@ -186,6 +186,8 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
     email: string;
     // Sprint 19 PR2: 新フィールド
     studentId: string;
+    // 名列番号 (クラス-出席番号, 例 3EP2-26)。studentId(学籍番号)とは別。
+    rosterNumber: string;
     howFound: string;
     interviewLocation: string;
     existingActivities?: string;
@@ -204,6 +206,9 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
   }
   if (!body.studentId || typeof body.studentId !== "string" || !body.studentId.trim()) {
     return c.json({ error: "studentId is required" }, 400);
+  }
+  if (!body.rosterNumber || typeof body.rosterNumber !== "string" || !body.rosterNumber.trim()) {
+    return c.json({ error: "rosterNumber is required" }, 400);
   }
   if (!body.howFound || typeof body.howFound !== "string") {
     return c.json({ error: "howFound is required" }, 400);
@@ -246,6 +251,7 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
     motivation: body.motivation?.trim() ?? null,
     introduction: body.introduction?.trim() ?? null,
     studentId: body.studentId.trim(),
+    rosterNumber: body.rosterNumber.trim(),
     howFound: body.howFound,
     interviewLocation: body.interviewLocation,
     existingActivities: body.existingActivities?.trim() || null,
@@ -280,6 +286,7 @@ applicationsRouter.post("/apply/:eventId", async (c) => {
         email: application.email,
         appliedAt: application.appliedAt,
         studentId: application.studentId,
+        rosterNumber: application.rosterNumber,
         howFound: application.howFound,
         interviewLocation: application.interviewLocation,
         interviewAt: application.interviewAt,
@@ -579,6 +586,7 @@ async function handleScheduledTransition(
       email: app.email,
       appliedAt: app.appliedAt,
       studentId: app.studentId,
+      rosterNumber: app.rosterNumber,
       howFound: app.howFound,
       interviewLocation: app.interviewLocation,
       interviewAt: app.interviewAt,
@@ -595,6 +603,7 @@ function toApplicationLike(app: typeof applications.$inferSelect) {
     email: app.email,
     appliedAt: app.appliedAt,
     studentId: app.studentId,
+    rosterNumber: app.rosterNumber,
     howFound: app.howFound,
     interviewLocation: app.interviewLocation,
     interviewAt: app.interviewAt,
