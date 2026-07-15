@@ -55,6 +55,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [diffLoading, setDiffLoading] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
+  // chunk 実行の進捗 (処理済みチャンネル / 全チャンネル)。null = 非実行中。
+  const [syncProgress, setSyncProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   // per-channel の checkbox 状態。channelId をキーに { invite, kick } を保持する。
   const [ops, setOps] = useState<Record<string, ChannelOps>>({});
   // Slack user ID → 表示名のキャッシュ (best-effort)。
@@ -159,8 +164,27 @@ export function RoleSyncTab({ eventId, action }: Props) {
     if (!ok) return;
     setSyncing(true);
     setSyncResult(null);
+    setSyncProgress({ done: 0, total: operations.length });
     try {
-      const res = await api.roles.sync(eventId, action.id, { operations });
+      // Cloudflare Workers の 1 invocation あたり subrequest 上限を超えないよう、
+      // operations を CHANNELS_PER_REQUEST 個ずつに分割して逐次実行する。
+      // 各リクエストは対象チャンネル分の member 取得 + invite/kick しか行わない
+      // ので、チャンネル/メンバーが大規模でも 1 リクエストが上限に当たらない。
+      const CHANNELS_PER_REQUEST = 5;
+      const res: SyncResult = { invited: 0, kicked: 0, errors: [] };
+      for (let i = 0; i < operations.length; i += CHANNELS_PER_REQUEST) {
+        const batch = operations.slice(i, i + CHANNELS_PER_REQUEST);
+        const part = await api.roles.sync(eventId, action.id, {
+          operations: batch,
+        });
+        res.invited += part.invited;
+        res.kicked += part.kicked;
+        res.errors.push(...part.errors);
+        setSyncProgress({
+          done: Math.min(i + CHANNELS_PER_REQUEST, operations.length),
+          total: operations.length,
+        });
+      }
       setSyncResult(res);
       if (res.errors.length === 0) {
         toast.success(
@@ -190,6 +214,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       toast.error(e instanceof Error ? e.message : "同期に失敗しました");
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
     }
   };
 
@@ -334,7 +359,9 @@ export function RoleSyncTab({ eventId, action }: Props) {
                   style={s.primaryBtn}
                 >
                   {syncing
-                    ? "実行中..."
+                    ? syncProgress
+                      ? `同期中... ${syncProgress.done}/${syncProgress.total} チャンネル`
+                      : "実行中..."
                     : `選択分を実行 (invite ${plannedInvites} / kick ${plannedKicks})`}
                 </button>
               </div>
