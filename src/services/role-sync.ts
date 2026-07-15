@@ -135,10 +135,19 @@ export async function computeExpectedMembership(
  * 各 managed channel について Slack 現状と DB 期待を比較した diff を返す。
  * Slack 側のエラー (channel_not_found 等) は ChannelSyncDiff.error に詰めて
  * 上位層に投げ返す。
+ *
+ * サブリクエスト設計 (Cloudflare Workers の 1 invocation あたり上限対策):
+ *   - channel 名は per-channel の conversations.info ではなく、conversations.list
+ *     1 回 (= getChannelName Map) でまとめて解決する。managed channel が M 個でも
+ *     名前解決の subrequest は O(1) (旧実装は O(M) で上限超過の主因だった)。
+ *   - channelIds を渡すと、その channel のみ Slack の member 取得を行う。
+ *     フロントが「N channel ずつ」複数リクエストに分割 (chunk) して呼べるように
+ *     するための絞り込み。未指定なら全 managed channel を対象にする (従来動作)。
  */
 export async function computeSyncDiff(
   env: Env,
   action: ActionRow,
+  channelIds?: string[],
 ): Promise<SyncDiffResult> {
   const workspaceId = readWorkspaceId(action);
   if (!workspaceId) {
@@ -155,14 +164,28 @@ export async function computeSyncDiff(
     action.id,
   );
 
+  // channelIds 指定時は交差を取る (chunk 実行)。未指定なら全 managed channel。
+  const filter = channelIds ? new Set(channelIds) : null;
+  const targetChannels = filter
+    ? managedChannels.filter((c) => filter.has(c))
+    : managedChannels;
+
+  // 対象 0 件なら Slack を一切叩かない (authTest / conversations.list も省く)。
+  if (targetChannels.length === 0) {
+    return { workspaceId, channels: [] };
+  }
+
   // bot 自身は Slack 側に常駐してほしいので kick から除外する。
   const auth = await slack.authTest();
   const botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
 
+  // channel 名は 1 回の conversations.list でまとめて解決 (N+1 排除)。
+  const nameMap = await buildChannelNameMap(slack);
+
   const channels: ChannelSyncDiff[] = [];
-  for (const channelId of managedChannels) {
+  for (const channelId of targetChannels) {
     const expected = expectedByChannel[channelId] ?? new Set<string>();
-    const channelName = await fetchChannelName(slack, channelId);
+    const channelName = nameMap.get(channelId) ?? channelId;
     const cur = await slack.listAllChannelMembers(channelId);
     if (!cur.ok) {
       channels.push({
@@ -184,20 +207,29 @@ export async function computeSyncDiff(
   return { workspaceId, channels };
 }
 
-async function fetchChannelName(
+/**
+ * conversations.list 1 回 (内部で cursor 分ページング) で channelId -> name の
+ * Map を作る。per-channel の conversations.info を M 回叩く N+1 を排除するための
+ * もの。失敗時は空 Map を返し、呼び出し側は channelId をそのまま名前に使う。
+ */
+async function buildChannelNameMap(
   slack: SlackClient,
-  channelId: string,
-): Promise<string> {
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   try {
-    const info = await slack.getChannelInfo(channelId);
-    if (info.ok && info.channel && typeof info.channel === "object") {
-      const ch = info.channel as { name?: string };
-      if (typeof ch.name === "string") return ch.name;
+    const res = await slack.getChannelList();
+    const list = res.channels;
+    if (res.ok && Array.isArray(list)) {
+      for (const ch of list as Array<{ id?: unknown; name?: unknown }>) {
+        if (typeof ch.id === "string" && typeof ch.name === "string") {
+          map.set(ch.id, ch.name);
+        }
+      }
     }
   } catch {
-    /* fall back to id */
+    /* fail-soft: channelId をそのまま名前に使う */
   }
-  return channelId;
+  return map;
 }
 
 /**
@@ -242,7 +274,11 @@ export async function executeSync(
     throw new Error(`workspace not found: ${workspaceId}`);
   }
 
-  const diff = await computeSyncDiff(env, action);
+  // operations 指定時は、その channel の member 取得だけに絞る (subrequest 削減)。
+  // 未指定なら全 managed channel を対象 (従来動作)。フロントが chunk 実行する際、
+  // 1 リクエストが対象 channel 分の subrequest しか使わないことを保証する。
+  const targetIds = operations ? operations.map((o) => o.channelId) : undefined;
+  const diff = await computeSyncDiff(env, action, targetIds);
 
   // operations が指定されていれば channelId をキーとする lookup を作る。
   // 未指定 (undefined) なら従来動作 = 全 channel × invite + kick。
