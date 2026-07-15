@@ -894,9 +894,10 @@ describe("sync-diff / sync (現状固定)", () => {
       ok: true,
       user_id: "U-BOT",
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockResolvedValue({
+    // 名前解決は conversations.list 1 回 (getChannelList) にまとまった。
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValue({
       ok: true,
-      channel: { name: "ch" },
+      channels: [{ id: "C1", name: "ch" }],
     } as SlackResponse);
     vi.spyOn(
       MockSlackClient.prototype,

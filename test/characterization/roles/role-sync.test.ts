@@ -220,8 +220,9 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
       ok: true,
       user_id: "U-BOT",
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockResolvedValueOnce(
-      { ok: true, channel: { name: "general" } } as SlackResponse,
+    // 名前解決は conversations.list 1 回 (getChannelList) でまとめて行う。
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValueOnce(
+      { ok: true, channels: [{ id: "C1", name: "general" }] } as SlackResponse,
     );
     vi.spyOn(
       MockSlackClient.prototype,
@@ -256,8 +257,8 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
       ok: true,
       user_id: "U-BOT",
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockResolvedValueOnce(
-      { ok: true, channel: { name: "gone" } } as SlackResponse,
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValueOnce(
+      { ok: true, channels: [{ id: "C-GONE", name: "gone" }] } as SlackResponse,
     );
     vi.spyOn(
       MockSlackClient.prototype,
@@ -279,7 +280,7 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     vi.restoreAllMocks();
   });
 
-  it("getChannelInfo 失敗/例外 → channelName は channelId に fallback", async () => {
+  it("getChannelList 失敗/例外 → channelName は channelId に fallback", async () => {
     const { row: ws } = await makeEncryptedWorkspace();
     const action = await setupAction(ws.id);
     const role = await makeSlackRole(action.id, { name: "R" });
@@ -290,7 +291,7 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
       ok: true,
       user_id: "U-BOT",
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockRejectedValueOnce(
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockRejectedValueOnce(
       new Error("boom"),
     );
     vi.spyOn(
@@ -302,7 +303,7 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     } as SlackResponse);
 
     const res = await computeSyncDiff(makeEnv(), action);
-    // CHARACTERIZATION: getChannelInfo 例外は握り潰し channelId を name に使う。
+    // getChannelList 例外は握り潰し channelId を name に使う (fail-soft)。
     expect(res.channels[0].channelName).toBe("C-NONAME");
     expect(res.channels[0].toInvite).toEqual([]);
     vi.restoreAllMocks();
@@ -318,8 +319,8 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     vi.spyOn(MockSlackClient.prototype, "authTest").mockResolvedValueOnce({
       ok: true,
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockResolvedValueOnce(
-      { ok: true, channel: { name: "c1" } } as SlackResponse,
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValueOnce(
+      { ok: true, channels: [{ id: "C1", name: "c1" }] } as SlackResponse,
     );
     vi.spyOn(
       MockSlackClient.prototype,
@@ -352,6 +353,67 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     const res = await computeSyncDiff(makeEnv(), action);
     expect(res.channels).toEqual([]);
     expect(membersSpy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  // subrequest 上限対策の回帰: managed channel が M 個でも名前解決は
+  // getChannelList 1 回のみ (旧実装は per-channel getChannelInfo で O(M))。
+  it("N+1 排除: 5 channel でも getChannelList は 1 回・getChannelInfo は 0 回", async () => {
+    const { row: ws } = await makeEncryptedWorkspace();
+    const action = await setupAction(ws.id);
+    const role = await makeSlackRole(action.id, { name: "R" });
+    const chans = ["C1", "C2", "C3", "C4", "C5"];
+    for (const ch of chans) await addRoleChannel(role.id, ch);
+
+    vi.spyOn(MockSlackClient.prototype, "authTest").mockResolvedValue({
+      ok: true,
+      user_id: "U-BOT",
+    } as SlackResponse);
+    const listSpy = vi
+      .spyOn(MockSlackClient.prototype, "getChannelList")
+      .mockResolvedValue({
+        ok: true,
+        channels: chans.map((id) => ({ id, name: `name-${id}` })),
+      } as SlackResponse);
+    const infoSpy = vi.spyOn(MockSlackClient.prototype, "getChannelInfo");
+    const membersSpy = vi
+      .spyOn(MockSlackClient.prototype, "listAllChannelMembers")
+      .mockResolvedValue({ ok: true, members: [] } as SlackResponse);
+
+    const res = await computeSyncDiff(makeEnv(), action);
+    expect(res.channels).toHaveLength(5);
+    expect(res.channels[0].channelName).toBe("name-C1");
+    // 名前解決の subrequest は channel 数に依らず 1 回。
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).not.toHaveBeenCalled();
+    // member 取得は対象 channel 分 (5 回)。
+    expect(membersSpy).toHaveBeenCalledTimes(5);
+    vi.restoreAllMocks();
+  });
+
+  // chunk 実行: channelIds を渡すと、その channel だけ member 取得する。
+  it("channelIds 指定 → 対象 channel のみ member 取得 (chunk 実行の絞り込み)", async () => {
+    const { row: ws } = await makeEncryptedWorkspace();
+    const action = await setupAction(ws.id);
+    const role = await makeSlackRole(action.id, { name: "R" });
+    for (const ch of ["C1", "C2", "C3"]) await addRoleChannel(role.id, ch);
+
+    vi.spyOn(MockSlackClient.prototype, "authTest").mockResolvedValue({
+      ok: true,
+      user_id: "U-BOT",
+    } as SlackResponse);
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValue({
+      ok: true,
+      channels: [],
+    } as SlackResponse);
+    const membersSpy = vi
+      .spyOn(MockSlackClient.prototype, "listAllChannelMembers")
+      .mockResolvedValue({ ok: true, members: [] } as SlackResponse);
+
+    const res = await computeSyncDiff(makeEnv(), action, ["C2"]);
+    expect(res.channels.map((c) => c.channelId)).toEqual(["C2"]);
+    expect(membersSpy).toHaveBeenCalledTimes(1);
+    expect(membersSpy).toHaveBeenCalledWith("C2");
     vi.restoreAllMocks();
   });
 });
@@ -396,11 +458,14 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
       ok: true,
       user_id: opts.botUserId ?? "U-BOT",
     } as SlackResponse);
-    vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockResolvedValue({
+    vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValue({
       ok: true,
-      channel: { name: "ch" },
+      channels: [
+        { id: "C1", name: "ch" },
+        { id: "C2", name: "ch" },
+      ],
     } as SlackResponse);
-    vi.spyOn(
+    const membersSpy = vi.spyOn(
       MockSlackClient.prototype,
       "listAllChannelMembers",
     ).mockImplementation(async (channel: string) => {
@@ -445,7 +510,7 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
           ? ({ ok: false, error: "cant_kick" } as SlackResponse)
           : ({ ok: true } as SlackResponse),
       );
-    return { inviteSpy, kickSpy };
+    return { inviteSpy, kickSpy, membersSpy };
   }
 
   beforeEach(() => {
@@ -494,6 +559,24 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
     expect(kickSpy.mock.calls).toEqual([["C1", "U-stale1"]]);
     expect(res.invited).toBe(1); // C1 へ U-a invite
     expect(res.kicked).toBe(1);
+  });
+
+  // subrequest 上限対策の回帰: operations で 1 channel だけ選ぶと、member 取得も
+  // その channel だけになる (chunk された 1 リクエストが全 channel 分の
+  // subrequest を使わないことの保証)。
+  it("operations 指定: member 取得も対象 channel のみ (subrequest scoping)", async () => {
+    const action = await setup({
+      members: ["U-a"],
+      channels: ["C1", "C2", "C3"],
+    });
+    const { membersSpy } = stubSlack({
+      currentByChannel: { C1: [], C2: [], C3: [] },
+    });
+    await executeSync(makeEnv(), action, [
+      { channelId: "C2", invite: true, kick: true },
+    ]);
+    // C1 / C3 の member 取得は行われない。
+    expect(membersSpy.mock.calls).toEqual([["C2"]]);
   });
 
   it("operations 指定: invite だけ true → kick しない (auto-invite 相当)", async () => {
