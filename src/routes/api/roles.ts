@@ -24,6 +24,7 @@
  *     GET    /orgs/:eventId/actions/:actionId/roles/:roleId/channels
  *     POST   /orgs/:eventId/actions/:actionId/roles/:roleId/channels       (bulk)
  *     DELETE /orgs/:eventId/actions/:actionId/roles/:roleId/channels/:channelId
+ *     POST   /orgs/:eventId/actions/:actionId/roles/team-channel-setup     (team1..N 一括: 作成+紐付け+同期)
  *
  *   Workspace members (Slack users.list 経由)
  *     GET    /orgs/:eventId/actions/:actionId/workspace-members
@@ -55,7 +56,10 @@ import type { SlackUser } from "../../services/slack-api";
 // Phase 2-B: 子⊆親 invariant の連鎖削除・循環検出に使う子孫列挙は
 // 副作用ゼロの純関数なので domain/role へ抽出。route は Repository/DB で
 // I/O → domain 純関数で判断 → I/O で反映、の薄い application フローに。
-import { collectDescendantRoleIds } from "../../domain/role/role-assign";
+import {
+  collectDescendantRoleIds,
+  expandWithAncestors,
+} from "../../domain/role/role-assign";
 // 命名規則ベースの自動分類 (pure domain)。route は Slack/DB の I/O を集め
 // domain の純関数に渡して判断させる薄い application フローに徹する。
 import {
@@ -938,6 +942,258 @@ rolesRouter.post(
       skippedNotInParent,
       errors,
     });
+  },
+);
+
+/**
+ * POST /orgs/:eventId/actions/:actionId/roles/team-channel-setup
+ *
+ *   「参加者を親ロールとして team1..N の子ロールを一括で作り、対応する Slack
+ *   チャンネルに紐付け、在籍者を同期する」運用一括操作 (HackIT のチーム運用)。
+ *   1 件ずつ手作業する代わりに、teams 配列で渡した各チームを 1 リクエストで
+ *   まとめて処理する。全ステップ冪等 (再実行しても重複作成・重複付与しない)。
+ *
+ *   body: {
+ *     parentRoleName?: string,   // 親ロール名。既定 "参加者"。
+ *     teams: Array<{ roleName: string; channelId: string }>,  // 対象チーム群
+ *     sync?: boolean,            // 既定 true。false なら作成+紐付けのみ (同期しない)
+ *     dryRun?: boolean,          // 既定 false。true なら一切書き込まず件数だけ返す
+ *   }
+ *
+ *   在籍者同期の invariant: 子⊆親 を保つため、チャンネル在籍者は team ロール
+ *   だけでなく祖先ロール (参加者 -> ... -> root) にも付与する (expandWithAncestors)。
+ *   親「参加者」が空でも在籍者が親に入るので team ロールへの付与が skip されない。
+ *
+ *   subrequest 対策: teams は呼び出し側 (CLI) が少数ずつ (例 5 件) に分割して
+ *   渡す前提。1 リクエストは authTest 1 回 + teams 件数分の conversations.members
+ *   しか叩かないので Cloudflare の 1 invocation 上限に当たらない。
+ *
+ *   返却: {
+ *     parentRoleName, dryRun, sync,
+ *     results: [{ roleName, channelId, roleId, created, channelBound,
+ *                 channelMemberCount, addedToTeam, addedToAncestors, errors }],
+ *     totals: { created, channelMemberCount, addedToTeam, addedToAncestors }
+ *   }
+ */
+rolesRouter.post(
+  "/orgs/:eventId/actions/:actionId/roles/team-channel-setup",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const body = await c.req
+      .json<{
+        parentRoleName?: string;
+        teams?: unknown;
+        sync?: boolean;
+        dryRun?: boolean;
+      }>()
+      .catch(() => ({}) as Record<string, never>);
+
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    // teams 検証: [{ roleName, channelId }] の配列であること。
+    if (!Array.isArray(body.teams)) {
+      return c.json({ error: "teams must be an array" }, 400);
+    }
+    const teams: Array<{ roleName: string; channelId: string }> = [];
+    for (const t of body.teams) {
+      const roleName =
+        t && typeof t === "object"
+          ? (t as { roleName?: unknown }).roleName
+          : undefined;
+      const channelId =
+        t && typeof t === "object"
+          ? (t as { channelId?: unknown }).channelId
+          : undefined;
+      if (
+        typeof roleName !== "string" ||
+        !roleName.trim() ||
+        typeof channelId !== "string" ||
+        !channelId.trim()
+      ) {
+        return c.json(
+          {
+            error:
+              "each team must be { roleName: string, channelId: string }",
+          },
+          400,
+        );
+      }
+      teams.push({ roleName: roleName.trim(), channelId: channelId.trim() });
+    }
+
+    const sync = body.sync !== false; // 既定 true
+    const dryRun = body.dryRun === true;
+    const parentRoleName = (body.parentRoleName ?? "参加者").trim() || "参加者";
+
+    // action 配下の全ロールを読み、name -> role の索引を作る (冪等性の核)。
+    let allRoles = await db
+      .select()
+      .from(slackRoles)
+      .where(eq(slackRoles.eventActionId, actionId))
+      .all();
+    const parent = allRoles.find((r) => r.name === parentRoleName);
+    if (!parent) {
+      return c.json(
+        { error: `parent role not found: ${parentRoleName}` },
+        404,
+      );
+    }
+
+    // sync する場合のみ Slack クライアント + bot user を用意 (authTest 1 回)。
+    let slack: Awaited<
+      ReturnType<typeof createSlackClientForWorkspace>
+    > | null = null;
+    let botUserId: string | null = null;
+    if (sync) {
+      const workspaceId = readWorkspaceId(found.action);
+      if (!workspaceId) {
+        return c.json({ error: "action.config.workspaceId is missing" }, 400);
+      }
+      slack = await createSlackClientForWorkspace(c.env, workspaceId);
+      if (!slack) {
+        return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+      }
+      try {
+        const auth = await slack.authTest();
+        botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
+      } catch {
+        /* auth 失敗時は bot 除外なしで続行 */
+      }
+    }
+
+    // 祖先ロールの現在メンバー集合をリクエスト内でキャッシュし、複数チームで
+    // 共有される親 (参加者/root) への重複 insert を防ぐ (subrequest 節約)。
+    const memberCache = new Map<string, Set<string>>();
+    async function membersOf(roleId: string): Promise<Set<string>> {
+      const hit = memberCache.get(roleId);
+      if (hit) return hit;
+      const set = await memberIdSet(db, roleId);
+      memberCache.set(roleId, set);
+      return set;
+    }
+
+    const now = new Date().toISOString();
+    const CHUNK = 20;
+    async function insertMembers(roleId: string, userIds: string[]) {
+      for (let i = 0; i < userIds.length; i += CHUNK) {
+        const chunk = userIds.slice(i, i + CHUNK).map((slackUserId) => ({
+          roleId,
+          slackUserId,
+          addedAt: now,
+        }));
+        await db.insert(slackRoleMembers).values(chunk);
+      }
+    }
+
+    type TeamResult = {
+      roleName: string;
+      channelId: string;
+      roleId: string | null;
+      created: boolean;
+      channelBound: boolean;
+      channelMemberCount: number;
+      addedToTeam: number;
+      addedToAncestors: number;
+      errors: string[];
+    };
+    const results: TeamResult[] = [];
+
+    for (const team of teams) {
+      const r: TeamResult = {
+        roleName: team.roleName,
+        channelId: team.channelId,
+        roleId: null,
+        created: false,
+        channelBound: false,
+        channelMemberCount: 0,
+        addedToTeam: 0,
+        addedToAncestors: 0,
+        errors: [],
+      };
+
+      // 1) ロール解決 or 作成 (親 = parentRoleName)。既存同名はそのまま使う。
+      let role = allRoles.find((x) => x.name === team.roleName);
+      if (!role) {
+        const newRole = {
+          id: crypto.randomUUID(),
+          eventActionId: actionId,
+          name: team.roleName,
+          description: null as string | null,
+          parentRoleId: parent.id,
+          createdAt: now,
+          updatedAt: now,
+        };
+        if (!dryRun) await db.insert(slackRoles).values(newRole);
+        // dryRun でも in-memory の role 一覧には足す。expandWithAncestors が
+        // 新規 team ロールの親チェーン (参加者 -> root) を解決でき、dryRun の
+        // addedToAncestors 件数を実行時と一致させるため (DB 書き込みは gate 済み)。
+        allRoles = [...allRoles, newRole];
+        role = newRole;
+        r.created = true;
+      }
+      r.roleId = role.id;
+
+      // 2) チャンネル紐付け (冪等)。
+      const existingChannels = await db
+        .select()
+        .from(slackRoleChannels)
+        .where(eq(slackRoleChannels.roleId, role.id))
+        .all();
+      const alreadyBound = existingChannels.some(
+        (ch) => ch.channelId === team.channelId,
+      );
+      if (!alreadyBound) {
+        if (!dryRun) {
+          await db
+            .insert(slackRoleChannels)
+            .values({ roleId: role.id, channelId: team.channelId, addedAt: now });
+        }
+        r.channelBound = true;
+      }
+
+      // 3) 在籍者同期。
+      if (sync && slack) {
+        const res = await slack.listAllChannelMembers(team.channelId);
+        if (!res.ok) {
+          r.errors.push(res.error ?? "fetch_failed");
+          results.push(r);
+          continue;
+        }
+        const channelUsers = res.members.filter((u) => u !== botUserId);
+        r.channelMemberCount = channelUsers.length;
+
+        // 子⊆親 を保つため team ロール + 祖先すべてに付与する。
+        const targetRoleIds = expandWithAncestors(allRoles, [role.id]);
+        for (const targetRoleId of targetRoleIds) {
+          const existing = await membersOf(targetRoleId);
+          const toAdd = channelUsers.filter((u) => !existing.has(u));
+          if (toAdd.length === 0) continue;
+          if (!dryRun) await insertMembers(targetRoleId, toAdd);
+          for (const u of toAdd) existing.add(u); // キャッシュ更新
+          if (targetRoleId === role.id) r.addedToTeam += toAdd.length;
+          else r.addedToAncestors += toAdd.length;
+        }
+      }
+
+      results.push(r);
+    }
+
+    const totals = results.reduce(
+      (acc, r) => {
+        acc.created += r.created ? 1 : 0;
+        acc.channelMemberCount += r.channelMemberCount;
+        acc.addedToTeam += r.addedToTeam;
+        acc.addedToAncestors += r.addedToAncestors;
+        return acc;
+      },
+      { created: 0, channelMemberCount: 0, addedToTeam: 0, addedToAncestors: 0 },
+    );
+
+    return c.json({ parentRoleName, dryRun, sync, results, totals });
   },
 );
 
