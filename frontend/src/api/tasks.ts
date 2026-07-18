@@ -30,6 +30,7 @@ export const tasks = {
     phase?: string;
     wbs?: string;
     progressPct?: number;
+    assignee?: string;
   }) =>
     request<Task>("/tasks", {
       method: "POST",
@@ -49,6 +50,7 @@ export const tasks = {
       phase?: string | null;
       wbs?: string | null;
       progressPct?: number | null;
+      assignee?: string | null;
     },
   ) =>
     request<Task>(`/tasks/${id}`, {

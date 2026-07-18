@@ -105,6 +105,8 @@ tasksRouter.post("/tasks", async (c) => {
     phase?: string;
     wbs?: string;
     progressPct?: number;
+    // gantt_tracker (0078): 担当者名 (自由文字列)。未指定なら null。
+    assignee?: string;
   }>();
 
   // バリデーション
@@ -161,6 +163,7 @@ tasksRouter.post("/tasks", async (c) => {
     phase: body.phase ?? null,
     wbs: body.wbs ?? null,
     progressPct: body.progressPct ?? null,
+    assignee: body.assignee ?? null,
   };
   await db.insert(tasks).values(task);
   return c.json(task, 201);
@@ -182,6 +185,8 @@ tasksRouter.put("/tasks/:id", async (c) => {
     phase?: string | null;
     wbs?: string | null;
     progressPct?: number | null;
+    // gantt_tracker (0078): 担当者名。null で明示クリア可
+    assignee?: string | null;
   }>();
 
   const existing = await db.select().from(tasks).where(eq(tasks.id, id)).get();
@@ -231,6 +236,7 @@ tasksRouter.put("/tasks/:id", async (c) => {
   if (body.phase !== undefined) updates.phase = body.phase;
   if (body.wbs !== undefined) updates.wbs = body.wbs;
   if (body.progressPct !== undefined) updates.progressPct = body.progressPct;
+  if (body.assignee !== undefined) updates.assignee = body.assignee;
 
   await db.update(tasks).set(updates).where(eq(tasks.id, id));
   const updated = await db.select().from(tasks).where(eq(tasks.id, id)).get();

@@ -105,6 +105,9 @@ export const tasks = sqliteTable(
     phase: text("phase"), // フェーズ id (例 "F1")
     wbs: text("wbs"), // WBS 番号 (例 "3.2")
     progressPct: integer("progress_pct"), // 0-100, NULL = 未設定
+    // gantt_tracker (migration 0078): 担当者名 (自由文字列)。NULL 許容。
+    // ガント表の葉タスクのみ編集可 (task_assignees とは別の軽量表示用)。
+    assignee: text("assignee"),
   },
   (t) => [index("idx_tasks_event_id").on(t.eventId)],
 );

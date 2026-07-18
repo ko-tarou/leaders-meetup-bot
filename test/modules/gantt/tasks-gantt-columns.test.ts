@@ -71,6 +71,41 @@ describe("tasks gantt columns (0077)", () => {
     expect(task.progressPct).toBeNull();
   });
 
+  it("assignee (0078) を POST 保存・PUT 更新・null クリアできる", async () => {
+    const created = (await (
+      await createTask({ assignee: "山田" })
+    ).json()) as Record<string, unknown>;
+    expect(created.assignee).toBe("山田");
+
+    const id = created.id as string;
+    const put = await app().request(
+      `/tasks/${id}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignee: "佐藤" }),
+      },
+      env,
+    );
+    expect(((await put.json()) as Record<string, unknown>).assignee).toBe("佐藤");
+
+    const clear = await app().request(
+      `/tasks/${id}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignee: null }),
+      },
+      env,
+    );
+    expect(((await clear.json()) as Record<string, unknown>).assignee).toBeNull();
+  });
+
+  it("assignee 未指定なら null (後方互換)", async () => {
+    const task = (await (await createTask()).json()) as Record<string, unknown>;
+    expect(task.assignee).toBeNull();
+  });
+
   it("progressPct の範囲外/非整数は 400", async () => {
     expect((await createTask({ progressPct: 150 })).status).toBe(400);
     expect((await createTask({ progressPct: -5 })).status).toBe(400);
