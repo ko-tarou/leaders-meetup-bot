@@ -45,7 +45,24 @@ export type ChannelSyncDiff = {
 export type SyncDiffResult = {
   workspaceId: string;
   channels: ChannelSyncDiff[];
+  /**
+   * ページング (offset/limit) 実行時のみ設定される。未指定 (全件計算) では undefined。
+   *   - total:      対象 managed channel の総数 (slice 前)
+   *   - nextOffset: 次ページの offset。これ以上ページが無ければ null。
+   * フロントは nextOffset が null になるまで offset を辿って channels を連結する。
+   */
+  total?: number;
+  nextOffset?: number | null;
 };
+
+/**
+ * sync-diff を offset/limit で分割計算するときの 1 ページあたり channel 数の既定値。
+ *
+ * Cloudflare Workers の subrequest 上限 (free=50/invocation) 対策。1 ページ =
+ * authTest(1) + getChannelList(数ページ) + limit 件の conversations.members なので、
+ * limit を小さく保てば大規模イベント (HackIT 等) でも 1 invocation が上限に当たらない。
+ */
+export const SYNC_DIFF_DEFAULT_PAGE_SIZE = 5;
 
 export type SyncExecuteResult = {
   invited: number;
@@ -143,11 +160,17 @@ export async function computeExpectedMembership(
  *   - channelIds を渡すと、その channel のみ Slack の member 取得を行う。
  *     フロントが「N channel ずつ」複数リクエストに分割 (chunk) して呼べるように
  *     するための絞り込み。未指定なら全 managed channel を対象にする (従来動作)。
+ *   - page (offset/limit) を渡すと、対象 channel を offset から limit 件だけに
+ *     絞って計算し、total と nextOffset を返す。GET /sync-diff の「diff 計算」が
+ *     全 channel を 1 invocation で叩いて subrequest 上限を超える事故を防ぐための
+ *     サーバー側ページング。slice は Slack 呼び出し (authTest/getChannelList/
+ *     conversations.members) の前に行うので、範囲外ページは Slack を一切叩かない。
  */
 export async function computeSyncDiff(
   env: Env,
   action: ActionRow,
   channelIds?: string[],
+  page?: { offset?: number; limit?: number },
 ): Promise<SyncDiffResult> {
   const workspaceId = readWorkspaceId(action);
   if (!workspaceId) {
@@ -166,13 +189,31 @@ export async function computeSyncDiff(
 
   // channelIds 指定時は交差を取る (chunk 実行)。未指定なら全 managed channel。
   const filter = channelIds ? new Set(channelIds) : null;
-  const targetChannels = filter
+  const allTargets = filter
     ? managedChannels.filter((c) => filter.has(c))
     : managedChannels;
 
+  // page 指定時は offset/limit で slice し total/nextOffset を返す (サーバー側
+  // ページング)。slice を Slack 呼び出しより前に置くことで、1 invocation で
+  // 叩く conversations.members を limit 件に抑え subrequest 上限超過を防ぐ。
+  let targetChannels = allTargets;
+  let paging: { total: number; nextOffset: number | null } | null = null;
+  if (page) {
+    const offset = Math.max(0, page.offset ?? 0);
+    const limit = Math.max(1, page.limit ?? SYNC_DIFF_DEFAULT_PAGE_SIZE);
+    targetChannels = allTargets.slice(offset, offset + limit);
+    const end = offset + limit;
+    paging = {
+      total: allTargets.length,
+      nextOffset: end < allTargets.length ? end : null,
+    };
+  }
+
   // 対象 0 件なら Slack を一切叩かない (authTest / conversations.list も省く)。
   if (targetChannels.length === 0) {
-    return { workspaceId, channels: [] };
+    return paging
+      ? { workspaceId, channels: [], total: paging.total, nextOffset: null }
+      : { workspaceId, channels: [] };
   }
 
   // bot 自身は Slack 側に常駐してほしいので kick から除外する。
@@ -204,7 +245,9 @@ export async function computeSyncDiff(
     const toKick = [...currentSet].filter((u) => !expected.has(u));
     channels.push({ channelId, channelName, toInvite, toKick });
   }
-  return { workspaceId, channels };
+  return paging
+    ? { workspaceId, channels, total: paging.total, nextOffset: paging.nextOffset }
+    : { workspaceId, channels };
 }
 
 /**

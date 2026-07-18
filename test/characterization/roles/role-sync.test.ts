@@ -416,6 +416,118 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     expect(membersSpy).toHaveBeenCalledWith("C2");
     vi.restoreAllMocks();
   });
+
+  // -------------------------------------------------------------------------
+  // page (offset/limit) ページング: HackIT のような大規模イベントで
+  // 「diff を計算」が全 channel を 1 invocation で叩き Cloudflare の subrequest
+  // 上限 (free=50) を超える "Too many subrequests" を防ぐための回帰網。
+  // -------------------------------------------------------------------------
+  describe("computeSyncDiff page (subrequest 上限対策)", () => {
+    /** N 個の managed channel (C0..C{N-1}) を 1 role に紐付けて seed。 */
+    async function setupManyChannels(n: number) {
+      const { row: ws } = await makeEncryptedWorkspace();
+      const ev = await makeEvent();
+      const action = await makeEventAction(ev.id, {
+        actionType: "role_management",
+        config: JSON.stringify({ workspaceId: ws.id }),
+      });
+      const role = await makeSlackRole(action.id, { name: "R" });
+      const ids: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const id = `C${i}`;
+        ids.push(id);
+        await addRoleChannel(role.id, id);
+      }
+      return { action, ids };
+    }
+
+    function stubSlackAllEmpty() {
+      vi.spyOn(MockSlackClient.prototype, "authTest").mockResolvedValue({
+        ok: true,
+        user_id: "U-BOT",
+      } as SlackResponse);
+      vi.spyOn(MockSlackClient.prototype, "getChannelList").mockResolvedValue({
+        ok: true,
+        channels: [],
+      } as SlackResponse);
+      return vi
+        .spyOn(MockSlackClient.prototype, "listAllChannelMembers")
+        .mockResolvedValue({ ok: true, members: [] } as SlackResponse);
+    }
+
+    it("1 ページの Slack member 取得は limit 件に収まる (subrequest 上限を超えない)", async () => {
+      // 20 channel あっても、limit=5 の 1 ページでは conversations.members は
+      // 5 回しか呼ばれない (= 1 invocation が subrequest 上限に当たらない核心)。
+      const { action } = await setupManyChannels(20);
+      const membersSpy = stubSlackAllEmpty();
+
+      const res = await computeSyncDiff(makeEnv(), action, undefined, {
+        offset: 0,
+        limit: 5,
+      });
+
+      expect(res.channels).toHaveLength(5);
+      expect(membersSpy).toHaveBeenCalledTimes(5);
+      expect(res.total).toBe(20);
+      expect(res.nextOffset).toBe(5);
+      vi.restoreAllMocks();
+    });
+
+    it("nextOffset を辿ると全 channel を重複なく網羅し、最終ページで null になる", async () => {
+      const { action, ids } = await setupManyChannels(12);
+      stubSlackAllEmpty();
+
+      const collected: string[] = [];
+      let offset: number | null = 0;
+      let pages = 0;
+      while (offset !== null) {
+        const res: Awaited<ReturnType<typeof computeSyncDiff>> =
+          await computeSyncDiff(makeEnv(), action, undefined, {
+            offset,
+            limit: 5,
+          });
+        collected.push(...res.channels.map((c) => c.channelId));
+        expect(res.total).toBe(12);
+        offset = res.nextOffset ?? null;
+        pages++;
+      }
+
+      // 12 件 / 5 = 3 ページ (5 + 5 + 2)。全 channel を 1 度ずつ網羅。
+      expect(pages).toBe(3);
+      expect(collected.sort()).toEqual([...ids].sort());
+      expect(collected).toHaveLength(12);
+      vi.restoreAllMocks();
+    });
+
+    it("offset が範囲外 → channels 空 / nextOffset null / Slack を叩かない", async () => {
+      const { action } = await setupManyChannels(3);
+      const membersSpy = stubSlackAllEmpty();
+
+      const res = await computeSyncDiff(makeEnv(), action, undefined, {
+        offset: 10,
+        limit: 5,
+      });
+
+      expect(res.channels).toEqual([]);
+      expect(res.total).toBe(3);
+      expect(res.nextOffset).toBeNull();
+      // 範囲外ページは authTest / conversations.members を一切呼ばない。
+      expect(membersSpy).not.toHaveBeenCalled();
+      vi.restoreAllMocks();
+    });
+
+    it("page 未指定 (従来動作) は total/nextOffset を付けず全 channel を返す", async () => {
+      const { action } = await setupManyChannels(7);
+      stubSlackAllEmpty();
+
+      const res = await computeSyncDiff(makeEnv(), action);
+
+      expect(res.channels).toHaveLength(7);
+      expect(res.total).toBeUndefined();
+      expect(res.nextOffset).toBeUndefined();
+      vi.restoreAllMocks();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

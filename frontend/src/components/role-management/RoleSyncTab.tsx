@@ -27,6 +27,12 @@ import { colors } from "../../styles/tokens";
 
 type Config = { workspaceId?: string };
 
+// diff 計算を分割リクエストする際の 1 ページあたり channel 数。
+// Cloudflare Workers の subrequest 上限 (free=50/invocation) を超えないよう、
+// 大規模イベントでは managed channel を CHANNELS_PER_DIFF_PAGE 件ずつに分けて
+// sync-diff を呼び、nextOffset を辿って結果を連結する。
+const CHANNELS_PER_DIFF_PAGE = 5;
+
 function parseConfig(raw: string): Config {
   try {
     const parsed = JSON.parse(raw || "{}");
@@ -34,6 +40,35 @@ function parseConfig(raw: string): Config {
   } catch {
     return {};
   }
+}
+
+// sync-diff を offset/limit で分割して全 channel 分を集約する。
+// 各リクエストは managed channel を CHANNELS_PER_DIFF_PAGE 件しか処理しないので、
+// 1 invocation が Cloudflare Workers の subrequest 上限に当たらない。
+// onProgress は (処理済み channel 数, 総 channel 数) を都度通知する (任意)。
+async function fetchDiffPaged(
+  eventId: string,
+  actionId: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<SyncDiffResponse> {
+  const channels: SyncDiffResponse["channels"] = [];
+  let offset = 0;
+  let workspaceId = "";
+  // 安全弁: 想定外に nextOffset が進み続けても無限ループしないよう上限を設ける。
+  const MAX_PAGES = 500;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = await api.roles.syncDiff(eventId, actionId, {
+      offset,
+      limit: CHANNELS_PER_DIFF_PAGE,
+    });
+    workspaceId = res.workspaceId;
+    channels.push(...res.channels);
+    const total = res.total ?? channels.length;
+    onProgress?.(channels.length, total);
+    if (res.nextOffset === null || res.nextOffset === undefined) break;
+    offset = res.nextOffset;
+  }
+  return { workspaceId, channels };
 }
 
 type Props = {
@@ -53,6 +88,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [diff, setDiff] = useState<SyncDiffResponse | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  // 分割 diff 計算の進捗 (処理済み channel / 総 channel)。null = 非表示。
+  const [diffProgress, setDiffProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
   // chunk 実行の進捗 (処理済みチャンネル / 全チャンネル)。null = 非実行中。
@@ -71,8 +111,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
     setDiffLoading(true);
     setDiffError(null);
     setSyncResult(null);
+    setDiffProgress(null);
     try {
-      const res = await api.roles.syncDiff(eventId, action.id);
+      const res = await fetchDiffPaged(eventId, action.id, (done, total) =>
+        setDiffProgress({ done, total }),
+      );
       setDiff(res);
       // default: 差分があれば該当方向 true、なければ false
       const initialOps: Record<string, ChannelOps> = {};
@@ -103,6 +146,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       );
     } finally {
       setDiffLoading(false);
+      setDiffProgress(null);
     }
   };
 
@@ -197,7 +241,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       }
       // 成功後 diff を再取得して空になったか確認できるようにする。
       try {
-        const next = await api.roles.syncDiff(eventId, action.id);
+        const next = await fetchDiffPaged(eventId, action.id);
         setDiff(next);
         const nextOps: Record<string, ChannelOps> = {};
         for (const c of next.channels) {
@@ -280,7 +324,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
           disabled={isReadOnly || diffLoading || syncing}
           style={s.secondaryBtn}
         >
-          {diffLoading ? "計算中..." : "diff を計算"}
+          {diffLoading
+            ? diffProgress
+              ? `計算中... ${diffProgress.done}/${diffProgress.total} チャンネル`
+              : "計算中..."
+            : "diff を計算"}
         </button>
       </div>
 

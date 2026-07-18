@@ -179,11 +179,21 @@ export const roles = {
     }
   },
 
-  // 同期: 各 channel の現状 vs 期待値を返す → 実行
-  syncDiff: (eventId: string, actionId: string) =>
-    request<SyncDiffResponse>(
-      `/orgs/${eventId}/actions/${actionId}/sync-diff`,
-    ),
+  // 同期: 各 channel の現状 vs 期待値を返す → 実行。
+  // offset/limit を渡すと managed channel を分割計算する (subrequest 上限対策)。
+  // 未指定なら全 channel を 1 回で計算する (後方互換)。
+  syncDiff: (
+    eventId: string,
+    actionId: string,
+    page?: { offset: number; limit: number },
+  ) => {
+    const qs = page
+      ? `?offset=${page.offset}&limit=${page.limit}`
+      : "";
+    return request<SyncDiffResponse>(
+      `/orgs/${eventId}/actions/${actionId}/sync-diff${qs}`,
+    );
+  },
   /**
    * sync を実行する。body に operations を渡すと channel × invite/kick の
    * selective 実行ができる。body 未指定 (= undefined) なら従来通り

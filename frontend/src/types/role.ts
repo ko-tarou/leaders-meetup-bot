@@ -88,6 +88,10 @@ export type ChannelDiff = {
 export type SyncDiffResponse = {
   workspaceId: string;
   channels: ChannelDiff[];
+  // offset/limit ページング時のみ設定される。全件計算 (offset/limit 未指定) では
+  // undefined。nextOffset が null になるまでフロントが offset を辿って連結する。
+  total?: number;
+  nextOffset?: number | null;
 };
 
 // POST /sync の結果
