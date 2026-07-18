@@ -14,6 +14,17 @@ import { GanttAddTaskForm } from "./GanttAddTaskForm";
 const ROW_H = 30;
 const HEADER_H = 26;
 const DAY_W = 3;
+// 固定列 (WBS + タスク名): 横スクロールしても左に残す。
+const WBS_W = 48;
+const NAME_W = 340;
+// スクロール領域の左端に置くフィールド群 (状態/進捗/担当者/開始/終了)。
+// チャートバーと一緒に横スクロールして画面外へ流れる。
+const STATUS_W = 92;
+const PROGRESS_W = 64;
+const ASSIGNEE_W = 120;
+const START_W = 104;
+const END_W = 104;
+const FIELDS_W = STATUS_W + PROGRESS_W + ASSIGNEE_W + START_W + END_W;
 const TEAM_COLORS = [
   "#2563eb", // blue
   "#d97706", // amber
@@ -452,46 +463,71 @@ export function GanttChartTab({
         />
       )}
       <div style={{ display: "flex", border: `1px solid ${colors.border}`, borderRadius: 8, overflow: "hidden" }}>
-        {/* 左: タスクテーブル */}
+        {/* 左: 固定カラム (タスク名だけを sticky に残す)。
+            WBS + タスク名 のみを置き、横スクロールしても左端に残る。
+            状態/進捗/担当者/開始/終了 は右のスクロール領域へ移した。 */}
         <div style={{ flexShrink: 0, borderRight: `2px solid ${colors.borderStrong}` }}>
           <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
-            <span style={{ width: 48, paddingLeft: 6 }}>WBS</span>
-            <span style={{ width: 340 }}>タスク</span>
-            <span style={{ width: 92 }}>状態</span>
-            <span style={{ width: 64 }}>進捗%</span>
-            <span style={{ width: 120 }}>担当者</span>
-            <span style={{ width: 104 }}>開始</span>
-            <span style={{ width: 104 }}>終了</span>
+            <span style={{ width: WBS_W, paddingLeft: 6 }}>WBS</span>
+            <span style={{ width: NAME_W }}>タスク</span>
           </div>
-          {rows.map((r, i) =>
+          {rows.map((r) =>
             r.kind === "team" ? (
-              <div key={`team-${r.team}`} style={{ height: ROW_H, display: "flex", alignItems: "center", paddingLeft: 6, fontWeight: 600, fontSize: 13, background: colors.surface, borderBottom: `1px solid ${colors.border}`, color: teamColor.get(r.team) }}>
+              <div key={`team-name-${r.team}`} style={{ height: ROW_H, display: "flex", alignItems: "center", paddingLeft: 6, fontWeight: 600, fontSize: 13, background: colors.surface, borderBottom: `1px solid ${colors.border}`, color: teamColor.get(r.team) }}>
                 {r.team}
               </div>
             ) : (
-              <TaskRow
+              <TaskNameRow
                 key={r.task.id}
                 task={r.task}
                 selected={r.task.id === selectedId}
                 editable={!rollup}
-                // 担当者は葉タスク (子を持たない実タスク) のみ編集可。
-                assigneeEditable={!rollup && !parentIds.has(r.task.id)}
                 onSelect={() => setSelectedId(r.task.id)}
-                onCommit={commitTask}
-                onCommitAssignee={commitAssignee}
               />
             ),
           )}
         </div>
-        {/* 右: タイムライン */}
+        {/* 右: 横スクロール領域 = [状態|進捗|担当者|開始|終了] + タイムライン。
+            この中身全体 (フィールド群 + バー) が一緒に横スクロールし、画面外へ流れる。
+            タスク名列だけがスクロールに追従せず左に残る。 */}
         <div style={{ overflowX: "auto", flexGrow: 1 }} data-testid="gantt-timeline">
-          {/* responsive.css の svg { max-width:100%; height:auto } リセットを
-              inline style で打ち消す (打ち消さないと縮んで hit-test も壊れる) */}
-          <svg
-            width={chartW}
-            height={chartH}
-            style={{ display: "block", maxWidth: "none", width: chartW, height: chartH }}
-          >
+          <div style={{ display: "flex", width: FIELDS_W + chartW }}>
+            {/* スクロールする左端フィールド群 (旧・左固定カラムから移設) */}
+            <div style={{ flexShrink: 0, borderRight: `1px solid ${colors.border}` }}>
+              <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
+                <span style={{ width: STATUS_W }}>状態</span>
+                <span style={{ width: PROGRESS_W }}>進捗%</span>
+                <span style={{ width: ASSIGNEE_W }}>担当者</span>
+                <span style={{ width: START_W }}>開始</span>
+                <span style={{ width: END_W }}>終了</span>
+              </div>
+              {rows.map((r) =>
+                r.kind === "team" ? (
+                  // チーム見出し行はフィールド側では空の帯 (行高を揃えて縦位置を一致させる)
+                  <div key={`team-fields-${r.team}`} style={{ height: ROW_H, background: colors.surface, borderBottom: `1px solid ${colors.border}` }} />
+                ) : (
+                  <TaskFieldsRow
+                    key={r.task.id}
+                    task={r.task}
+                    selected={r.task.id === selectedId}
+                    editable={!rollup}
+                    // 担当者は葉タスク (子を持たない実タスク) のみ編集可。
+                    assigneeEditable={!rollup && !parentIds.has(r.task.id)}
+                    onSelect={() => setSelectedId(r.task.id)}
+                    onCommit={commitTask}
+                    onCommitAssignee={commitAssignee}
+                  />
+                ),
+              )}
+            </div>
+            {/* タイムライン SVG */}
+            {/* responsive.css の svg { max-width:100%; height:auto } リセットを
+                inline style で打ち消す (打ち消さないと縮んで hit-test も壊れる) */}
+            <svg
+              width={chartW}
+              height={chartH}
+              style={{ display: "block", maxWidth: "none", width: chartW, height: chartH, flexShrink: 0 }}
+            >
             {/* 月グリッド + ラベル */}
             {monthTicks.map((t) => (
               <g key={t.x}>
@@ -592,7 +628,8 @@ export function GanttChartTab({
                 </g>
               );
             })}
-          </svg>
+            </svg>
+          </div>
         </div>
       </div>
       <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
@@ -604,7 +641,46 @@ export function GanttChartTab({
   );
 }
 
-function TaskRow({
+// 固定列 (左に残る): WBS + タスク名 のみ。行クリックで選択できる。
+// data-testid="gantt-row-*" はこの行が担う (行数カウントの基準)。
+function TaskNameRow({
+  task,
+  selected,
+  editable = true,
+  onSelect,
+}: {
+  task: Task;
+  selected: boolean;
+  editable?: boolean;
+  onSelect: () => void;
+}) {
+  const key = task.wbs ?? task.id;
+  return (
+    <div
+      data-testid={`gantt-row-${key}`}
+      onClick={editable ? onSelect : undefined}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: ROW_H,
+        fontSize: 12,
+        borderBottom: `1px solid ${colors.border}`,
+        background: selected ? colors.primarySubtle : colors.background,
+        cursor: editable ? "pointer" : "default",
+        boxSizing: "border-box",
+      }}
+    >
+      <span style={{ width: WBS_W, paddingLeft: 6, color: colors.textSecondary }}>{task.wbs}</span>
+      <span style={{ width: NAME_W, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.title}>
+        {task.title}
+      </span>
+    </div>
+  );
+}
+
+// スクロールする左端フィールド群: 状態/進捗/担当者/開始/終了。
+// タスク名列とは別 DOM だが行高 (ROW_H) を揃えて縦位置を一致させる。
+function TaskFieldsRow({
   task,
   selected,
   editable = true,
@@ -654,7 +730,7 @@ function TaskRow({
   const key = task.wbs ?? task.id;
   return (
     <div
-      data-testid={`gantt-row-${key}`}
+      data-testid={`gantt-fields-${key}`}
       onClick={editable ? onSelect : undefined}
       style={{
         display: "flex",
@@ -667,11 +743,7 @@ function TaskRow({
         boxSizing: "border-box",
       }}
     >
-      <span style={{ width: 48, paddingLeft: 6, color: colors.textSecondary }}>{task.wbs}</span>
-      <span style={{ width: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.title}>
-        {task.title}
-      </span>
-      <span style={{ width: 92 }}>
+      <span style={{ width: STATUS_W }}>
         {editable ? (
           <select
             value={task.status}
@@ -687,7 +759,7 @@ function TaskRow({
           <span style={{ color: colors.textSecondary }}>{STATUS_LABEL[task.status] ?? task.status}</span>
         )}
       </span>
-      <span style={{ width: 64 }}>
+      <span style={{ width: PROGRESS_W }}>
         {editable ? (
           <input
             type="number"
@@ -705,7 +777,7 @@ function TaskRow({
           <span style={{ color: colors.textSecondary }}>{task.progressPct ?? 0}%</span>
         )}
       </span>
-      <span style={{ width: 120 }} data-testid={`gantt-assignee-${key}`}>
+      <span style={{ width: ASSIGNEE_W }} data-testid={`gantt-assignee-${key}`}>
         {assigneeEditable ? (
           <input
             type="text"
@@ -721,10 +793,10 @@ function TaskRow({
           <span style={{ color: colors.textSecondary }}>{task.assignee ?? ""}</span>
         )}
       </span>
-      <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
+      <span style={{ width: START_W, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
         {dateLabel(task.startAt)}
       </span>
-      <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-end-${key}`}>
+      <span style={{ width: END_W, color: colors.textSecondary }} data-testid={`gantt-end-${key}`}>
         {dateLabel(task.dueAt)}
       </span>
     </div>
