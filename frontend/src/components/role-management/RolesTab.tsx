@@ -368,6 +368,11 @@ function RoleEditModal({
     role?.parentRoleId ?? "",
   );
   const [submitting, setSubmitting] = useState(false);
+  // ロール名⇄チャンネル名 自動追随 (opt-in)。紐付けチャンネルが 1 つのロールを
+  // edit するときだけ提示し、name 変更時に該当チャンネルを新名へ rename する。
+  const [syncChannelName, setSyncChannelName] = useState(false);
+  const canAutoRename =
+    mode === "edit" && !!role && role.channelsCount === 1;
 
   // 親候補: 同 action の他ロール。edit 時は自分自身 + 子孫を除外 (循環防止)。
   const parentOptions = useMemo(() => {
@@ -393,12 +398,23 @@ function RoleEditModal({
         });
         toast.success("ロールを作成しました");
       } else if (role) {
-        await api.roles.update(eventId, actionId, role.id, {
+        const nameChanged = name.trim() !== role.name;
+        const updated = await api.roles.update(eventId, actionId, role.id, {
           name: name.trim(),
           description: description.trim(),
           parentRoleId: parentRoleId || null,
+          syncChannelName: canAutoRename && syncChannelName && nameChanged,
         });
-        toast.success("ロールを更新しました");
+        const cr = updated.channelRename;
+        if (cr && !cr.ok) {
+          toast.warning(
+            `ロールは更新しましたが、チャンネル名の変更に失敗しました: ${cr.error ?? "unknown"}`,
+          );
+        } else if (cr && cr.ok) {
+          toast.success(`ロールとチャンネル名 (#${cr.to}) を更新しました`);
+        } else {
+          toast.success("ロールを更新しました");
+        }
       }
       onSaved();
     } catch (e) {
@@ -456,6 +472,29 @@ function RoleEditModal({
         <div style={s.meta}>
           子ロールのメンバーは親ロールのメンバーに限定されます。
         </div>
+        {canAutoRename && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "0.5rem",
+              marginTop: "0.75rem",
+              fontSize: "0.8rem",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={syncChannelName}
+              onChange={(e) => setSyncChannelName(e.target.checked)}
+              disabled={submitting}
+              style={{ marginTop: "0.15rem" }}
+            />
+            <span>
+              名前を変更したら、紐付いた Slack チャンネルも新しいロール名に
+              リネームする (Slack 上の実チャンネル名が変わります)
+            </span>
+          </label>
+        )}
         <div style={s.modalActions}>
           <button onClick={onClose} disabled={submitting} style={s.secondaryBtn}>
             キャンセル

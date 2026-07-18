@@ -321,6 +321,26 @@ export class SlackClient implements SlackPort {
   }
 
   /**
+   * ロール名⇄チャンネル名同期: チャンネルをリネームする。
+   * Slack `conversations.rename` を 1:1 で写す薄いラッパー。
+   * - public channel: `channels:manage` scope
+   * - private channel: `groups:write` scope
+   *   (どちらも既に付与済みなので追加インストール不要)
+   *
+   * name は Slack が命名規則で正規化する (小文字化・空白/ピリオド不可・最大80字。
+   * 非ラテン文字=日本語は許容)。呼び出し側は事前に normalizeChannelName で
+   * 正規化した値を渡し、レスポンスの channel.name で実際の確定名を確認すること。
+   *
+   * 認可制約: rename できるのは「作成者 / WS 管理者 / Channel Manager」のみ。
+   * bot がこれに該当しない場合 `not_authorized` が返る (呼び出し側で fail-soft)。
+   * 既に同名の場合 `name_taken` が返り得るので、呼び出し側は現状名と一致する
+   * チャンネルを rename 対象から除外する (冪等)。
+   */
+  async renameChannel(channel: string, name: string): Promise<SlackResponse> {
+    return this.callApi("conversations.rename", { channel, name });
+  }
+
+  /**
    * Sprint 24 (role_management): channel の現在の member 一覧を pagination で取得。
    * - public channel: `channels:read` scope
    * - private channel: `groups:read` scope

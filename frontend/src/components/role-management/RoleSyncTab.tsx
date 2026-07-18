@@ -1,6 +1,8 @@
 import { useState, type CSSProperties } from "react";
 import type {
   ChannelDiff,
+  ChannelNameDiffItem,
+  ChannelNameSyncResult,
   EventAction,
   SlackUser,
   SyncDiffResponse,
@@ -462,8 +464,383 @@ export function RoleSyncTab({ eventId, action }: Props) {
           )}
         </div>
       )}
+
+      <div style={s.divider} />
+      <ChannelNameSyncSection eventId={eventId} action={action} />
     </div>
   );
+}
+
+// ロール名 ⇄ チャンネル名 同期セクション。
+// メンバー同期 (上) と同じ「diff プレビュー → 選択 → 確認ダイアログ → 実行」
+// の操作感を踏襲する。各ロールに紐づくチャンネルの名前を、そのロール名
+// (Slack 命名規則で正規化した値) に合わせて rename する。
+function ChannelNameSyncSection({ eventId, action }: Props) {
+  const toast = useToast();
+  const { confirm } = useConfirm();
+  const isReadOnly = useIsReadOnly();
+  const [items, setItems] = useState<ChannelNameDiffItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
+  // rename 対象に選択された channelId 集合。
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<ChannelNameSyncResult | null>(null);
+
+  // diff を nextOffset を辿って全件集約する (subrequest 上限対策)。
+  const fetchDiff = async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setProgress(null);
+    try {
+      const all: ChannelNameDiffItem[] = [];
+      let offset = 0;
+      const MAX_PAGES = 2000;
+      let total = 0;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const res = await api.roles.channelNameDiff(eventId, action.id, {
+          offset,
+        });
+        all.push(...res.items);
+        total = res.total ?? all.length;
+        setProgress({ done: all.length, total });
+        if (res.nextOffset === null || res.nextOffset === undefined) break;
+        if (res.nextOffset <= offset) break;
+        offset = res.nextOffset;
+      }
+      setItems(all);
+      // default: rename が必要なものだけ選択。
+      setSelected(
+        new Set(all.filter((i) => i.needsRename).map((i) => i.channelId)),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "差分の取得に失敗しました");
+    } finally {
+      setLoading(false);
+      setProgress(null);
+    }
+  };
+
+  const toggle = (channelId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(channelId)) next.delete(channelId);
+      else next.add(channelId);
+      return next;
+    });
+  };
+
+  const selectableIds = (items ?? [])
+    .filter((i) => i.needsRename)
+    .map((i) => i.channelId);
+  const setAll = (on: boolean) =>
+    setSelected(on ? new Set(selectableIds) : new Set());
+
+  const runRename = async () => {
+    if (!items) return;
+    const channelIds = [...selected].filter((id) =>
+      selectableIds.includes(id),
+    );
+    if (channelIds.length === 0) {
+      toast.error("リネーム対象が選択されていません");
+      return;
+    }
+    const ok = await confirm({
+      title: "チャンネル名の同期",
+      message: `${channelIds.length} 件のチャンネルを、紐づくロール名にリネームします。この操作は Slack 上の実チャンネル名を変更します。よろしいですか？`,
+      variant: "danger",
+      confirmLabel: "リネーム実行",
+    });
+    if (!ok) return;
+    setRunning(true);
+    setResult(null);
+    setProgress({ done: 0, total: channelIds.length });
+    try {
+      // subrequest 予算 (1 channel = getChannelInfo + rename = 2)。BE は予算超過分を
+      // deferred で返すので、それを次リクエストへ回して空になるまで再送する。
+      const CHUNK = 15;
+      const agg: ChannelNameSyncResult = {
+        dryRun: false,
+        renamed: 0,
+        skipped: 0,
+        results: [],
+      };
+      const queue = [...channelIds];
+      const totalIds = channelIds.length;
+      let done = 0;
+      const MAX_REQUESTS = totalIds * 4 + 50;
+      let requests = 0;
+      while (queue.length > 0 && requests < MAX_REQUESTS) {
+        requests++;
+        const batch = queue.splice(0, CHUNK);
+        const part = await api.roles.channelNameSync(eventId, action.id, {
+          channelIds: batch,
+        });
+        agg.renamed += part.renamed;
+        agg.skipped += part.skipped;
+        agg.results.push(...part.results);
+        const deferred = part.deferred ?? [];
+        if (deferred.length > 0) queue.unshift(...deferred);
+        done += batch.length - deferred.length;
+        setProgress({ done: Math.min(done, totalIds), total: totalIds });
+      }
+      setResult(agg);
+      const errs = agg.results.filter((r) => r.status === "error").length;
+      if (errs === 0) {
+        toast.success(
+          `リネーム完了: ${agg.renamed} 件 (スキップ ${agg.skipped} 件)`,
+        );
+      } else {
+        toast.warning(
+          `リネーム完了 (一部失敗): 成功 ${agg.renamed} / スキップ ${agg.skipped} / 失敗 ${errs}`,
+        );
+      }
+      // 再取得して差分が解消したか確認できるようにする。
+      try {
+        await fetchDiff();
+      } catch {
+        /* noop */
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "リネームに失敗しました");
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
+  };
+
+  const needsRenameCount = (items ?? []).filter((i) => i.needsRename).length;
+  const warnCount = (items ?? []).filter(
+    (i) => i.warnings.length > 0 || i.collision || i.error,
+  ).length;
+
+  return (
+    <div>
+      <h3 style={s.heading}>チャンネル名の同期 (ロール名に合わせる)</h3>
+      <p style={s.desc}>
+        各ロールに紐づく Slack チャンネルの名前を、そのロール名 (Slack 命名規則で
+        正規化した値) に合わせてリネームします。既に一致しているチャンネルは
+        対象外です。日本語名がそのまま使えない場合は「注意」を表示します。
+      </p>
+
+      <div style={s.actionRow}>
+        <button
+          onClick={fetchDiff}
+          disabled={isReadOnly || loading || running}
+          style={s.secondaryBtn}
+        >
+          {loading
+            ? progress
+              ? `確認中... ${progress.done}/${progress.total}`
+              : "確認中..."
+            : "差分を確認"}
+        </button>
+      </div>
+
+      {error && (
+        <div style={s.error}>
+          エラー: {error}
+          <ScopeHint message={error} />
+        </div>
+      )}
+
+      {items && (
+        <div style={{ marginTop: "1rem" }}>
+          <div style={s.summary}>
+            対象 {items.length} チャンネル / 要リネーム {needsRenameCount} 件
+            {warnCount > 0 && ` / 注意 ${warnCount} 件`}
+          </div>
+
+          {items.length === 0 ? (
+            <div style={s.empty}>
+              ロールに紐づくチャンネルがありません。「ロール」タブで各ロールに
+              チャンネルを割当ててください。
+            </div>
+          ) : (
+            <>
+              <div style={s.quickRow}>
+                <button
+                  type="button"
+                  onClick={() => setAll(true)}
+                  style={s.quickBtn}
+                >
+                  要リネームを全選択
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAll(false)}
+                  style={s.quickBtn}
+                >
+                  全クリア
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gap: "0.5rem" }}>
+                {items.map((it) => (
+                  <ChannelNameRow
+                    key={it.channelId}
+                    item={it}
+                    checked={selected.has(it.channelId)}
+                    onToggle={() => toggle(it.channelId)}
+                  />
+                ))}
+              </div>
+
+              <div style={{ ...s.actionRow, marginTop: "1rem" }}>
+                <button
+                  onClick={runRename}
+                  disabled={isReadOnly || running || loading}
+                  style={s.primaryBtn}
+                >
+                  {running
+                    ? progress
+                      ? `リネーム中... ${progress.done}/${progress.total}`
+                      : "実行中..."
+                    : `選択分をリネーム (${
+                        [...selected].filter((id) =>
+                          selectableIds.includes(id),
+                        ).length
+                      })`}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ marginTop: "1.5rem" }}>
+          <h4 style={s.subHeading}>リネーム結果</h4>
+          <div style={s.resultBox}>
+            <div>
+              <strong>renamed:</strong> {result.renamed} 件
+            </div>
+            <div>
+              <strong>skipped:</strong> {result.skipped} 件
+            </div>
+            <div>
+              <strong>errors:</strong>{" "}
+              {result.results.filter((r) => r.status === "error").length} 件
+            </div>
+          </div>
+          {result.results.filter((r) => r.status === "error").length > 0 && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <div style={{ display: "grid", gap: "0.25rem" }}>
+                {result.results
+                  .filter((r) => r.status === "error")
+                  .map((r, i) => (
+                    <div key={i} style={s.errorRow}>
+                      <div>
+                        <strong>{r.roleName}</strong> channel: {r.channelId}
+                        {r.from ? ` (#${r.from})` : ""} → {r.to}
+                      </div>
+                      <div style={s.errorMsg}>{r.error}</div>
+                      <RenameErrorHint error={r.error} />
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChannelNameRow({
+  item,
+  checked,
+  onToggle,
+}: {
+  item: ChannelNameDiffItem;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  const disabled = !item.needsRename;
+  return (
+    <div style={s.diffRow}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <label
+          style={{ ...s.checkboxLabel, opacity: disabled ? 0.5 : 1, flex: 1 }}
+        >
+          <input
+            type="checkbox"
+            checked={checked && !disabled}
+            disabled={disabled}
+            onChange={onToggle}
+          />
+          <span>
+            <strong>{item.roleName}</strong>{" "}
+            <span style={s.metaInline}>{item.channelId}</span>
+          </span>
+        </label>
+        {item.error ? (
+          <span style={s.kickLabel}>取得失敗</span>
+        ) : item.needsRename ? (
+          <span style={s.inviteLabel}>要リネーム</span>
+        ) : item.collision ? (
+          <span style={s.kickLabel}>衝突</span>
+        ) : (
+          <span style={s.okBadge}>一致</span>
+        )}
+      </div>
+      {!item.error && (
+        <div style={{ ...s.diffSection, marginTop: "0.375rem" }}>
+          <span style={s.diffUsers}>
+            #{item.currentName ?? "(不明)"}
+          </span>{" "}
+          <span style={{ color: "inherit" }}>→</span>{" "}
+          <span style={{ ...s.diffUsers, fontWeight: 600 }}>
+            #{item.targetName || "(空)"}
+          </span>
+        </div>
+      )}
+      {item.error && (
+        <div style={{ ...s.error, marginTop: "0.375rem" }}>
+          取得失敗: {item.error}
+        </div>
+      )}
+      {item.warnings.map((w, i) => (
+        <div key={i} style={s.hint}>
+          注意: {w}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// rename 特有のエラーに対するヒント。
+function RenameErrorHint({ error }: { error?: string }) {
+  if (!error) return null;
+  const lower = error.toLowerCase();
+  if (lower.includes("not_authorized") || lower.includes("restricted_action")) {
+    return (
+      <div style={s.hint}>
+        bot にチャンネル名を変更する権限がありません。Slack 側でチャンネルの
+        「Channel management」設定を確認するか、ワークスペース管理者に rename を
+        依頼してください。
+      </div>
+    );
+  }
+  if (lower.includes("name_taken")) {
+    return (
+      <div style={s.hint}>
+        同名のチャンネルが既に存在します。ロール名の重複を解消してください。
+      </div>
+    );
+  }
+  if (lower.includes("not_in_channel") || lower.includes("channel_not_found")) {
+    return (
+      <div style={s.hint}>
+        bot が該当チャンネルに参加していないか、チャンネルが見つかりません。
+      </div>
+    );
+  }
+  return null;
 }
 
 function ChannelDiffRow({
@@ -737,5 +1114,11 @@ const s: Record<string, CSSProperties> = {
     margin: "0 0 0.5rem",
     fontSize: "0.875rem",
     fontWeight: 600,
+  },
+  divider: {
+    height: 1,
+    background: colors.border,
+    border: "none",
+    margin: "2rem 0 1.5rem",
   },
 };

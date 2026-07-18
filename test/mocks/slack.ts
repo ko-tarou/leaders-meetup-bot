@@ -148,6 +148,10 @@ export class MockSlackClient {
     return this.record("conversationsKick", [channel, user]);
   }
 
+  async renameChannel(channel: string, name: string): Promise<SlackResponse> {
+    return this.record("renameChannel", [channel, name]);
+  }
+
   async listAllChannelMembers(channel: string): Promise<SlackResponse> {
     return this.record("listAllChannelMembers", [channel]);
   }

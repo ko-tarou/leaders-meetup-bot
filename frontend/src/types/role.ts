@@ -73,6 +73,51 @@ export type ClassifyPreviewResponse = {
   members: ClassifiedMember[];
 };
 
+// ロール名 ⇄ チャンネル名 同期。
+// BE: GET /channel-name-diff の items 要素。
+export type ChannelNameDiffItem = {
+  roleId: string;
+  roleName: string;
+  channelId: string;
+  // getChannelInfo 失敗時は null。
+  currentName: string | null;
+  // ロール名を Slack 命名規則で正規化した確定ターゲット名。
+  targetName: string;
+  // rename が必要 (現状名 !== ターゲット & 非衝突) か。
+  needsRename: boolean;
+  // ロール名そのままでは使えず正規化で表示が変わるか。
+  changed: boolean;
+  // 同名ターゲットの binding が複数ある (rename すると衝突) か。
+  collision: boolean;
+  warnings: string[];
+  // getChannelInfo 失敗理由。
+  error?: string;
+};
+
+// GET /channel-name-diff のレスポンス全体。nextOffset を辿って items を連結する。
+export type ChannelNameDiffResponse = {
+  workspaceId: string;
+  total: number;
+  items: ChannelNameDiffItem[];
+  nextOffset: number | null;
+};
+
+// POST /channel-name-sync の結果。deferred が空になるまで FE が再送する。
+export type ChannelNameSyncResult = {
+  dryRun: boolean;
+  renamed: number;
+  skipped: number;
+  results: {
+    channelId: string;
+    roleName: string;
+    from: string | null;
+    to: string;
+    status: "renamed" | "skipped" | "planned" | "error";
+    error?: string;
+  }[];
+  deferred?: string[];
+};
+
 // 1 channel あたりの sync diff (期待 vs 現状)。
 // BE の ChannelSyncDiff (src/services/role-sync.ts) と同型。
 // error が入っているときは toInvite/toKick は空でも UI 側で「取得失敗」表示する。
