@@ -27,6 +27,13 @@ import { colors } from "../../styles/tokens";
 
 type Config = { workspaceId?: string };
 
+// diff 計算の分割は「サーバー側の subrequest 予算」が主導する。フロントは
+// offset=0 から呼び、レスポンスの nextOffset を辿って結果を連結するだけ。
+// (旧実装は「5 channel/req」で分割していたが、1 channel が members ページングで
+//  最大 20 subrequest を消費し得る & getChannelList が毎回最大 20 subrequest を
+//  使うため、チャンネル数では上限を制御できず "Too many subrequests" が再発した。
+//  → サーバーが subrequest を厳密にカウントして予算手前で nextOffset を返す方式に変更。)
+
 function parseConfig(raw: string): Config {
   try {
     const parsed = JSON.parse(raw || "{}");
@@ -34,6 +41,34 @@ function parseConfig(raw: string): Config {
   } catch {
     return {};
   }
+}
+
+// sync-diff を offset ページングで全 channel 分を集約する。1 リクエストが処理する
+// channel 数はサーバーの subrequest 予算が決め、nextOffset で継続位置が返る。
+// フロントは nextOffset を辿るだけ (limit は渡さない = 予算に委ねる)。
+// onProgress は (処理済み channel 数, 総 channel 数) を都度通知する (任意)。
+async function fetchDiffPaged(
+  eventId: string,
+  actionId: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<SyncDiffResponse> {
+  const channels: SyncDiffResponse["channels"] = [];
+  let offset = 0;
+  let workspaceId = "";
+  // 安全弁: 想定外に nextOffset が進み続けても無限ループしないよう上限を設ける。
+  const MAX_PAGES = 2000;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = await api.roles.syncDiff(eventId, actionId, { offset });
+    workspaceId = res.workspaceId;
+    channels.push(...res.channels);
+    const total = res.total ?? channels.length;
+    onProgress?.(channels.length, total);
+    if (res.nextOffset === null || res.nextOffset === undefined) break;
+    // 前進しない (nextOffset が offset 以下) 場合も無限ループ防止で打ち切る。
+    if (res.nextOffset <= offset) break;
+    offset = res.nextOffset;
+  }
+  return { workspaceId, channels };
 }
 
 type Props = {
@@ -53,6 +88,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
   const [diff, setDiff] = useState<SyncDiffResponse | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  // 分割 diff 計算の進捗 (処理済み channel / 総 channel)。null = 非表示。
+  const [diffProgress, setDiffProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncing, setSyncing] = useState(false);
   // chunk 実行の進捗 (処理済みチャンネル / 全チャンネル)。null = 非実行中。
@@ -71,8 +111,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
     setDiffLoading(true);
     setDiffError(null);
     setSyncResult(null);
+    setDiffProgress(null);
     try {
-      const res = await api.roles.syncDiff(eventId, action.id);
+      const res = await fetchDiffPaged(eventId, action.id, (done, total) =>
+        setDiffProgress({ done, total }),
+      );
       setDiff(res);
       // default: 差分があれば該当方向 true、なければ false
       const initialOps: Record<string, ChannelOps> = {};
@@ -103,6 +146,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       );
     } finally {
       setDiffLoading(false);
+      setDiffProgress(null);
     }
   };
 
@@ -167,23 +211,31 @@ export function RoleSyncTab({ eventId, action }: Props) {
     setSyncProgress({ done: 0, total: operations.length });
     try {
       // Cloudflare Workers の 1 invocation あたり subrequest 上限を超えないよう、
-      // operations を CHANNELS_PER_REQUEST 個ずつに分割して逐次実行する。
-      // 各リクエストは対象チャンネル分の member 取得 + invite/kick しか行わない
-      // ので、チャンネル/メンバーが大規模でも 1 リクエストが上限に当たらない。
+      // operations を CHANNELS_PER_REQUEST 個ずつに分割して逐次実行する。加えて
+      // サーバーが subrequest 予算を超える手前で未処理分を deferred として返すので、
+      // それをキューに戻して空になるまで再送する (大量 kick 等でも上限に当たらない)。
       const CHANNELS_PER_REQUEST = 5;
       const res: SyncResult = { invited: 0, kicked: 0, errors: [] };
-      for (let i = 0; i < operations.length; i += CHANNELS_PER_REQUEST) {
-        const batch = operations.slice(i, i + CHANNELS_PER_REQUEST);
+      const queue = [...operations];
+      const totalOps = operations.length;
+      let done = 0;
+      // 安全弁: deferred が減らない異常時に無限ループしないよう上限を設ける。
+      const MAX_REQUESTS = totalOps * 20 + 100;
+      let requests = 0;
+      while (queue.length > 0 && requests < MAX_REQUESTS) {
+        requests++;
+        const batch = queue.splice(0, CHANNELS_PER_REQUEST);
         const part = await api.roles.sync(eventId, action.id, {
           operations: batch,
         });
         res.invited += part.invited;
         res.kicked += part.kicked;
         res.errors.push(...part.errors);
-        setSyncProgress({
-          done: Math.min(i + CHANNELS_PER_REQUEST, operations.length),
-          total: operations.length,
-        });
+        // 未処理分は次リクエストへ (再送されるチャンネルは done に数えない)。
+        const deferred = part.deferred ?? [];
+        if (deferred.length > 0) queue.unshift(...deferred);
+        done += batch.length - deferred.length;
+        setSyncProgress({ done: Math.min(done, totalOps), total: totalOps });
       }
       setSyncResult(res);
       if (res.errors.length === 0) {
@@ -197,7 +249,7 @@ export function RoleSyncTab({ eventId, action }: Props) {
       }
       // 成功後 diff を再取得して空になったか確認できるようにする。
       try {
-        const next = await api.roles.syncDiff(eventId, action.id);
+        const next = await fetchDiffPaged(eventId, action.id);
         setDiff(next);
         const nextOps: Record<string, ChannelOps> = {};
         for (const c of next.channels) {
@@ -280,7 +332,11 @@ export function RoleSyncTab({ eventId, action }: Props) {
           disabled={isReadOnly || diffLoading || syncing}
           style={s.secondaryBtn}
         >
-          {diffLoading ? "計算中..." : "diff を計算"}
+          {diffLoading
+            ? diffProgress
+              ? `計算中... ${diffProgress.done}/${diffProgress.total} チャンネル`
+              : "計算中..."
+            : "diff を計算"}
         </button>
       </div>
 

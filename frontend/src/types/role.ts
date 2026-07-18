@@ -88,6 +88,10 @@ export type ChannelDiff = {
 export type SyncDiffResponse = {
   workspaceId: string;
   channels: ChannelDiff[];
+  // offset/limit ページング時のみ設定される。全件計算 (offset/limit 未指定) では
+  // undefined。nextOffset が null になるまでフロントが offset を辿って連結する。
+  total?: number;
+  nextOffset?: number | null;
 };
 
 // POST /sync の結果
@@ -101,6 +105,9 @@ export type SyncResult = {
     users?: string[];
     error: string;
   }[];
+  // subrequest 予算内で処理し切れず次リクエストに持ち越した operation 群。
+  // フロントはこれが空になるまで再送する (大規模チャンネル/大量 kick 対策)。
+  deferred?: { channelId: string; invite: boolean; kick: boolean }[];
 };
 
 // 005-user-oauth: POST /bot-bulk-invite の結果。

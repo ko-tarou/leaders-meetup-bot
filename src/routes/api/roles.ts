@@ -1397,6 +1397,15 @@ rolesRouter.get(
 /**
  * GET /orgs/:eventId/actions/:actionId/sync-diff
  *   各 managed channel について現状 vs 期待値の diff を返す (preview)。
+ *
+ *   ページング (Cloudflare Workers subrequest 上限対策):
+ *     - offset / limit を渡すと managed channel を offset から limit 件だけ計算し、
+ *       total と nextOffset を返す。大規模イベント (HackIT 等) で全 channel を
+ *       1 invocation で叩くと conversations.members が上限 (free=50) を超えて
+ *       "Too many subrequests" になるため、フロントが nextOffset を辿って複数
+ *       リクエストに分割する。
+ *     - offset / limit 未指定なら従来通り全 channel を 1 回で計算する
+ *       (後方互換。小規模イベント向け)。
  */
 rolesRouter.get(
   "/orgs/:eventId/actions/:actionId/sync-diff",
@@ -1407,10 +1416,27 @@ rolesRouter.get(
 
     const found = await findRoleManagementAction(db, eventId, actionIdParam);
     if ("error" in found) return c.json({ error: found.error }, found.status);
-    const actionId = found.action.id;
+
+    const offsetRaw = c.req.query("offset");
+    const limitRaw = c.req.query("limit");
+    let page: { offset?: number; limit?: number } | undefined;
+    if (offsetRaw !== undefined || limitRaw !== undefined) {
+      const offset = offsetRaw !== undefined ? Number.parseInt(offsetRaw, 10) : 0;
+      if (Number.isNaN(offset) || offset < 0) {
+        return c.json({ error: "invalid offset" }, 400);
+      }
+      let limit: number | undefined;
+      if (limitRaw !== undefined) {
+        limit = Number.parseInt(limitRaw, 10);
+        if (Number.isNaN(limit) || limit < 1) {
+          return c.json({ error: "invalid limit" }, 400);
+        }
+      }
+      page = { offset, limit };
+    }
 
     try {
-      const diff = await computeSyncDiff(c.env, found.action);
+      const diff = await computeSyncDiff(c.env, found.action, undefined, page);
       return c.json(diff);
     } catch (e) {
       return c.json(

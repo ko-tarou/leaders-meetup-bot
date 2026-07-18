@@ -137,7 +137,9 @@ export class SlackClient implements SlackPort {
     return this.callApiGet("users.lookupByEmail", { email });
   }
 
-  async getChannelList(): Promise<SlackResponse> {
+  async getChannelList(opts?: {
+    maxPages?: number;
+  }): Promise<SlackResponse & { pages?: number; truncated?: boolean }> {
     // conversations.list で workspace の全 public/private チャンネルを取得する。
     // 以前は users.conversations を使っていたが、bot 参加済みチャンネルしか
     // 返らず一覧が欠ける問題があったため切替。private_channel を含めるには
@@ -146,11 +148,16 @@ export class SlackClient implements SlackPort {
     //
     // ページネーション対応: limit=200 単発呼び出しでは KIT Developers Hub の
     // ような大規模 workspace で channels が欠ける（next_cursor 未処理）。
-    // cursor を辿って最大 MAX_PAGES (=20, 4000件) まで取得する。
+    // cursor を辿って最大 MAX_PAGES まで取得する。
+    //
+    // subrequest 予算対策: 1 回の cursor ページ取得 = 1 subrequest なので、
+    // 呼び出し側 (computeSyncDiff 等) が 1 invocation の subrequest 総数を
+    // 制御できるよう maxPages を渡せるようにし、実際に消費したページ数 (pages)
+    // と、cursor が残ったまま maxPages で打ち切ったか (truncated) を返す。
     const allChannels: unknown[] = [];
     let cursor = "";
     let pages = 0;
-    const MAX_PAGES = 20;
+    const MAX_PAGES = Math.max(1, opts?.maxPages ?? 20);
 
     while (pages < MAX_PAGES) {
       const params: Record<string, string | number> = {
@@ -161,6 +168,7 @@ export class SlackClient implements SlackPort {
       if (cursor) params.cursor = cursor;
 
       const res = await this.callApiGet("conversations.list", params);
+      pages++;
       if (!res.ok) {
         // エラー時は今までに集めた分を返す（fail-soft）
         console.error("conversations.list error:", res);
@@ -168,6 +176,8 @@ export class SlackClient implements SlackPort {
           ok: false,
           error: res.error,
           channels: allChannels,
+          pages,
+          truncated: false,
         };
       }
 
@@ -178,14 +188,13 @@ export class SlackClient implements SlackPort {
         | { next_cursor?: string }
         | undefined;
       cursor = meta?.next_cursor ?? "";
-      pages++;
       if (!cursor) break;
     }
 
     console.log(
       `getChannelList: fetched ${allChannels.length} channels in ${pages} pages`,
     );
-    return { ok: true, channels: allChannels };
+    return { ok: true, channels: allChannels, pages, truncated: cursor !== "" };
   }
 
   async getChannelMembers(channel: string): Promise<SlackResponse> {
@@ -319,22 +328,36 @@ export class SlackClient implements SlackPort {
   async listAllChannelMembers(
     channel: string,
     opts?: { limit?: number; maxPages?: number },
-  ): Promise<{ ok: boolean; error?: string; members: string[] }> {
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    members: string[];
+    pages: number;
+    truncated: boolean;
+  }> {
     const limit = opts?.limit ?? 200;
-    const MAX_PAGES = opts?.maxPages ?? 20;
+    const MAX_PAGES = Math.max(1, opts?.maxPages ?? 20);
     const all: string[] = [];
     let cursor = "";
     let pages = 0;
 
+    // subrequest 予算対策: 1 cursor ページ = 1 subrequest。呼び出し側が
+    // maxPages で「このチャンネルに費やしてよい subrequest 数」を制御でき、
+    // 実消費数 (pages) と、cursor が残ったまま打ち切ったか (truncated) を返す。
+    // truncated=true の members は不完全なので、diff 計算に使うと誤った
+    // kick を生む。呼び出し側は truncated を error 相当に扱うこと。
     while (pages < MAX_PAGES) {
       const params: Record<string, string | number> = { channel, limit };
       if (cursor) params.cursor = cursor;
       const res = await this.callApiGet("conversations.members", params);
+      pages++;
       if (!res.ok) {
         return {
           ok: false,
           error: typeof res.error === "string" ? res.error : "unknown",
           members: all,
+          pages,
+          truncated: false,
         };
       }
       const members = (res.members as string[] | undefined) ?? [];
@@ -343,10 +366,9 @@ export class SlackClient implements SlackPort {
         | { next_cursor?: string }
         | undefined;
       cursor = meta?.next_cursor ?? "";
-      pages++;
       if (!cursor) break;
     }
-    return { ok: true, members: all };
+    return { ok: true, members: all, pages, truncated: cursor !== "" };
   }
 
   // ADR-0006: workspace bootstrap で team_id を取得するために使う
