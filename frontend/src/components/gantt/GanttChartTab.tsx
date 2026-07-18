@@ -47,9 +47,74 @@ const toolbarBtnStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
+// サブタスク折りたたみ (Issue / Sub-issue 風):
+// WBS が "major.minor.leaf" (3 セグメント以上) のタスクは、末尾を除いた WBS を
+// 「親グループ」として畳める。例 "4.2.1" -> 親 "4.2" (公式LP)。
+// 2 セグメント以下 ("1.1") はグループ化せず従来通りフラット表示 (既存挙動を壊さない)。
+type GroupAgg = {
+  startMs: number | null;
+  dueMs: number | null;
+  progressPct: number;
+  status: Task["status"];
+};
+
 type Row =
   | { kind: "team"; team: string }
-  | { kind: "task"; task: Task };
+  | {
+      kind: "group";
+      key: string; // 親 WBS ("4.2")
+      label: string; // 見出し ("公式LP")
+      team: string;
+      count: number;
+      agg: GroupAgg;
+    }
+  | { kind: "task"; task: Task; indent: boolean };
+
+/** 3 セグメント以上の WBS の親キー (末尾を除いた WBS)。それ未満は null (=グループ化しない)。 */
+function parentWbsKey(wbs: string | null): string | null {
+  if (!wbs) return null;
+  const seg = wbs.split(".");
+  if (seg.length < 3) return null;
+  return seg.slice(0, -1).join(".");
+}
+
+/** グループ見出し: 子タイトルが "公式LP: ..." のように共通接頭辞+コロンを持てばそれを使う。 */
+function deriveGroupLabel(members: Task[], groupKey: string): string {
+  const prefixes = members.map((m) => {
+    const idx = m.title.search(/[:：]/);
+    return idx > 0 ? m.title.slice(0, idx).trim() : null;
+  });
+  const first = prefixes[0];
+  if (first && prefixes.every((p) => p === first)) return first;
+  return `WBS ${groupKey}`;
+}
+
+/** グループの集計 (開始=最小/終了=最大/進捗=平均/状態=導出)。rollupTasks と同じ規約。 */
+function aggregate(members: Task[]): GroupAgg {
+  const starts = members
+    .map((m) => m.startAt)
+    .filter((v): v is string => !!v)
+    .map((s) => Date.parse(s));
+  const dues = members
+    .map((m) => m.dueAt)
+    .filter((v): v is string => !!v)
+    .map((s) => Date.parse(s));
+  const progs = members.map((m) => m.progressPct ?? (m.status === "done" ? 100 : 0));
+  const progressPct = progs.length
+    ? Math.round(progs.reduce((a, b) => a + b, 0) / progs.length)
+    : 0;
+  const status: Task["status"] = members.every((m) => m.status === "done")
+    ? "done"
+    : members.some((m) => m.status === "doing") || progressPct > 0
+      ? "doing"
+      : "todo";
+  return {
+    startMs: starts.length ? Math.min(...starts) : null,
+    dueMs: dues.length ? Math.max(...dues) : null,
+    progressPct,
+    status,
+  };
+}
 
 type DragState = {
   taskId: string;
@@ -169,7 +234,18 @@ export function GanttChartTab({
   const [refreshKey, setRefreshKey] = useState(0);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  // 折りたたみ中の親グループキー ("4.2" 等)。既定は全グループ畳んだ状態 (左をギュッと締める)。
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const seenGroupsRef = useRef<Set<string>>(new Set());
   const toast = useToast();
+
+  const toggleGroup = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const config: GanttConfig = useMemo(
     () => parseGanttConfig(action.config),
@@ -255,7 +331,37 @@ export function GanttChartTab({
     [rollupLevel, visibleTasks, config],
   );
 
-  // チーム順 (config.teams -> 未知チーム -> チームなし) に WBS 順で並べる
+  // 折りたたみ対象の親グループ: parentWbsKey が同じで 2 件以上あるものだけ。
+  // (rollup 表示中はグループ化しない = 従来の集約ビューをそのまま使う。)
+  const groupMap = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    if (rollup) return m;
+    for (const t of displayTasks) {
+      const pk = parentWbsKey(t.wbs);
+      if (!pk) continue;
+      const arr = m.get(pk);
+      if (arr) arr.push(t);
+      else m.set(pk, [t]);
+    }
+    for (const [k, v] of m) if (v.length < 2) m.delete(k); // 単独メンバーはフラット表示
+    return m;
+  }, [displayTasks, rollup]);
+
+  // 新しく現れたグループは既定で畳む (左をギュッと締める)。ユーザーの開閉はそのまま保持。
+  useEffect(() => {
+    const keys = [...groupMap.keys()];
+    const unseen = keys.filter((k) => !seenGroupsRef.current.has(k));
+    if (unseen.length === 0) return;
+    for (const k of unseen) seenGroupsRef.current.add(k);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      for (const k of unseen) next.add(k);
+      return next;
+    });
+  }, [groupMap]);
+
+  // チーム順 (config.teams -> 未知チーム -> チームなし) に WBS 順で並べる。
+  // 各チーム内で 3 セグ WBS のサブタスクは親グループ (折りたたみ見出し) にぶら下げる。
   const rows: Row[] = useMemo(() => {
     const knownTeams = config.teams;
     const teamOf = (t: Task) => t.team ?? "(チームなし)";
@@ -270,10 +376,33 @@ export function GanttChartTab({
         .sort((a, b) => compareWbs(a.wbs, b.wbs));
       if (members.length === 0) continue;
       out.push({ kind: "team", team });
-      for (const t of members) out.push({ kind: "task", task: t });
+      const emitted = new Set<string>();
+      for (const t of members) {
+        const pk = parentWbsKey(t.wbs);
+        const grp = pk ? groupMap.get(pk) : undefined;
+        if (pk && grp) {
+          // グループ見出しを (WBS 順で最初に来た時に) 1 度だけ出す。
+          if (!emitted.has(pk)) {
+            emitted.add(pk);
+            const ordered = [...grp].sort((a, b) => compareWbs(a.wbs, b.wbs));
+            out.push({
+              kind: "group",
+              key: pk,
+              label: deriveGroupLabel(ordered, pk),
+              team,
+              count: ordered.length,
+              agg: aggregate(ordered),
+            });
+          }
+          // 展開中のみ子タスク行をインデントして出す。
+          if (!collapsed.has(pk)) out.push({ kind: "task", task: t, indent: true });
+        } else {
+          out.push({ kind: "task", task: t, indent: false });
+        }
+      }
     }
     return out;
-  }, [displayTasks, config.teams]);
+  }, [displayTasks, config.teams, groupMap, collapsed]);
 
   const teamColor = useMemo(() => {
     const map = new Map<string, string>();
@@ -476,12 +605,20 @@ export function GanttChartTab({
               <div key={`team-name-${r.team}`} style={{ height: ROW_H, display: "flex", alignItems: "center", paddingLeft: 6, fontWeight: 600, fontSize: 13, background: colors.surface, borderBottom: `1px solid ${colors.border}`, color: teamColor.get(r.team) }}>
                 {r.team}
               </div>
+            ) : r.kind === "group" ? (
+              <GroupNameRow
+                key={`group-name-${r.key}`}
+                row={r}
+                open={!collapsed.has(r.key)}
+                onToggle={() => toggleGroup(r.key)}
+              />
             ) : (
               <TaskNameRow
                 key={r.task.id}
                 task={r.task}
                 selected={r.task.id === selectedId}
                 editable={!rollup}
+                indent={r.indent}
                 onSelect={() => setSelectedId(r.task.id)}
               />
             ),
@@ -505,6 +642,8 @@ export function GanttChartTab({
                 r.kind === "team" ? (
                   // チーム見出し行はフィールド側では空の帯 (行高を揃えて縦位置を一致させる)
                   <div key={`team-fields-${r.team}`} style={{ height: ROW_H, background: colors.surface, borderBottom: `1px solid ${colors.border}` }} />
+                ) : r.kind === "group" ? (
+                  <GroupFieldsRow key={`group-fields-${r.key}`} row={r} />
                 ) : (
                   <TaskFieldsRow
                     key={r.task.id}
@@ -546,7 +685,7 @@ export function GanttChartTab({
                 x2={chartW}
                 y2={yOf(i) + ROW_H}
                 stroke={colors.border}
-                strokeWidth={r.kind === "team" ? 1 : 0.5}
+                strokeWidth={r.kind === "task" ? 0.5 : 1}
               />
             ))}
             {/* 今日line */}
@@ -583,6 +722,26 @@ export function GanttChartTab({
                   markerEnd="url(#gantt-arrow)"
                   data-testid={`gantt-dep-${d.id}`}
                 />
+              );
+            })}
+            {/* グループのサマリバー (最早開始〜最遅終了)。折りたたみ/展開どちらでも表示。 */}
+            {rows.map((r, i) => {
+              if (r.kind !== "group") return null;
+              if (r.agg.startMs === null || r.agg.dueMs === null) return null;
+              const x = xOf(r.agg.startMs);
+              const w = Math.max(DAY_W, xOf(r.agg.dueMs + DAY_MS) - x);
+              const cy = yOf(i) + ROW_H / 2;
+              const color = teamColor.get(r.team) ?? colors.textSecondary;
+              const barH = 6;
+              return (
+                <g key={`group-bar-${r.key}`} data-testid={`gantt-group-bar-${r.key}`}>
+                  {/* 本体 (細い帯) */}
+                  <rect x={x} y={cy - barH / 2} width={w} height={barH} fill={color} fillOpacity={0.9} />
+                  {/* 両端の下向きキャップ (サマリバーらしさ) */}
+                  <path d={`M ${x} ${cy - barH / 2} L ${x} ${cy + barH} L ${x + 5} ${cy - barH / 2} Z`} fill={color} />
+                  <path d={`M ${x + w} ${cy - barH / 2} L ${x + w} ${cy + barH} L ${x + w - 5} ${cy - barH / 2} Z`} fill={color} />
+                  <title>{`${r.label} (${r.count}件)\n${dateLabel(new Date(r.agg.startMs).toISOString())} - ${dateLabel(new Date(r.agg.dueMs).toISOString())} (進捗 ${r.agg.progressPct}%)`}</title>
+                </g>
               );
             })}
             {/* バー */}
@@ -647,11 +806,14 @@ function TaskNameRow({
   task,
   selected,
   editable = true,
+  indent = false,
   onSelect,
 }: {
   task: Task;
   selected: boolean;
   editable?: boolean;
+  // 親グループにぶら下がる子タスクは名前をインデントして階層を表す。
+  indent?: boolean;
   onSelect: () => void;
 }) {
   const key = task.wbs ?? task.id;
@@ -671,9 +833,85 @@ function TaskNameRow({
       }}
     >
       <span style={{ width: WBS_W, paddingLeft: 6, color: colors.textSecondary }}>{task.wbs}</span>
-      <span style={{ width: NAME_W, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.title}>
+      <span
+        style={{
+          width: NAME_W,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          // 子タスクはインデント + 縦ガイド線で親子関係を視覚化。
+          paddingLeft: indent ? 20 : 0,
+          borderLeft: indent ? `2px solid ${colors.border}` : undefined,
+          marginLeft: indent ? 6 : 0,
+          color: indent ? colors.textSecondary : colors.text,
+        }}
+        title={task.title}
+      >
         {task.title}
       </span>
+    </div>
+  );
+}
+
+// 親グループの見出し行 (固定列)。▶/▼ で子タスクを開閉。WBS はグループキー ("4.2")。
+// data-testid="gantt-group-*" (leaf 行カウント gantt-row-* とは別系統)。
+function GroupNameRow({
+  row,
+  open,
+  onToggle,
+}: {
+  row: Extract<Row, { kind: "group" }>;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      data-testid={`gantt-group-${row.key}`}
+      onClick={onToggle}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: ROW_H,
+        fontSize: 12,
+        fontWeight: 600,
+        borderBottom: `1px solid ${colors.border}`,
+        background: colors.surface,
+        cursor: "pointer",
+        boxSizing: "border-box",
+      }}
+    >
+      <span style={{ width: WBS_W, paddingLeft: 6, color: colors.textSecondary, fontWeight: 400 }}>{row.key}</span>
+      <span style={{ width: NAME_W, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+        <span data-testid={`gantt-group-toggle-${row.key}`} style={{ width: 12, display: "inline-block", color: colors.textSecondary }}>
+          {open ? "▼" : "▶"}
+        </span>
+        <span title={row.label}>{row.label}</span>
+        <span style={{ color: colors.textMuted, fontWeight: 400 }}>({row.count})</span>
+      </span>
+    </div>
+  );
+}
+
+// 親グループのフィールド行 (状態/進捗/開始/終了の集計を表示専用で出す。担当者は空)。
+function GroupFieldsRow({ row }: { row: Extract<Row, { kind: "group" }> }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        height: ROW_H,
+        fontSize: 12,
+        borderBottom: `1px solid ${colors.border}`,
+        background: colors.surface,
+        boxSizing: "border-box",
+        color: colors.textSecondary,
+      }}
+    >
+      <span style={{ width: STATUS_W }}>{STATUS_LABEL[row.agg.status] ?? row.agg.status}</span>
+      <span style={{ width: PROGRESS_W }}>{row.agg.progressPct}%</span>
+      <span style={{ width: ASSIGNEE_W }} />
+      <span style={{ width: START_W }}>{dateLabel(row.agg.startMs === null ? null : new Date(row.agg.startMs).toISOString())}</span>
+      <span style={{ width: END_W }}>{dateLabel(row.agg.dueMs === null ? null : new Date(row.agg.dueMs).toISOString())}</span>
     </div>
   );
 }
