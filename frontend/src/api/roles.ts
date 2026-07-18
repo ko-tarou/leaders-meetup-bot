@@ -1,4 +1,6 @@
 import type {
+  ChannelNameDiffResponse,
+  ChannelNameSyncResult,
   ClassifyPreviewResponse,
   SlackRole,
   SlackRoleChannelRow,
@@ -32,12 +34,25 @@ export const roles = {
       name?: string;
       description?: string;
       parentRoleId?: string | null;
+      // true かつ name 変更あり & 紐付けチャンネルが 1 つのとき、そのチャンネルを
+      // 新ロール名へ自動リネームする (best-effort)。レスポンスに channelRename が付く。
+      syncChannelName?: boolean;
     },
   ) =>
-    request<SlackRole>(
-      `/orgs/${eventId}/actions/${actionId}/roles/${roleId}`,
-      { method: "PUT", body: JSON.stringify(data) },
-    ),
+    request<
+      SlackRole & {
+        channelRename?: {
+          ok: boolean;
+          channelId: string;
+          from: string | null;
+          to: string;
+          error?: string;
+        };
+      }
+    >(`/orgs/${eventId}/actions/${actionId}/roles/${roleId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
   delete: (eventId: string, actionId: string, roleId: string) =>
     request<{ ok: boolean }>(
       `/orgs/${eventId}/actions/${actionId}/roles/${roleId}`,
@@ -214,6 +229,35 @@ export const roles = {
       body: JSON.stringify(body ?? {}),
     }),
 
+  // ロール名 ⇄ チャンネル名 同期。
+  // diff: 各ロールに紐づくチャンネルの「現状名 → ロール名(正規化後)」を返す
+  // read-only プレビュー。offset/limit で分割 (subrequest 上限対策)、nextOffset で継続。
+  channelNameDiff: (
+    eventId: string,
+    actionId: string,
+    page?: { offset: number; limit?: number },
+  ) => {
+    let qs = "";
+    if (page) {
+      const params = new URLSearchParams({ offset: String(page.offset) });
+      if (page.limit !== undefined) params.set("limit", String(page.limit));
+      qs = `?${params.toString()}`;
+    }
+    return request<ChannelNameDiffResponse>(
+      `/orgs/${eventId}/actions/${actionId}/channel-name-diff${qs}`,
+    );
+  },
+  // sync: 選択チャンネルを紐づくロール名へ rename する。channelIds 省略で全対象。
+  // dryRun=true で実行せず planned 件数のみ。deferred が空になるまで FE が再送。
+  channelNameSync: (
+    eventId: string,
+    actionId: string,
+    body?: { channelIds?: string[]; dryRun?: boolean },
+  ) =>
+    request<ChannelNameSyncResult>(
+      `/orgs/${eventId}/actions/${actionId}/channel-name-sync`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+    ),
 };
 
 // 公開管理 (public-management): action 単位で公開 URL を発行する。

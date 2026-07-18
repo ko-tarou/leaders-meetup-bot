@@ -70,6 +70,7 @@ import {
   type ClassifyMemberInput,
 } from "../../domain/role/name-classify";
 import { buildDefaultRoleSpecs } from "../../domain/role/default-roles";
+import { normalizeChannelName } from "../../domain/role/channel-name";
 
 export const rolesRouter = new Hono<{ Bindings: Env }>();
 
@@ -445,6 +446,10 @@ rolesRouter.put(
       name?: string;
       description?: string;
       parentRoleId?: string | null;
+      // ロール名⇄チャンネル名 自動追随 (opt-in)。true かつ name 変更あり &
+      // このロールに紐づくチャンネルが 1 つのときだけ、そのチャンネルを新ロール名へ
+      // best-effort で rename する。既定 (未指定) は従来通り何もしない。
+      syncChannelName?: boolean;
     }>();
 
     const found = await findRoleManagementAction(db, eventId, actionIdParam);
@@ -502,7 +507,73 @@ rolesRouter.put(
       .from(slackRoles)
       .where(eq(slackRoles.id, roleId))
       .get();
-    return c.json(updated);
+
+    // 自動追随 (opt-in): name を変更したときだけ、紐づくチャンネルを新ロール名へ
+    // best-effort で rename する。fail-soft (rename 失敗はロール更新を妨げない)。
+    let channelRename:
+      | {
+          ok: boolean;
+          channelId: string;
+          from: string | null;
+          to: string;
+          error?: string;
+        }
+      | undefined;
+    if (body.syncChannelName === true && updates.name) {
+      const chRows = await db
+        .select()
+        .from(slackRoleChannels)
+        .where(eq(slackRoleChannels.roleId, roleId))
+        .all();
+      const norm = normalizeChannelName(updates.name);
+      // 対象が 1 チャンネル & 正規化後が非空のときだけ自動 rename する
+      // (複数チャンネルはどれを合わせるか曖昧なので手動同期 UI に委ねる)。
+      if (chRows.length === 1 && norm.name.length > 0) {
+        const channelId = chRows[0].channelId;
+        const workspaceId = readWorkspaceId(found.action);
+        const slack = workspaceId
+          ? await createSlackClientForWorkspace(c.env, workspaceId)
+          : null;
+        if (slack) {
+          try {
+            const info = await slack.getChannelInfo(channelId);
+            const cur = info.ok
+              ? ((info.channel as { name?: string } | undefined)?.name ?? null)
+              : null;
+            if (cur === norm.name) {
+              channelRename = { ok: true, channelId, from: cur, to: norm.name };
+            } else {
+              const res = await slack.renameChannel(channelId, norm.name);
+              const renamedCh = res.channel as { name?: string } | undefined;
+              channelRename = {
+                ok: res.ok === true,
+                channelId,
+                from: cur,
+                to:
+                  typeof renamedCh?.name === "string"
+                    ? renamedCh.name
+                    : norm.name,
+                error: res.ok
+                  ? undefined
+                  : typeof res.error === "string"
+                    ? res.error
+                    : "rename_failed",
+              };
+            }
+          } catch (e) {
+            channelRename = {
+              ok: false,
+              channelId,
+              from: null,
+              to: norm.name,
+              error: e instanceof Error ? e.message : "rename_exception",
+            };
+          }
+        }
+      }
+    }
+
+    return c.json(channelRename ? { ...updated, channelRename } : updated);
   },
 );
 
@@ -1194,6 +1265,340 @@ rolesRouter.post(
     );
 
     return c.json({ parentRoleName, dryRun, sync, results, totals });
+  },
+);
+
+// ----------------------------------------------------------------------------
+// ロール名 ⇄ チャンネル名 同期
+//
+//   各ロールに紐づく Slack チャンネルの「名前」を、そのロール名に合わせて
+//   一致させる。member 同期 (sync) が「在籍者」を合わせるのに対し、こちらは
+//   「チャンネル名そのもの」を合わせる。
+//
+//   - GET  channel-name-diff : 現状名 → ロール名(正規化後) の差分プレビュー。
+//   - POST channel-name-sync : 選択チャンネルを rename (冪等・dryRun 可)。
+//
+//   subrequest 予算 (Cloudflare Workers free plan = 50/invocation):
+//     - diff:  getChannelInfo が 1 binding = 1 subrequest。offset/limit で分割。
+//     - sync:  1 channel = getChannelInfo(1) + rename(1) = 2 subrequest。
+//              予算を超える手前で未処理分を deferred として返し、FE が再送する。
+// ----------------------------------------------------------------------------
+
+/**
+ * role の name を Slack チャンネル名にできるか + 現状との差分を 1 件に畳んだ型。
+ */
+type ChannelNameDiffItem = {
+  roleId: string;
+  roleName: string;
+  channelId: string;
+  currentName: string | null; // getChannelInfo 失敗時 null
+  targetName: string;
+  needsRename: boolean;
+  changed: boolean; // ロール名がそのままでは使えず正規化で変わる
+  collision: boolean; // 同一ターゲット名の binding が複数ある (rename すると衝突)
+  warnings: string[];
+  error?: string; // getChannelInfo 失敗理由
+};
+
+/**
+ * action 配下の (role, channel) binding を、ロール名の辞書順 → channelId 順で
+ * 安定ソートして返す。offset ページングの並びを request 間で一定にするため。
+ */
+async function loadRoleChannelBindings(
+  db: ReturnType<typeof drizzle>,
+  actionId: string,
+): Promise<Array<{ roleId: string; roleName: string; channelId: string }>> {
+  const roles = await db
+    .select()
+    .from(slackRoles)
+    .where(eq(slackRoles.eventActionId, actionId))
+    .all();
+  if (roles.length === 0) return [];
+  const roleById = new Map(roles.map((r) => [r.id, r]));
+  const chRows = await db
+    .select()
+    .from(slackRoleChannels)
+    .where(
+      inArray(
+        slackRoleChannels.roleId,
+        roles.map((r) => r.id),
+      ),
+    )
+    .all();
+  const bindings = chRows
+    .map((row) => {
+      const role = roleById.get(row.roleId);
+      return role
+        ? { roleId: role.id, roleName: role.name, channelId: row.channelId }
+        : null;
+    })
+    .filter((b): b is NonNullable<typeof b> => b !== null);
+  bindings.sort(
+    (a, b) =>
+      a.roleName.localeCompare(b.roleName) ||
+      a.channelId.localeCompare(b.channelId),
+  );
+  return bindings;
+}
+
+/**
+ * GET /orgs/:eventId/actions/:actionId/channel-name-diff
+ *   ?offset=0&limit=40
+ *
+ *   ロールに紐づく各チャンネルについて「現状のチャンネル名 → ロール名(正規化後)」
+ *   の差分を返す read-only プレビュー。書き込みは一切しない。
+ */
+rolesRouter.get(
+  "/orgs/:eventId/actions/:actionId/channel-name-diff",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    const workspaceId = readWorkspaceId(found.action);
+    if (!workspaceId) {
+      return c.json({ error: "action.config.workspaceId is missing" }, 400);
+    }
+    const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+    if (!slack) {
+      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+    }
+
+    const bindings = await loadRoleChannelBindings(db, actionId);
+    const total = bindings.length;
+
+    // ターゲット名の衝突検出 (複数チャンネルが同じロール名になる場合)。全 binding
+    // を先に走査して衝突する channelId を集める。
+    const targetCount = new Map<string, number>();
+    for (const b of bindings) {
+      const t = normalizeChannelName(b.roleName).name;
+      targetCount.set(t, (targetCount.get(t) ?? 0) + 1);
+    }
+
+    const offset = Math.max(0, Number(c.req.query("offset") ?? 0) || 0);
+    // getChannelInfo = 1 subrequest。free plan 50 の手前で止める。
+    const limit = Math.max(
+      1,
+      Math.min(40, Number(c.req.query("limit") ?? 40) || 40),
+    );
+    const slice = bindings.slice(offset, offset + limit);
+
+    const items: ChannelNameDiffItem[] = [];
+    for (const b of slice) {
+      const norm = normalizeChannelName(b.roleName);
+      const collision = (targetCount.get(norm.name) ?? 0) > 1;
+      const warnings = [...norm.warnings];
+      if (collision) {
+        warnings.push(
+          "複数チャンネルが同じ名前になります。リネームは手動で確認してください",
+        );
+      }
+      const info = await slack.getChannelInfo(b.channelId);
+      if (!info.ok) {
+        items.push({
+          roleId: b.roleId,
+          roleName: b.roleName,
+          channelId: b.channelId,
+          currentName: null,
+          targetName: norm.name,
+          needsRename: false,
+          changed: norm.changed,
+          collision,
+          warnings,
+          error: typeof info.error === "string" ? info.error : "fetch_failed",
+        });
+        continue;
+      }
+      const ch = info.channel as { name?: string } | undefined;
+      const currentName = typeof ch?.name === "string" ? ch.name : null;
+      const needsRename =
+        norm.name.length > 0 && !collision && currentName !== norm.name;
+      items.push({
+        roleId: b.roleId,
+        roleName: b.roleName,
+        channelId: b.channelId,
+        currentName,
+        targetName: norm.name,
+        needsRename,
+        changed: norm.changed,
+        collision,
+        warnings,
+      });
+    }
+
+    const end = offset + slice.length;
+    const nextOffset = end < total ? end : null;
+    return c.json({ workspaceId, total, items, nextOffset });
+  },
+);
+
+/**
+ * POST /orgs/:eventId/actions/:actionId/channel-name-sync
+ *   body: { channelIds?: string[], dryRun?: boolean }
+ *
+ *   選択チャンネルを「紐づくロール名(正規化後)」へ rename する。
+ *   - channelIds 省略時は全 binding を対象にする。
+ *   - ターゲット名はサーバーが binding から再導出する (client の name を信用しない)。
+ *   - 冪等: 現状名が既にターゲットと一致するものは skip。
+ *   - collision (同名衝突) の binding は安全のため rename せず skip 扱い。
+ *   - subrequest 予算超過分は deferred(channelId[]) で返し、FE が再送する。
+ */
+rolesRouter.post(
+  "/orgs/:eventId/actions/:actionId/channel-name-sync",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const eventId = c.req.param("eventId");
+    const actionIdParam = c.req.param("actionId");
+    const found = await findRoleManagementAction(db, eventId, actionIdParam);
+    if ("error" in found) return c.json({ error: found.error }, found.status);
+    const actionId = found.action.id;
+
+    const body = await c.req
+      .json<{ channelIds?: unknown; dryRun?: unknown }>()
+      .catch(() => ({}) as Record<string, never>);
+    const dryRun = body.dryRun === true;
+    const requested = Array.isArray(body.channelIds)
+      ? new Set(
+          body.channelIds.filter((x): x is string => typeof x === "string"),
+        )
+      : null;
+
+    const workspaceId = readWorkspaceId(found.action);
+    if (!workspaceId) {
+      return c.json({ error: "action.config.workspaceId is missing" }, 400);
+    }
+    const slack = await createSlackClientForWorkspace(c.env, workspaceId);
+    if (!slack) {
+      return c.json({ error: `workspace not found: ${workspaceId}` }, 404);
+    }
+
+    const bindings = await loadRoleChannelBindings(db, actionId);
+    // 衝突検出 (diff と同じロジック)。
+    const targetCount = new Map<string, number>();
+    for (const b of bindings) {
+      const t = normalizeChannelName(b.roleName).name;
+      targetCount.set(t, (targetCount.get(t) ?? 0) + 1);
+    }
+    const targets = bindings.filter(
+      (b) => requested === null || requested.has(b.channelId),
+    );
+
+    type RenameResult = {
+      channelId: string;
+      roleName: string;
+      from: string | null;
+      to: string;
+      status: "renamed" | "skipped" | "planned" | "error";
+      error?: string;
+    };
+    const results: RenameResult[] = [];
+    const deferred: string[] = [];
+    let renamed = 0;
+    let skipped = 0;
+
+    // subrequest 予算: getChannelInfo(1)+rename(1)=最大2/channel。free plan 50 の
+    // 手前で止める。dryRun は rename しないので 1/channel。
+    const BUDGET = 40;
+    let used = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const b = targets[i];
+      const norm = normalizeChannelName(b.roleName);
+      const to = norm.name;
+      const collision = (targetCount.get(to) ?? 0) > 1;
+
+      // 予算チェック: この channel を処理すると溢れるなら残りを deferred へ。
+      const cost = dryRun ? 1 : 2;
+      if (used + cost > BUDGET) {
+        for (let j = i; j < targets.length; j++) {
+          deferred.push(targets[j].channelId);
+        }
+        break;
+      }
+
+      if (to.length === 0 || collision) {
+        skipped += 1;
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from: null,
+          to,
+          status: "skipped",
+          error: collision ? "name_collision" : "empty_name",
+        });
+        continue;
+      }
+
+      const info = await slack.getChannelInfo(b.channelId);
+      used += 1;
+      if (!info.ok) {
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from: null,
+          to,
+          status: "error",
+          error: typeof info.error === "string" ? info.error : "fetch_failed",
+        });
+        continue;
+      }
+      const ch = info.channel as { name?: string } | undefined;
+      const from = typeof ch?.name === "string" ? ch.name : null;
+      if (from === to) {
+        skipped += 1;
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from,
+          to,
+          status: "skipped",
+        });
+        continue;
+      }
+      if (dryRun) {
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from,
+          to,
+          status: "planned",
+        });
+        continue;
+      }
+      const res = await slack.renameChannel(b.channelId, to);
+      used += 1;
+      if (res.ok) {
+        renamed += 1;
+        const renamedCh = res.channel as { name?: string } | undefined;
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from,
+          to: typeof renamedCh?.name === "string" ? renamedCh.name : to,
+          status: "renamed",
+        });
+      } else {
+        results.push({
+          channelId: b.channelId,
+          roleName: b.roleName,
+          from,
+          to,
+          status: "error",
+          error: typeof res.error === "string" ? res.error : "rename_failed",
+        });
+      }
+    }
+
+    return c.json({
+      dryRun,
+      renamed,
+      skipped,
+      results,
+      deferred: deferred.length > 0 ? deferred : undefined,
+    });
   },
 );
 

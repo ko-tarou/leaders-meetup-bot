@@ -105,6 +105,8 @@ export interface SlackPort {
     userId: string,
   ): Promise<SlackResponse>;
 
+  renameChannel(channel: string, name: string): Promise<SlackResponse>;
+
   listAllChannelMembers(
     channel: string,
     opts?: { limit?: number; maxPages?: number },
