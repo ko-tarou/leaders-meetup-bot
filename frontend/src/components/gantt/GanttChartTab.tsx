@@ -62,7 +62,8 @@ type Row =
   | { kind: "team"; team: string }
   | {
       kind: "group";
-      key: string; // 親 WBS ("4.2")
+      key: string; // 折りたたみ用のチーム内一意キー ("集客告知 4.2")
+      wbs: string; // 親 WBS ("4.2") — 表示/testid 用
       label: string; // 見出し ("公式LP")
       team: string;
       count: number;
@@ -331,20 +332,27 @@ export function GanttChartTab({
     [rollupLevel, visibleTasks, config],
   );
 
-  // 折りたたみ対象の親グループ: parentWbsKey が同じで 2 件以上あるものだけ。
+  // 折りたたみ対象の親グループ: 同じ (チーム, parentWbsKey) に 2 件以上あるものだけ。
+  // ガントはチーム単位で並ぶため、親グループもチーム内で閉じる (同じ WBS 親が別チームに
+  // またがっても、各チームの見出しはそのチームのメンバーだけを集計する)。
+  // キーは `${team} ${pk}` (チーム跨ぎで衝突しない)。
   // (rollup 表示中はグループ化しない = 従来の集約ビューをそのまま使う。)
+  const SEP = " ";
+  const teamOf = (t: Task) => t.team ?? "(チームなし)";
   const groupMap = useMemo(() => {
     const m = new Map<string, Task[]>();
     if (rollup) return m;
     for (const t of displayTasks) {
       const pk = parentWbsKey(t.wbs);
       if (!pk) continue;
-      const arr = m.get(pk);
+      const gk = `${teamOf(t)}${SEP}${pk}`;
+      const arr = m.get(gk);
       if (arr) arr.push(t);
-      else m.set(pk, [t]);
+      else m.set(gk, [t]);
     }
     for (const [k, v] of m) if (v.length < 2) m.delete(k); // 単独メンバーはフラット表示
     return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayTasks, rollup]);
 
   // 新しく現れたグループは既定で畳む (左をギュッと締める)。ユーザーの開閉はそのまま保持。
@@ -364,7 +372,6 @@ export function GanttChartTab({
   // 各チーム内で 3 セグ WBS のサブタスクは親グループ (折りたたみ見出し) にぶら下げる。
   const rows: Row[] = useMemo(() => {
     const knownTeams = config.teams;
-    const teamOf = (t: Task) => t.team ?? "(チームなし)";
     const teamNames = [
       ...knownTeams,
       ...[...new Set(displayTasks.map(teamOf))].filter((t) => !knownTeams.includes(t)),
@@ -379,15 +386,17 @@ export function GanttChartTab({
       const emitted = new Set<string>();
       for (const t of members) {
         const pk = parentWbsKey(t.wbs);
-        const grp = pk ? groupMap.get(pk) : undefined;
-        if (pk && grp) {
+        const gk = pk ? `${team}${SEP}${pk}` : null;
+        const grp = gk ? groupMap.get(gk) : undefined;
+        if (pk && gk && grp) {
           // グループ見出しを (WBS 順で最初に来た時に) 1 度だけ出す。
-          if (!emitted.has(pk)) {
-            emitted.add(pk);
+          if (!emitted.has(gk)) {
+            emitted.add(gk);
             const ordered = [...grp].sort((a, b) => compareWbs(a.wbs, b.wbs));
             out.push({
               kind: "group",
-              key: pk,
+              key: gk,
+              wbs: pk,
               label: deriveGroupLabel(ordered, pk),
               team,
               count: ordered.length,
@@ -395,13 +404,14 @@ export function GanttChartTab({
             });
           }
           // 展開中のみ子タスク行をインデントして出す。
-          if (!collapsed.has(pk)) out.push({ kind: "task", task: t, indent: true });
+          if (!collapsed.has(gk)) out.push({ kind: "task", task: t, indent: true });
         } else {
           out.push({ kind: "task", task: t, indent: false });
         }
       }
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayTasks, config.teams, groupMap, collapsed]);
 
   const teamColor = useMemo(() => {
@@ -734,7 +744,7 @@ export function GanttChartTab({
               const color = teamColor.get(r.team) ?? colors.textSecondary;
               const barH = 6;
               return (
-                <g key={`group-bar-${r.key}`} data-testid={`gantt-group-bar-${r.key}`}>
+                <g key={`group-bar-${r.key}`} data-testid={`gantt-group-bar-${r.wbs}`}>
                   {/* 本体 (細い帯) */}
                   <rect x={x} y={cy - barH / 2} width={w} height={barH} fill={color} fillOpacity={0.9} />
                   {/* 両端の下向きキャップ (サマリバーらしさ) */}
@@ -866,7 +876,7 @@ function GroupNameRow({
 }) {
   return (
     <div
-      data-testid={`gantt-group-${row.key}`}
+      data-testid={`gantt-group-${row.wbs}`}
       onClick={onToggle}
       style={{
         display: "flex",
@@ -880,9 +890,9 @@ function GroupNameRow({
         boxSizing: "border-box",
       }}
     >
-      <span style={{ width: WBS_W, paddingLeft: 6, color: colors.textSecondary, fontWeight: 400 }}>{row.key}</span>
+      <span style={{ width: WBS_W, paddingLeft: 6, color: colors.textSecondary, fontWeight: 400 }}>{row.wbs}</span>
       <span style={{ width: NAME_W, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
-        <span data-testid={`gantt-group-toggle-${row.key}`} style={{ width: 12, display: "inline-block", color: colors.textSecondary }}>
+        <span data-testid={`gantt-group-toggle-${row.wbs}`} style={{ width: 12, display: "inline-block", color: colors.textSecondary }}>
           {open ? "▼" : "▶"}
         </span>
         <span title={row.label}>{row.label}</span>
