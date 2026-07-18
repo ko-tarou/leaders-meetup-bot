@@ -20,6 +20,9 @@ export type Task = {
   phase: string | null;
   wbs: string | null;
   progressPct: number | null;
+  // gantt_tracker (migration 0078): 担当者名 (自由文字列)。NULL 許容。
+  // ガント表では葉タスク (子を持たないタスク) のみ編集可。
+  assignee: string | null;
 };
 
 export type TaskFilters = {

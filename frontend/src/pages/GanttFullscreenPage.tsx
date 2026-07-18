@@ -42,32 +42,42 @@ export function GanttFullscreenPage() {
 
   if (!eventId) return null;
 
+  // Excel/スプレッドシート的にビューポート全幅・全高を使い切る。
+  // 外側は overflow:hidden でページ自体を固定し、本文エリア (content) だけを
+  // スクロールさせる (横スクロールはガント本文内に閉じ込める)。余白は最小化。
   return (
     <div
       style={{
-        minHeight: "100vh",
-        padding: "12px 16px 24px",
+        height: "100vh",
+        width: "100vw",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
         background: colors.background,
         fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
+        boxSizing: "border-box",
       }}
     >
+      {/* ヘッダー/ツールバーは最小化 (高さを取らずグラフ領域を最大化) */}
       <div
         style={{
+          flexShrink: 0,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 10,
+          padding: "4px 10px",
+          borderBottom: `1px solid ${colors.border}`,
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 16, color: colors.text }}>
+        <h1 style={{ margin: 0, fontSize: 14, color: colors.text }}>
           ガント全画面
         </h1>
         <button
           type="button"
           onClick={() => window.close()}
           style={{
-            fontSize: 13,
-            padding: "6px 12px",
+            fontSize: 12,
+            padding: "4px 10px",
             border: `1px solid ${colors.borderStrong}`,
             borderRadius: 4,
             background: colors.surface,
@@ -78,27 +88,30 @@ export function GanttFullscreenPage() {
           閉じる
         </button>
       </div>
-      {loading && (
-        <div style={{ padding: "2rem", color: colors.textMuted }}>
-          読み込み中...
-        </div>
-      )}
-      {!loading && error && (
-        <div style={{ padding: "2rem", color: colors.danger }}>{error}</div>
-      )}
-      {!loading && !error && !action && (
-        <div style={{ padding: "2rem", color: colors.textMuted }}>
-          ガントアクションが見つかりません。
-        </div>
-      )}
-      {!loading && !error && action && (
-        <GanttScopeView
-          eventId={eventId}
-          action={action}
-          scopes={["all", "team", "monthly"]}
-          fullscreen
-        />
-      )}
+      {/* 本文: 残り全高を占有し、ここだけスクロール (縦・横とも本文内に閉じる) */}
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "6px 8px" }}>
+        {loading && (
+          <div style={{ padding: "2rem", color: colors.textMuted }}>
+            読み込み中...
+          </div>
+        )}
+        {!loading && error && (
+          <div style={{ padding: "2rem", color: colors.danger }}>{error}</div>
+        )}
+        {!loading && !error && !action && (
+          <div style={{ padding: "2rem", color: colors.textMuted }}>
+            ガントアクションが見つかりません。
+          </div>
+        )}
+        {!loading && !error && action && (
+          <GanttScopeView
+            eventId={eventId}
+            action={action}
+            scopes={["all", "team", "monthly"]}
+            fullscreen
+          />
+        )}
+      </div>
     </div>
   );
 }

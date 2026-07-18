@@ -119,6 +119,8 @@ function rollupTasks(
       // top は major、mid は先頭メンバーの wbs を代表値にして左表/並びを自然にする。
       wbs: level === "top" ? major : first,
       progressPct,
+      // 集約行は担当者を持たない (葉タスクのみ担当者を設定する仕様)。
+      assignee: null,
     });
   }
   return out;
@@ -187,6 +189,28 @@ export function GanttChartTab({
   }, [eventId, refreshKey]);
 
   const reload = () => setRefreshKey((k) => k + 1);
+
+  // 葉タスク判定用: 他タスクの parentTaskId に現れる id は「親」= 葉ではない。
+  // フラット WBS 構造 (親未使用) では実質すべてが葉になるが、1 階層サブタスク
+  // (ADR-0002) を持つ場合は親を担当者編集不可にする。
+  const parentIds = useMemo(
+    () => new Set(tasks.map((t) => t.parentTaskId).filter((v): v is string => !!v)),
+    [tasks],
+  );
+
+  // 担当者の楽観的更新: 先にローカル反映 -> API 失敗時はスナップショットへロールバック。
+  const commitAssignee = async (taskId: string, assignee: string | null) => {
+    const snapshot = tasks;
+    setTasks((cur) =>
+      cur.map((t) => (t.id === taskId ? { ...t, assignee } : t)),
+    );
+    try {
+      await api.tasks.update(taskId, { assignee });
+    } catch (e) {
+      setTasks(snapshot); // ロールバック
+      toast.error(`担当者の更新に失敗: ${e instanceof Error ? e.message : ""}`);
+    }
+  };
 
   // 「チーム別」表示: teamFilter が指定された時だけ、そのチームのタスクに絞る。
   // 全体 (null) は全タスク。rows / 範囲 / タイムラインはこの絞り込み後を基準に
@@ -435,6 +459,7 @@ export function GanttChartTab({
             <span style={{ width: 340 }}>タスク</span>
             <span style={{ width: 92 }}>状態</span>
             <span style={{ width: 64 }}>進捗%</span>
+            <span style={{ width: 120 }}>担当者</span>
             <span style={{ width: 104 }}>開始</span>
             <span style={{ width: 104 }}>終了</span>
           </div>
@@ -449,8 +474,11 @@ export function GanttChartTab({
                 task={r.task}
                 selected={r.task.id === selectedId}
                 editable={!rollup}
+                // 担当者は葉タスク (子を持たない実タスク) のみ編集可。
+                assigneeEditable={!rollup && !parentIds.has(r.task.id)}
                 onSelect={() => setSelectedId(r.task.id)}
                 onCommit={commitTask}
+                onCommitAssignee={commitAssignee}
               />
             ),
           )}
@@ -580,15 +608,20 @@ function TaskRow({
   task,
   selected,
   editable = true,
+  assigneeEditable = true,
   onSelect,
   onCommit,
+  onCommitAssignee,
 }: {
   task: Task;
   selected: boolean;
   // false のとき状態/進捗を編集不可のテキスト表示にする (最上位抽象度の集約行)。
   editable?: boolean;
+  // 担当者を編集可能にするか (葉タスクのみ true)。false は編集不可 (中間/上位/集約行)。
+  assigneeEditable?: boolean;
   onSelect: () => void;
   onCommit: (taskId: string, updates: Parameters<typeof api.tasks.update>[1], label: string) => void;
+  onCommitAssignee: (taskId: string, assignee: string | null) => void;
 }) {
   const [progress, setProgress] = useState<string>(
     task.progressPct === null ? "" : String(task.progressPct),
@@ -596,6 +629,17 @@ function TaskRow({
   useEffect(() => {
     setProgress(task.progressPct === null ? "" : String(task.progressPct));
   }, [task.progressPct]);
+
+  const [assignee, setAssignee] = useState<string>(task.assignee ?? "");
+  useEffect(() => {
+    setAssignee(task.assignee ?? "");
+  }, [task.assignee]);
+
+  const commitAssignee = () => {
+    const next = assignee.trim() === "" ? null : assignee.trim();
+    if (next === (task.assignee ?? null)) return;
+    onCommitAssignee(task.id, next);
+  };
 
   const commitProgress = () => {
     const v = progress === "" ? null : Number(progress);
@@ -659,6 +703,22 @@ function TaskRow({
           />
         ) : (
           <span style={{ color: colors.textSecondary }}>{task.progressPct ?? 0}%</span>
+        )}
+      </span>
+      <span style={{ width: 120 }} data-testid={`gantt-assignee-${key}`}>
+        {assigneeEditable ? (
+          <input
+            type="text"
+            value={assignee}
+            placeholder="-"
+            onChange={(e) => setAssignee(e.target.value)}
+            onBlur={commitAssignee}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 108, fontSize: 12 }}
+          />
+        ) : (
+          <span style={{ color: colors.textSecondary }}>{task.assignee ?? ""}</span>
         )}
       </span>
       <span style={{ width: 104, color: colors.textSecondary }} data-testid={`gantt-start-${key}`}>
