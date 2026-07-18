@@ -105,6 +105,9 @@ export type SyncResult = {
     users?: string[];
     error: string;
   }[];
+  // subrequest 予算内で処理し切れず次リクエストに持ち越した operation 群。
+  // フロントはこれが空になるまで再送する (大規模チャンネル/大量 kick 対策)。
+  deferred?: { channelId: string; invite: boolean; kick: boolean }[];
 };
 
 // 005-user-oauth: POST /bot-bulk-invite の結果。

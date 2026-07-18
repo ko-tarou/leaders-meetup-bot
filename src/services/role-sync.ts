@@ -56,13 +56,30 @@ export type SyncDiffResult = {
 };
 
 /**
- * sync-diff を offset/limit で分割計算するときの 1 ページあたり channel 数の既定値。
- *
- * Cloudflare Workers の subrequest 上限 (free=50/invocation) 対策。1 ページ =
- * authTest(1) + getChannelList(数ページ) + limit 件の conversations.members なので、
- * limit を小さく保てば大規模イベント (HackIT 等) でも 1 invocation が上限に当たらない。
+ * sync-diff を offset/limit で分割計算するときの 1 ページあたり channel 数の
+ * 「粗い」上限。実際の 1 invocation の停止は下記 subrequest 予算で決まる。
  */
 export const SYNC_DIFF_DEFAULT_PAGE_SIZE = 5;
+
+/**
+ * Cloudflare Workers free plan の 1 invocation あたり subrequest 上限は 50。
+ * その手前で必ず止めるための予算。Slack への fetch は全て 1 subrequest なので、
+ * authTest + conversations.list(ページング) + conversations.members(ページング)
+ * + invite/kick の総 fetch 数がこの値を超えないよう制御する。
+ *
+ * ★前回修正 (PR#399) が効かなかった真因:
+ *   分割単位を「チャンネル数 (5件/req)」にしていたが、実際の subrequest コストは
+ *   - getChannelList (conversations.list) が **毎リクエスト最大 20 subrequest**
+ *   - listAllChannelMembers (conversations.members) が **1 チャンネル最大 20 subrequest**
+ *   と可変・大きく、5 チャンネルでも 1 + 20 + 5×(最大20) = 最大 121 subrequest に
+ *   達し得た。チャンネル数では真のコストを制御できていなかった。
+ *   → 分割単位を「subrequest 予算」に変え、予算を超える手前で nextOffset を返して
+ *     フロントに継続させる (members のページングも予算に含めて厳密にカウント)。
+ */
+export const SYNC_SUBREQUEST_BUDGET = 45;
+
+/** 1 チャンネルの members 取得に許す最大ページ数の上限 (予算があってもこれ以上は辿らない)。 */
+const MEMBERS_MAX_PAGES = 20;
 
 export type SyncExecuteResult = {
   invited: number;
@@ -74,6 +91,13 @@ export type SyncExecuteResult = {
     users?: string[];
     error: string;
   }>;
+  /**
+   * subrequest 予算内で処理し切れず、次リクエストに持ち越した operation 群。
+   * フロントはこれが空になるまで再送する (大規模チャンネルで kick が多い等でも
+   * 1 invocation が Cloudflare の subrequest 上限を超えないための継続機構)。
+   * 未設定/空配列なら「この呼び出しで全て完了」を意味する。
+   */
+  deferred?: SyncOperation[];
 };
 
 /**
@@ -171,6 +195,7 @@ export async function computeSyncDiff(
   action: ActionRow,
   channelIds?: string[],
   page?: { offset?: number; limit?: number },
+  opts?: { resolveNames?: boolean; budget?: number },
 ): Promise<SyncDiffResult> {
   const workspaceId = readWorkspaceId(action);
   if (!workspaceId) {
@@ -193,41 +218,71 @@ export async function computeSyncDiff(
     ? managedChannels.filter((c) => filter.has(c))
     : managedChannels;
 
-  // page 指定時は offset/limit で slice し total/nextOffset を返す (サーバー側
-  // ページング)。slice を Slack 呼び出しより前に置くことで、1 invocation で
-  // 叩く conversations.members を limit 件に抑え subrequest 上限超過を防ぐ。
-  let targetChannels = allTargets;
-  let paging: { total: number; nextOffset: number | null } | null = null;
-  if (page) {
-    const offset = Math.max(0, page.offset ?? 0);
-    const limit = Math.max(1, page.limit ?? SYNC_DIFF_DEFAULT_PAGE_SIZE);
-    targetChannels = allTargets.slice(offset, offset + limit);
-    const end = offset + limit;
-    paging = {
-      total: allTargets.length,
-      nextOffset: end < allTargets.length ? end : null,
-    };
-  }
+  const budget = Math.max(2, opts?.budget ?? SYNC_SUBREQUEST_BUDGET);
+  const resolveNames = opts?.resolveNames ?? true;
+
+  // page 指定時は offset を開始位置、limit を「粗い」チャンネル数上限として使う。
+  // 実際にどこで打ち切るかは subrequest 予算 (budget) で決まり、超える手前で
+  // nextOffset を返してフロントに継続させる (サーバー側ページング)。
+  const paged = page !== undefined;
+  const startOffset = paged ? Math.max(0, page?.offset ?? 0) : 0;
+  const channelCap =
+    paged && page?.limit !== undefined ? Math.max(1, page.limit) : undefined;
+  const hardEnd =
+    channelCap !== undefined
+      ? Math.min(allTargets.length, startOffset + channelCap)
+      : allTargets.length;
 
   // 対象 0 件なら Slack を一切叩かない (authTest / conversations.list も省く)。
-  if (targetChannels.length === 0) {
-    return paging
-      ? { workspaceId, channels: [], total: paging.total, nextOffset: null }
+  if (startOffset >= hardEnd) {
+    return paged
+      ? { workspaceId, channels: [], total: allTargets.length, nextOffset: null }
       : { workspaceId, channels: [] };
   }
 
+  // ---- ここから subrequest を消費する。used で厳密にカウントし budget 未満を保証 ----
+  let used = 0;
+
   // bot 自身は Slack 側に常駐してほしいので kick から除外する。
   const auth = await slack.authTest();
+  used += 1;
   const botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
 
-  // channel 名は 1 回の conversations.list でまとめて解決 (N+1 排除)。
-  const nameMap = await buildChannelNameMap(slack);
+  // channel 名は 1 回の conversations.list でまとめて解決 (N+1 排除)。名前解決は
+  // 表示専用の fail-soft なので、members 用の予算を残すためページ数を制限する。
+  // executeSync など名前不要な経路では resolveNames=false でまるごと省ける。
+  const nameMap = new Map<string, string>();
+  if (resolveNames) {
+    const nameBudget = Math.max(1, Math.min(MEMBERS_MAX_PAGES, budget - used - 1));
+    const nameRes = await buildChannelNameMap(slack, nameBudget);
+    used += nameRes.pages;
+    for (const [k, v] of nameRes.map) nameMap.set(k, v);
+  }
 
   const channels: ChannelSyncDiff[] = [];
-  for (const channelId of targetChannels) {
+  let idx = startOffset;
+  let processed = 0;
+  for (; idx < hardEnd; idx++) {
+    const remaining = budget - used;
+    // paged 実行時のみ subrequest 予算で早期打ち切り。予算が尽きたら以降を次
+    // リクエストへ回し nextOffset で継続させる。最低 1 チャンネルは必ず処理して
+    // 前進を保証する (無限ループ防止)。
+    // 非 paged (auto-invite 等の従来経路) は全チャンネルを従来どおり処理する
+    // (振る舞い不変。1 invocation の subrequest 制御はその呼び出し側の責務)。
+    if (paged && processed >= 1 && remaining < 1) break;
+
+    const channelId = allTargets[idx];
     const expected = expectedByChannel[channelId] ?? new Set<string>();
     const channelName = nameMap.get(channelId) ?? channelId;
-    const cur = await slack.listAllChannelMembers(channelId);
+
+    // paged 時のみ「残予算」で members ページ数を絞る。非 paged は従来上限のまま。
+    const maxPages = paged
+      ? Math.max(1, Math.min(MEMBERS_MAX_PAGES, remaining))
+      : MEMBERS_MAX_PAGES;
+    const cur = await slack.listAllChannelMembers(channelId, { maxPages });
+    used += cur.pages ?? 1;
+    processed += 1;
+
     if (!cur.ok) {
       channels.push({
         channelId,
@@ -238,16 +293,38 @@ export async function computeSyncDiff(
       });
       continue;
     }
-    const currentSet = new Set(
-      cur.members.filter((u) => u !== botUserId),
-    );
+    // truncated = members を取り切れなかった = 不完全。この不完全な集合で diff を
+    // 計算すると「本当は在籍しているのに toKick」になり破壊的。
+    if (cur.truncated) {
+      // 予算不足 (maxPages を残予算で絞った) が原因なら、この channel を次リクエストへ
+      // 回す。break して nextOffset をこの idx のままにすれば、次回はこの channel が
+      // 先頭 = フル予算 (MEMBERS_MAX_PAGES) で取り直せる (誤 error を出さない)。
+      // ただし「この invocation で最初に処理した channel」を defer すると (極端に小さい
+      // budget では) 同じ channel を延々 retry して無限ループになるため、他に 1 件でも
+      // 処理済み (processed > 1) の時だけ defer する。先頭 channel は通常フル予算が
+      // 取れるので、ここに落ちるのは病的に小さい budget の時だけ (その場合は error)。
+      if (paged && maxPages < MEMBERS_MAX_PAGES && processed > 1) break;
+      // フル予算でも取り切れない巨大 channel (4000+ 名) は kick 事故防止のため error。
+      channels.push({
+        channelId,
+        channelName,
+        toInvite: [],
+        toKick: [],
+        error: "members_incomplete_subrequest_budget",
+      });
+      continue;
+    }
+    const currentSet = new Set(cur.members.filter((u) => u !== botUserId));
     const toInvite = [...expected].filter((u) => !currentSet.has(u));
     const toKick = [...currentSet].filter((u) => !expected.has(u));
     channels.push({ channelId, channelName, toInvite, toKick });
   }
-  return paging
-    ? { workspaceId, channels, total: paging.total, nextOffset: paging.nextOffset }
-    : { workspaceId, channels };
+
+  if (paged) {
+    const nextOffset = idx < allTargets.length ? idx : null;
+    return { workspaceId, channels, total: allTargets.length, nextOffset };
+  }
+  return { workspaceId, channels };
 }
 
 /**
@@ -257,10 +334,15 @@ export async function computeSyncDiff(
  */
 async function buildChannelNameMap(
   slack: SlackClient,
-): Promise<Map<string, string>> {
+  maxPages?: number,
+): Promise<{ map: Map<string, string>; pages: number }> {
   const map = new Map<string, string>();
+  let pages = 0;
   try {
-    const res = await slack.getChannelList();
+    const res = await slack.getChannelList(
+      maxPages !== undefined ? { maxPages } : undefined,
+    );
+    pages = typeof res.pages === "number" ? res.pages : 1;
     const list = res.channels;
     if (res.ok && Array.isArray(list)) {
       for (const ch of list as Array<{ id?: unknown; name?: unknown }>) {
@@ -270,9 +352,11 @@ async function buildChannelNameMap(
       }
     }
   } catch {
-    /* fail-soft: channelId をそのまま名前に使う */
+    /* fail-soft: channelId をそのまま名前に使う。pages は既に加算済みでなくても
+       実際に fetch が走ったのは最大 1 回想定なので過小計上を避け 1 とみなす。 */
+    if (pages === 0) pages = 1;
   }
-  return map;
+  return { map, pages };
 }
 
 /**
@@ -307,6 +391,7 @@ export async function executeSync(
   env: Env,
   action: ActionRow,
   operations?: SyncOperation[],
+  opts?: { budget?: number },
 ): Promise<SyncExecuteResult> {
   const workspaceId = readWorkspaceId(action);
   if (!workspaceId) {
@@ -317,106 +402,192 @@ export async function executeSync(
     throw new Error(`workspace not found: ${workspaceId}`);
   }
 
-  // operations 指定時は、その channel の member 取得だけに絞る (subrequest 削減)。
-  // 未指定なら全 managed channel を対象 (従来動作)。フロントが chunk 実行する際、
-  // 1 リクエストが対象 channel 分の subrequest しか使わないことを保証する。
-  const targetIds = operations ? operations.map((o) => o.channelId) : undefined;
-  const diff = await computeSyncDiff(env, action, targetIds);
+  // subrequest 予算。member 取得 (ページング) + invite(bulk) + kick(per-user) の
+  // 総 fetch 数がこの値を超えないよう、超える手前で残りを deferred に積んで返す。
+  // フロントは deferred が空になるまで再送する (大規模チャンネル/大量 kick でも
+  // 1 invocation が Cloudflare の subrequest 上限を超えないための継続機構)。
+  const budget = Math.max(4, opts?.budget ?? SYNC_SUBREQUEST_BUDGET);
 
-  // operations が指定されていれば channelId をキーとする lookup を作る。
-  // 未指定 (undefined) なら従来動作 = 全 channel × invite + kick。
-  const opsMap: Map<string, SyncOperation> | null = operations
-    ? new Map(operations.map((o) => [o.channelId, o]))
-    : null;
+  const db = drizzle(env.DB);
+  const { managedChannels, expectedByChannel } = await computeExpectedMembership(
+    db,
+    action.id,
+  );
+  const managedSet = new Set(managedChannels);
+
+  // 対象タスク列。operations 指定時はその順序・フラグを尊重しつつ managed channel
+  // のみに絞る (旧実装が computeSyncDiff(managed ∩ targetIds) だった振る舞いを踏襲)。
+  // 未指定なら全 managed channel × invite+kick (従来動作)。
+  type Task = { channelId: string; invite: boolean; kick: boolean };
+  const tasks: Task[] = operations
+    ? operations
+        .filter((o) => managedSet.has(o.channelId))
+        .map((o) => ({ channelId: o.channelId, invite: o.invite, kick: o.kick }))
+    : managedChannels.map((c) => ({ channelId: c, invite: true, kick: true }));
 
   let invited = 0;
   let kicked = 0;
   const errors: SyncExecuteResult["errors"] = [];
+  const deferred: SyncOperation[] = [];
 
-  for (const ch of diff.channels) {
-    // operations 指定時 & 該当 channel が含まれていない場合はスキップ。
-    // fetch_members error も「ユーザーが選んでいない以上」は通知しない。
-    const op = opsMap ? opsMap.get(ch.channelId) : null;
-    if (opsMap && !op) continue;
+  if (tasks.length === 0) return { invited, kicked, errors };
 
-    const doInvite = op ? op.invite : true;
-    const doKick = op ? op.kick : true;
+  // 名前解決 (getChannelList) は不要なので呼ばない = 固定 subrequest コストを削減。
+  let used = 0;
+  const auth = await slack.authTest();
+  used += 1;
+  const botUserId = typeof auth.user_id === "string" ? auth.user_id : null;
 
-    if (ch.error) {
-      // この channel は何かしら実行しようとしている (op で 1 つ以上 true)
-      // ときだけ fetch_members エラーを通知する。
-      if (doInvite || doKick) {
+  const deferFrom = (from: number) => {
+    for (let j = from; j < tasks.length; j++) {
+      deferred.push({
+        channelId: tasks[j].channelId,
+        invite: tasks[j].invite,
+        kick: tasks[j].kick,
+      });
+    }
+  };
+
+  let processed = 0;
+  for (let t = 0; t < tasks.length; t++) {
+    const task = tasks[t];
+    const remaining = budget - used;
+    // member 取得 (>=1) + 最低 1 回の mutate を賄えない残予算なら、この channel
+    // 以降を丸ごと次リクエストへ回す。最低 1 channel は処理し前進を保証する。
+    if (processed >= 1 && remaining < 2) {
+      deferFrom(t);
+      break;
+    }
+
+    // members 取得。残予算でページ数を絞る (mutate 用に予算を残す)。
+    const memberMax = Math.max(1, Math.min(MEMBERS_MAX_PAGES, remaining - 1));
+    const cur = await slack.listAllChannelMembers(task.channelId, {
+      maxPages: memberMax,
+    });
+    used += cur.pages ?? 1;
+    processed += 1;
+
+    if (!cur.ok) {
+      if (task.invite || task.kick) {
         errors.push({
-          channelId: ch.channelId,
+          channelId: task.channelId,
           action: "fetch_members",
-          error: ch.error,
+          error: cur.error ?? "fetch_failed",
         });
       }
       continue;
     }
-    if (doInvite && ch.toInvite.length > 0) {
-      // bulk invite (conversations.invite に comma 区切りで全員渡す) は Slack 側で
-      // 「全員 invite できる」ことを要求する all-or-nothing 操作。1 人でも
-      // user_not_found / cant_invite 等で弾かれると、その channel の invite は
-      // **全員失敗** する (=「1 人のせいで全員 invite できない」事故の根本原因)。
-      //
-      // 対策: bulk 失敗時は 1 user ずつ個別 invite に fallback し、健全な user は
-      // 救済しつつ、問題のある user だけを per-user error として理由付きで残す。
-      // already_in_channel は成功扱い (期待 member が既に居る = 正常)。
-      const res = await slack.conversationsInviteBulk(
-        ch.channelId,
-        ch.toInvite,
-      );
-      if (res.ok) {
-        invited += ch.toInvite.length;
-      } else if (ch.toInvite.length === 1) {
-        // 1 人だけなら fallback しても同じ結果なので、そのまま per-user error に。
-        const userId = ch.toInvite[0];
-        const err = res.error ?? "unknown";
-        if (err === "already_in_channel") {
-          invited += 1;
-        } else {
-          errors.push({
-            channelId: ch.channelId,
-            action: "invite",
-            userId,
-            error: err,
-          });
-        }
+    if (cur.truncated) {
+      // 予算不足で取り切れなかった場合は fresh な次リクエストに回す (この channel
+      // 以降を defer)。フル予算 (MEMBERS_MAX_PAGES) でも取り切れない巨大 channel は
+      // これ以上どうにもならないので kick 事故防止のため error 扱い。
+      if (memberMax < MEMBERS_MAX_PAGES) {
+        deferFrom(t);
+        break;
+      }
+      if (task.invite || task.kick) {
+        errors.push({
+          channelId: task.channelId,
+          action: "fetch_members",
+          error: "members_incomplete_subrequest_budget",
+        });
+      }
+      continue;
+    }
+
+    const currentSet = new Set(cur.members.filter((u) => u !== botUserId));
+    const toInvite = task.invite
+      ? [...(expectedByChannel[task.channelId] ?? new Set<string>())].filter(
+          (u) => !currentSet.has(u),
+        )
+      : [];
+    const toKick = task.kick
+      ? [...currentSet].filter(
+          (u) => !(expectedByChannel[task.channelId] ?? new Set<string>()).has(u),
+        )
+      : [];
+
+    let channelDeferred = false;
+
+    if (toInvite.length > 0) {
+      if (budget - used < 1) {
+        channelDeferred = true;
       } else {
-        // 複数人で bulk が失敗 → 1 人ずつ個別 invite で誰が原因かを切り分ける。
-        for (const userId of ch.toInvite) {
-          const one = await slack.conversationsInviteBulk(ch.channelId, [
-            userId,
-          ]);
-          if (one.ok || one.error === "already_in_channel") {
-            invited += 1;
-          } else {
+        // bulk invite は all-or-nothing。1 人でも弾かれると channel 全員失敗するので、
+        // bulk 失敗時は 1 user ずつ fallback して健全な user を救済し、問題の user
+        // だけを per-user error に残す。already_in_channel は成功扱い。
+        const res = await slack.conversationsInviteBulk(
+          task.channelId,
+          toInvite,
+        );
+        used += 1;
+        if (res.ok) {
+          invited += toInvite.length;
+        } else if (toInvite.length === 1) {
+          const userId = toInvite[0];
+          const err = res.error ?? "unknown";
+          if (err === "already_in_channel") invited += 1;
+          else
             errors.push({
-              channelId: ch.channelId,
+              channelId: task.channelId,
               action: "invite",
               userId,
-              error: one.error ?? "unknown",
+              error: err,
             });
+        } else {
+          for (const userId of toInvite) {
+            if (budget - used < 1) {
+              // fallback 途中で予算切れ → この channel を defer (再送で recompute)。
+              channelDeferred = true;
+              break;
+            }
+            const one = await slack.conversationsInviteBulk(task.channelId, [
+              userId,
+            ]);
+            used += 1;
+            if (one.ok || one.error === "already_in_channel") invited += 1;
+            else
+              errors.push({
+                channelId: task.channelId,
+                action: "invite",
+                userId,
+                error: one.error ?? "unknown",
+              });
           }
         }
       }
     }
-    if (doKick) {
-      for (const userId of ch.toKick) {
-        const res = await slack.conversationsKick(ch.channelId, userId);
-        if (res.ok) {
-          kicked++;
-        } else {
+
+    if (!channelDeferred && toKick.length > 0) {
+      for (const userId of toKick) {
+        if (budget - used < 1) {
+          // 予算切れ → 残りの kick を次リクエストへ (再送で recompute され残りを kick)。
+          channelDeferred = true;
+          break;
+        }
+        const res = await slack.conversationsKick(task.channelId, userId);
+        used += 1;
+        if (res.ok) kicked++;
+        else
           errors.push({
-            channelId: ch.channelId,
+            channelId: task.channelId,
             action: "kick",
             userId,
             error: res.error ?? "unknown",
           });
-        }
       }
     }
+
+    if (channelDeferred) {
+      // この channel はやり残しがある。丸ごと defer し、以降も次リクエストへ。
+      // 再送時は member を取り直して残差分のみ適用する (invite の already_in_channel
+      // / kick 済みユーザーの自然除外により冪等)。
+      deferFrom(t);
+      break;
+    }
   }
-  return { invited, kicked, errors };
+
+  return deferred.length > 0
+    ? { invited, kicked, errors, deferred }
+    : { invited, kicked, errors };
 }

@@ -413,7 +413,8 @@ describe("computeSyncDiff (現状固定 / D1 + Slack mock)", () => {
     const res = await computeSyncDiff(makeEnv(), action, ["C2"]);
     expect(res.channels.map((c) => c.channelId)).toEqual(["C2"]);
     expect(membersSpy).toHaveBeenCalledTimes(1);
-    expect(membersSpy).toHaveBeenCalledWith("C2");
+    // subrequest 予算対策で maxPages を渡すようになった (非 paged は従来上限 20)。
+    expect(membersSpy).toHaveBeenCalledWith("C2", { maxPages: 20 });
     vi.restoreAllMocks();
   });
 
@@ -688,7 +689,8 @@ describe("executeSync (現状固定 / D1 + Slack mock)", () => {
       { channelId: "C2", invite: true, kick: true },
     ]);
     // C1 / C3 の member 取得は行われない。
-    expect(membersSpy.mock.calls).toEqual([["C2"]]);
+    // subrequest 予算対策で maxPages を渡すようになった。
+    expect(membersSpy.mock.calls).toEqual([["C2", { maxPages: 20 }]]);
   });
 
   it("operations 指定: invite だけ true → kick しない (auto-invite 相当)", async () => {

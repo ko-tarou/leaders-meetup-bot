@@ -185,11 +185,14 @@ export const roles = {
   syncDiff: (
     eventId: string,
     actionId: string,
-    page?: { offset: number; limit: number },
+    page?: { offset: number; limit?: number },
   ) => {
-    const qs = page
-      ? `?offset=${page.offset}&limit=${page.limit}`
-      : "";
+    let qs = "";
+    if (page) {
+      const params = new URLSearchParams({ offset: String(page.offset) });
+      if (page.limit !== undefined) params.set("limit", String(page.limit));
+      qs = `?${params.toString()}`;
+    }
     return request<SyncDiffResponse>(
       `/orgs/${eventId}/actions/${actionId}/sync-diff${qs}`,
     );

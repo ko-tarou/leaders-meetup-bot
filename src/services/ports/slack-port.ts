@@ -80,7 +80,9 @@ export interface SlackPort {
    */
   usersLookupByEmail(email: string): Promise<SlackResponse>;
 
-  getChannelList(): Promise<SlackResponse>;
+  getChannelList(opts?: {
+    maxPages?: number;
+  }): Promise<SlackResponse & { pages?: number; truncated?: boolean }>;
 
   getChannelMembers(channel: string): Promise<SlackResponse>;
 
@@ -106,7 +108,13 @@ export interface SlackPort {
   listAllChannelMembers(
     channel: string,
     opts?: { limit?: number; maxPages?: number },
-  ): Promise<{ ok: boolean; error?: string; members: string[] }>;
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    members: string[];
+    pages: number;
+    truncated: boolean;
+  }>;
 
   authTest(): Promise<
     SlackResponse & {
