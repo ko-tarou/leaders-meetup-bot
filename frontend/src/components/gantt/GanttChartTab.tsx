@@ -25,6 +25,8 @@ const ASSIGNEE_W = 120;
 const START_W = 104;
 const END_W = 104;
 const FIELDS_W = STATUS_W + PROGRESS_W + ASSIGNEE_W + START_W + END_W;
+// 固定列 (タスク名) との境目に少しだけ余白を入れて、状態列が左端にベタ付きにならないようにする。
+const FIELDS_PAD_LEFT = 10;
 const TEAM_COLORS = [
   "#2563eb", // blue
   "#d97706", // amber
@@ -638,9 +640,11 @@ export function GanttChartTab({
             この中身全体 (フィールド群 + バー) が一緒に横スクロールし、画面外へ流れる。
             タスク名列だけがスクロールに追従せず左に残る。 */}
         <div style={{ overflowX: "auto", flexGrow: 1 }} data-testid="gantt-timeline">
-          <div style={{ display: "flex", width: FIELDS_W + chartW }}>
-            {/* スクロールする左端フィールド群 (旧・左固定カラムから移設) */}
-            <div style={{ flexShrink: 0, borderRight: `1px solid ${colors.border}` }}>
+          <div style={{ display: "flex", width: FIELDS_W + FIELDS_PAD_LEFT + chartW }}>
+            {/* スクロールする左端フィールド群 (旧・左固定カラムから移設)。
+                paddingLeft で固定列との境目に少し余白を作る (ヘッダ/ボディ共通の
+                コンテナに付けるので桁ズレしない)。 */}
+            <div style={{ flexShrink: 0, borderRight: `1px solid ${colors.border}`, paddingLeft: FIELDS_PAD_LEFT }}>
               <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
                 <span style={{ width: STATUS_W }}>状態</span>
                 <span style={{ width: PROGRESS_W }}>進捗%</span>
