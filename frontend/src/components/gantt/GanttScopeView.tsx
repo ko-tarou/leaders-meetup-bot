@@ -115,8 +115,8 @@ export function GanttScopeView({
             style={dropdownStyle}
           >
             <option value="detail">詳細 (全タスク)</option>
-            <option value="mid">中間 (WBS 中分類)</option>
-            <option value="top">最上位 (WBS トップ集約)</option>
+            <option value="mid">中間 (工程の中分類)</option>
+            <option value="top">最上位 (フェーズで集約)</option>
           </select>
         )}
         {scope === "team" && teams.length > 0 && (

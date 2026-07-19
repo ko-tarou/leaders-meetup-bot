@@ -103,7 +103,7 @@ export const ACTION_META: Record<
   gantt_tracker: {
     label: "ガントチャート",
     description:
-      "カンファレンス等の長期プロジェクトを WBS / チーム別ガントで管理します",
+      "カンファレンス等の長期プロジェクトを 工程 / チーム別ガントで管理します",
     icon: "📊",
   },
   app_management: {

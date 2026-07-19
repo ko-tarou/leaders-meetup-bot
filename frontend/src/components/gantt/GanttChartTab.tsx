@@ -89,7 +89,7 @@ function deriveGroupLabel(members: Task[], groupKey: string): string {
   });
   const first = prefixes[0];
   if (first && prefixes.every((p) => p === first)) return first;
-  return `WBS ${groupKey}`;
+  return `工程 ${groupKey}`;
 }
 
 /** グループの集計 (開始=最小/終了=最大/進捗=平均/状態=導出)。rollupTasks と同じ規約。 */
@@ -175,7 +175,7 @@ function rollupTasks(
         : "todo";
     const base =
       config.phases.find((p) => p.id === `F${major}`)?.label ??
-      (major === "その他" ? "その他" : `WBS ${major}`);
+      (major === "その他" ? "その他" : `工程 ${major}`);
     const first = members[0]?.wbs ?? major;
     const last = members[members.length - 1]?.wbs ?? major;
     const label =
@@ -609,7 +609,7 @@ export function GanttChartTab({
             状態/進捗/担当者/開始/終了 は右のスクロール領域へ移した。 */}
         <div style={{ flexShrink: 0, borderRight: `2px solid ${colors.borderStrong}` }}>
           <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
-            <span style={{ width: WBS_W, paddingLeft: 6 }}>WBS</span>
+            <span style={{ width: WBS_W, paddingLeft: 6 }}>工程</span>
             <span style={{ width: NAME_W }}>タスク</span>
           </div>
           {rows.map((r) =>
@@ -807,7 +807,7 @@ export function GanttChartTab({
       </div>
       <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 6 }}>
         {rollup
-          ? "抽象度ビュー: WBS で集約した表示専用ビューです。右上のドロップダウンで「詳細」に戻すと編集できます。"
+          ? "抽象度ビュー: 工程番号で集約した表示専用ビューです。右上のドロップダウンで「詳細」に戻すと編集できます。"
           : "バーをドラッグで期間ごと移動・両端ドラッグで開始/終了日を変更。行クリックで選択し、上の依存パネルで先行タスクを設定できます。"}
       </p>
     </div>

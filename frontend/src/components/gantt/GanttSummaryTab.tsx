@@ -103,7 +103,7 @@ export function GanttSummaryTab({ eventId }: { eventId: string }) {
         </tbody>
       </table>
       <p style={{ fontSize: 12, color: colors.textMuted, marginTop: 8 }}>
-        状態・期間・進捗は配下タスク（WBS で紐付け）からサーバが自動集計します。
+        状態・期間・進捗は配下タスク（工程番号で紐付け）からサーバが自動集計します。
       </p>
     </div>
   );
