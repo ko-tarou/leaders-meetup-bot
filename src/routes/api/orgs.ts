@@ -243,6 +243,9 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // ADR-0011: channel_router。新規参加メンバーを役割 (運営名簿) に応じた
     // チャンネルへ振り分ける。PR1 はルール表 + 手動同期 + ドライランまで。
     "channel_router",
+    // participant_broadcast: HackIT 参加者への一斉送信。連携済み Gmail から
+    // 件名/本文テンプレ + 宛先貼り付けで送信。preview (ドライラン) + confirm ゲート付き。
+    "participant_broadcast",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(

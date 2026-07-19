@@ -14,6 +14,7 @@ import { RosterPage } from "../roster/RosterPage";
 import { AppManagementTab } from "../../components/app-management/AppManagementTab";
 import { GanttScopeView } from "../../components/gantt/GanttScopeView";
 import { ChannelRouterMainTab } from "../../components/channel-router/ChannelRouterMainTab";
+import { ParticipantBroadcastMainTab } from "../../components/participant-broadcast/ParticipantBroadcastMainTab";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
 
@@ -98,6 +99,14 @@ export function ActionMainContent({
           eventId={eventId}
           action={action}
           onSaved={onChanged ?? (() => {})}
+        />
+      );
+    case "participant_broadcast":
+      return (
+        <ParticipantBroadcastMainTab
+          eventId={eventId}
+          action={action}
+          onChanged={onChanged ?? (() => {})}
         />
       );
     default:

@@ -39,7 +39,10 @@ export type EventActionType =
   | "gantt_tracker"
   // ADR-0011: チャンネル自動振り分け (HackIT)。新規参加メンバーを運営名簿の
   // 役割に応じたチャンネルへ振り分ける。PR1 はルール表 + ドライランまで。
-  | "channel_router";
+  | "channel_router"
+  // participant_broadcast: HackIT 参加者への一斉メール送信。連携済み Gmail から
+  // 件名/本文テンプレ + 宛先貼り付けで送る。preview (ドライラン) + confirm ゲート付き。
+  | "participant_broadcast";
 
 export type EventAction = {
   id: string;

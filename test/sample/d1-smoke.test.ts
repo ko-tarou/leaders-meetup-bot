@@ -21,10 +21,10 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は applications への roster_number 追加 (学籍番号/名列番号の分離)。
+    // 末尾は participant_broadcast (参加者一斉送信の送信ログ) テーブル追加。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0091_add_roster_number_to_applications");
+    expect(names[names.length - 1]).toBe("0092_participant_broadcast");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);

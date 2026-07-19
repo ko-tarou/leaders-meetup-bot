@@ -1330,3 +1330,34 @@ export const channelRouterMembers = sqliteTable(
     index("idx_channel_router_members_status").on(t.eventActionId, t.status),
   ],
 );
+
+// participant_broadcast: 参加者一斉送信 (migration 0092)。
+// HackIT 参加者全員へ「Slack 入って」「チーム名決めて」等の案内メールを
+// 連携済み Gmail (gmail_accounts) から一斉送信する。1 回の送信 = 1 batch。
+// (event_action_id, batch_id, recipient_email) UNIQUE で二重送信を物理的に防ぐ。
+// status = 'sent' | 'failed'。個人情報 (メール) はログ運用上必要な最小限のみ保持。
+export const broadcastSends = sqliteTable(
+  "broadcast_sends",
+  {
+    id: text("id").primaryKey(),
+    eventActionId: text("event_action_id")
+      .notNull()
+      .references(() => eventActions.id, { onDelete: "cascade" }),
+    batchId: text("batch_id").notNull(),
+    recipientEmail: text("recipient_email").notNull(),
+    recipientName: text("recipient_name").notNull().default(""),
+    subject: text("subject").notNull().default(""),
+    // 'sent' | 'failed'
+    status: text("status").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("broadcast_sends_batch_recipient_uniq").on(
+      t.eventActionId,
+      t.batchId,
+      t.recipientEmail,
+    ),
+    index("idx_broadcast_sends_action").on(t.eventActionId),
+  ],
+);

@@ -39,6 +39,8 @@ const ALL_ACTION_TYPES: EventActionType[] = [
   "gantt_tracker",
   // channel_router: 新規参加メンバーのチャンネル自動振り分け (ADR-0011)。
   "channel_router",
+  // participant_broadcast: 参加者への一斉メール送信 (連携済み Gmail 経由)。
+  "participant_broadcast",
 ];
 
 type Props = {
