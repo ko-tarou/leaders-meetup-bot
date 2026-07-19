@@ -332,7 +332,7 @@ export async function computeSyncDiff(
  * Map を作る。per-channel の conversations.info を M 回叩く N+1 を排除するための
  * もの。失敗時は空 Map を返し、呼び出し側は channelId をそのまま名前に使う。
  */
-async function buildChannelNameMap(
+export async function buildChannelNameMap(
   slack: SlackClient,
   maxPages?: number,
 ): Promise<{ map: Map<string, string>; pages: number }> {

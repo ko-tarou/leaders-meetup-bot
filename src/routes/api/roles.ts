@@ -47,6 +47,7 @@ import {
 } from "../../db/schema";
 import { createSlackClientForWorkspace } from "../../services/workspace";
 import {
+  buildChannelNameMap,
   computeSyncDiff,
   executeSync,
   readWorkspaceId,
@@ -1279,9 +1280,14 @@ rolesRouter.post(
 //   - POST channel-name-sync : 選択チャンネルを rename (冪等・dryRun 可)。
 //
 //   subrequest 予算 (Cloudflare Workers free plan = 50/invocation):
-//     - diff:  getChannelInfo が 1 binding = 1 subrequest。offset/limit で分割。
-//     - sync:  1 channel = getChannelInfo(1) + rename(1) = 2 subrequest。
-//              予算を超える手前で未処理分を deferred として返し、FE が再送する。
+//     - 現状名の解決は conversations.list を 1 回 (内部 cursor ページングで数回) 叩く
+//       buildChannelNameMap で channelId -> name を一括取得する。以前は binding ごとに
+//       conversations.info を叩いており (N 個の binding = N subrequest)、team1..30 の
+//       ような多数の binding で 50 上限を超えて "Too many subrequests" になっていた。
+//       list 一括化で N 回 -> 数回 (ページ数) に激減させ、以降 name 解決は 0 subrequest。
+//     - diff:  name 解決は map から (subrequest 0)。list ページ数 (<=20) のみ消費。
+//     - sync:  1 channel = rename(1) のみ (name 解決は map から)。予算を超える手前で
+//              未処理分を deferred として返し、FE が再送する。
 // ----------------------------------------------------------------------------
 
 /**
@@ -1378,11 +1384,18 @@ rolesRouter.get(
       targetCount.set(t, (targetCount.get(t) ?? 0) + 1);
     }
 
+    // 現状名の一括解決: conversations.list を 1 回 (内部で cursor ページング) 叩いて
+    // channelId -> name の Map を作る。以前は binding ごとに conversations.info を
+    // 叩いていたため binding 数だけ subrequest を消費し 50 上限を超えていた。
+    // list 一括化で subrequest を「ページ数 (<=20)」に固定し、以降の name 解決は 0。
+    const { map: nameMap } = await buildChannelNameMap(slack);
+
     const offset = Math.max(0, Number(c.req.query("offset") ?? 0) || 0);
-    // getChannelInfo = 1 subrequest。free plan 50 の手前で止める。
+    // name 解決は nameMap から引くだけ (subrequest 0) なので、1 リクエストで全
+    // binding を返せる。limit は後方互換のため残すが既定を大きく取る。
     const limit = Math.max(
       1,
-      Math.min(40, Number(c.req.query("limit") ?? 40) || 40),
+      Math.min(500, Number(c.req.query("limit") ?? 500) || 500),
     );
     const slice = bindings.slice(offset, offset + limit);
 
@@ -1396,8 +1409,10 @@ rolesRouter.get(
           "複数チャンネルが同じ名前になります。リネームは手動で確認してください",
         );
       }
-      const info = await slack.getChannelInfo(b.channelId);
-      if (!info.ok) {
+      // 現状名は list 由来の nameMap から引く (subrequest 0)。map に無い =
+      // bot 未参加 or archived で list に出ないチャンネル。rename 対象外として扱う。
+      const currentName = nameMap.get(b.channelId) ?? null;
+      if (currentName === null) {
         items.push({
           roleId: b.roleId,
           roleName: b.roleName,
@@ -1408,12 +1423,10 @@ rolesRouter.get(
           changed: norm.changed,
           collision,
           warnings,
-          error: typeof info.error === "string" ? info.error : "fetch_failed",
+          error: "not_found_in_list",
         });
         continue;
       }
-      const ch = info.channel as { name?: string } | undefined;
-      const currentName = typeof ch?.name === "string" ? ch.name : null;
       const needsRename =
         norm.name.length > 0 && !collision && currentName !== norm.name;
       items.push({
@@ -1486,6 +1499,12 @@ rolesRouter.post(
       (b) => requested === null || requested.has(b.channelId),
     );
 
+    // 現状名は conversations.list 1 回 (内部ページング) で一括取得し map から引く。
+    // 以前は channel ごとに conversations.info を叩いていたため rename と合わせて
+    // 1 channel = 2 subrequest 消費し、多数の channel で 50 上限を超えていた。
+    // list 一括化で name 解決は 0 subrequest になり、消費は rename(1)/channel のみ。
+    const { map: nameMap } = await buildChannelNameMap(slack, 8);
+
     type RenameResult = {
       channelId: string;
       roleName: string;
@@ -1499,9 +1518,10 @@ rolesRouter.post(
     let renamed = 0;
     let skipped = 0;
 
-    // subrequest 予算: getChannelInfo(1)+rename(1)=最大2/channel。free plan 50 の
-    // 手前で止める。dryRun は rename しないので 1/channel。
-    const BUDGET = 40;
+    // subrequest 予算: name 解決は map から (0)。実消費は rename(1)/channel のみ。
+    // list のページ (<=8) + rename 30 で 50 上限に余裕を持って収める。dryRun は
+    // rename しないので 0/channel だが、対称性のため予算チェックは残す。
+    const BUDGET = 30;
     let used = 0;
 
     for (let i = 0; i < targets.length; i++) {
@@ -1510,8 +1530,9 @@ rolesRouter.post(
       const to = norm.name;
       const collision = (targetCount.get(to) ?? 0) > 1;
 
-      // 予算チェック: この channel を処理すると溢れるなら残りを deferred へ。
-      const cost = dryRun ? 1 : 2;
+      // 予算チェック: この channel を rename すると溢れるなら残りを deferred へ。
+      // name 解決は map から引くだけなので dryRun / skip は予算を消費しない。
+      const cost = dryRun ? 0 : 1;
       if (used + cost > BUDGET) {
         for (let j = i; j < targets.length; j++) {
           deferred.push(targets[j].channelId);
@@ -1532,21 +1553,19 @@ rolesRouter.post(
         continue;
       }
 
-      const info = await slack.getChannelInfo(b.channelId);
-      used += 1;
-      if (!info.ok) {
+      // 現状名は list 由来の map から。無い = bot 未参加/archived で rename 不可。
+      const from = nameMap.get(b.channelId) ?? null;
+      if (from === null) {
         results.push({
           channelId: b.channelId,
           roleName: b.roleName,
           from: null,
           to,
           status: "error",
-          error: typeof info.error === "string" ? info.error : "fetch_failed",
+          error: "not_found_in_list",
         });
         continue;
       }
-      const ch = info.channel as { name?: string } | undefined;
-      const from = typeof ch?.name === "string" ? ch.name : null;
       if (from === to) {
         skipped += 1;
         results.push({

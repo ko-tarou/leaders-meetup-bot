@@ -38,17 +38,24 @@ function app() {
   return a;
 }
 
-/** getChannelInfo が返す現状名を channelId ごとに固定する。 */
+/**
+ * 現状名の一括解決を固定する。diff/sync は conversations.list (getChannelList)
+ * 由来の channelId -> name Map から現状名を引くので、per-channel の
+ * getChannelInfo ではなく getChannelList を stub する (subrequest 上限対策の一括化)。
+ * byChannel に無い channelId は list に出ない = bot 未参加/archived 相当。
+ */
 function stubChannelNames(byChannel: Record<string, string>) {
-  vi.spyOn(MockSlackClient.prototype, "getChannelInfo").mockImplementation(
-    // @ts-expect-error テスト用シグネチャ簡略化
-    async (channel: string) => {
-      const name = byChannel[channel];
-      return name === undefined
-        ? { ok: false, error: "channel_not_found" }
-        : { ok: true, channel: { id: channel, name } };
-    },
-  );
+  return vi
+    .spyOn(MockSlackClient.prototype, "getChannelList")
+    .mockImplementation(
+      // @ts-expect-error テスト用シグネチャ簡略化
+      async () => ({
+        ok: true,
+        channels: Object.entries(byChannel).map(([id, name]) => ({ id, name })),
+        pages: 1,
+        truncated: false,
+      }),
+    );
 }
 
 async function bindChannel(roleId: string, channelId: string) {
@@ -126,6 +133,41 @@ describe("GET channel-name-diff", () => {
     expect(c1.needsRename).toBe(false);
     expect(c2.needsRename).toBe(true);
     expect(c2.targetName).toBe("チーム2");
+  });
+
+  it("subrequest 上限対策: 現状名は conversations.list 1 回で一括解決し、binding ごとの conversations.info は叩かない", async () => {
+    const { event, action } = await setup();
+    // team1..30 相当の多数 binding。以前は info を 30 回叩き 50 上限を超えていた。
+    const N = 30;
+    const byChannel: Record<string, string> = {};
+    for (let i = 1; i <= N; i++) {
+      const role = await makeSlackRole(action.id, { name: `チーム${i}` });
+      const cid = `C${i}`;
+      await bindChannel(role.id, cid);
+      byChannel[cid] = `team-${i}`; // 全て旧名 → 全て needsRename
+    }
+    const listSpy = stubChannelNames(byChannel);
+    const infoSpy = vi.spyOn(MockSlackClient.prototype, "getChannelInfo");
+
+    const res = await app().request(
+      `/orgs/${event.id}/actions/${action.id}/channel-name-diff`,
+      {},
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      total: number;
+      items: Array<{ needsRename: boolean }>;
+      nextOffset: number | null;
+    };
+    // 30 binding を 1 リクエストで全件返す (offset ページング不要)。
+    expect(body.total).toBe(N);
+    expect(body.items.length).toBe(N);
+    expect(body.nextOffset).toBeNull();
+    expect(body.items.every((i) => i.needsRename)).toBe(true);
+    // 名前解決は list 1 回のみ。per-channel の info は 0 回。
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(listSpy.mock.calls.length).toBeLessThanOrEqual(1);
   });
 });
 
