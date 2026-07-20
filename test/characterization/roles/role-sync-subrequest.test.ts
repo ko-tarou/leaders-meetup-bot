@@ -175,6 +175,44 @@ describe("メンバー同期: subrequest 総数が構造的に 50 未満 (実 fe
     expect(Math.max(...perInvocationPeaks)).toBeLessThan(50);
   });
 
+  it("★非 paged (page 未指定) 経路でも 1 invocation は常に <50 subrequest (旧フロント/cron/直接呼び出しの overflow 根治)", async () => {
+    // 61ch 規模を模した 30ch × 5 memberページ + list 3ページ。
+    // 修正前は page を渡さない呼び出し (キャッシュされた旧フロントの `?offset=` 無し
+    // GET・auto-invite cron・直接 API) が budget を無視して全 channel を 1 invocation で
+    // 舐め、1 + 3 + 30×5 = 154 subrequest → "Too many subrequests" (HTTP 400) を出していた。
+    const channelIds = Array.from({ length: 30 }, (_, i) => `C${i}`);
+    const members = ["U0", "U1", "U2", "U3", "U4"];
+    const action = await seed(channelIds, members);
+
+    restoreFetch = installFetchStub({
+      channelListPages: 3,
+      channelIds,
+      memberPagesPerChannel: 5,
+      membersPerChannel: members,
+    });
+
+    fetchCallsThisInvocation = 0;
+    // page を一切渡さない (= 従来の非 paged 呼び出し)。
+    const res = await computeSyncDiff(makeEnv(), action);
+
+    // ★核心: 非 paged でも 1 invocation の subrequest 総数が上限 (50) 未満かつ budget 以下。
+    expect(fetchCallsThisInvocation).toBeLessThan(50);
+    expect(fetchCallsThisInvocation).toBeLessThanOrEqual(SYNC_SUBREQUEST_BUDGET);
+    // budget 内で処理できた channel だけを partial で返す (残りは omit)。
+    // 30ch 全ては 1 invocation に収まらないので厳密な部分集合になる。
+    expect(res.channels.length).toBeGreaterThan(0);
+    expect(res.channels.length).toBeLessThan(30);
+    // 返った channel は不完全 members による誤 kick を出さない (差分なし設定)。
+    for (const ch of res.channels) {
+      expect(ch.error).toBeUndefined();
+      expect(ch.toInvite).toEqual([]);
+      expect(ch.toKick).toEqual([]);
+    }
+    // 非 paged の返却 shape は従来通り total/nextOffset を付けない (後方互換)。
+    expect(res.total).toBeUndefined();
+    expect(res.nextOffset).toBeUndefined();
+  });
+
   it("フル予算でも取り切れない巨大 channel は error 扱い (kick 事故防止) で budget も超えない", async () => {
     const channelIds = ["C0", "CBIG", "C1"];
     const members = ["U0", "U1"];

@@ -264,21 +264,23 @@ export async function computeSyncDiff(
   let processed = 0;
   for (; idx < hardEnd; idx++) {
     const remaining = budget - used;
-    // paged 実行時のみ subrequest 予算で早期打ち切り。予算が尽きたら以降を次
-    // リクエストへ回し nextOffset で継続させる。最低 1 チャンネルは必ず処理して
-    // 前進を保証する (無限ループ防止)。
-    // 非 paged (auto-invite 等の従来経路) は全チャンネルを従来どおり処理する
-    // (振る舞い不変。1 invocation の subrequest 制御はその呼び出し側の責務)。
-    if (paged && processed >= 1 && remaining < 1) break;
+    // subrequest 予算で早期打ち切り。予算が尽きたら以降は処理しない。paged なら
+    // nextOffset で次リクエストへ継続させ、非 paged なら partial (残りを omit) で返す。
+    // 最低 1 チャンネルは必ず処理して前進を保証する (無限ループ防止)。
+    //
+    // ★根治ポイント: 以前は `paged` のときだけ budget を効かせていたため、page を
+    //   渡さない経路 (キャッシュされた旧フロントの `?offset=` 無し呼び出し・auto-invite
+    //   cron・任意の直接 API 呼び出し) が 61ch 規模の workspace で 1 invocation あたり
+    //   50 subrequest を超え "Too many subrequests" (HTTP 400) を出していた。budget を
+    //   paged/非 paged を問わず常に効かせ、どの経路でも上限を構造的に超えないようにする。
+    if (processed >= 1 && remaining < 1) break;
 
     const channelId = allTargets[idx];
     const expected = expectedByChannel[channelId] ?? new Set<string>();
     const channelName = nameMap.get(channelId) ?? channelId;
 
-    // paged 時のみ「残予算」で members ページ数を絞る。非 paged は従来上限のまま。
-    const maxPages = paged
-      ? Math.max(1, Math.min(MEMBERS_MAX_PAGES, remaining))
-      : MEMBERS_MAX_PAGES;
+    // 「残予算」で members ページ数を絞る (mutate 用でなく次チャンネル用に予算を残す)。
+    const maxPages = Math.max(1, Math.min(MEMBERS_MAX_PAGES, remaining));
     const cur = await slack.listAllChannelMembers(channelId, { maxPages });
     used += cur.pages ?? 1;
     processed += 1;
@@ -303,7 +305,9 @@ export async function computeSyncDiff(
       // budget では) 同じ channel を延々 retry して無限ループになるため、他に 1 件でも
       // 処理済み (processed > 1) の時だけ defer する。先頭 channel は通常フル予算が
       // 取れるので、ここに落ちるのは病的に小さい budget の時だけ (その場合は error)。
-      if (paged && maxPages < MEMBERS_MAX_PAGES && processed > 1) break;
+      // 非 paged でも同じく break (残りを omit した partial で返す) ことで、予算不足の
+      // チャンネルを不完全な members で誤って diff (= 誤 kick) しないようにする。
+      if (maxPages < MEMBERS_MAX_PAGES && processed > 1) break;
       // フル予算でも取り切れない巨大 channel (4000+ 名) は kick 事故防止のため error。
       channels.push({
         channelId,
