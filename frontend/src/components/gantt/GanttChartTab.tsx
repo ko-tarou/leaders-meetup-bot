@@ -642,10 +642,12 @@ export function GanttChartTab({
         <div style={{ overflowX: "auto", flexGrow: 1 }} data-testid="gantt-timeline">
           <div style={{ display: "flex", width: FIELDS_W + FIELDS_PAD_LEFT + chartW }}>
             {/* スクロールする左端フィールド群 (旧・左固定カラムから移設)。
-                paddingLeft で固定列との境目に少し余白を作る (ヘッダ/ボディ共通の
-                コンテナに付けるので桁ズレしない)。 */}
-            <div style={{ flexShrink: 0, borderRight: `1px solid ${colors.border}`, paddingLeft: FIELDS_PAD_LEFT }}>
-              <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}` }}>
+                固定列との境目の余白 (FIELDS_PAD_LEFT) は各行 (ヘッダ/ボディ) 自身の
+                paddingLeft として持たせる。こうすると余白部分にも行の背景色 (ヘッダ=surface,
+                ボディ=ゼブラ/選択色) が乗り、素通しの空白にならず自然な余白になる。
+                全行に同じ値を付けるので桁ズレしない。 */}
+            <div style={{ flexShrink: 0, borderRight: `1px solid ${colors.border}` }}>
+              <div style={{ display: "flex", height: HEADER_H, background: colors.surface, fontSize: 12, color: colors.textSecondary, alignItems: "center", borderBottom: `1px solid ${colors.border}`, paddingLeft: FIELDS_PAD_LEFT, boxSizing: "border-box" }}>
                 <span style={{ width: STATUS_W }}>状態</span>
                 <span style={{ width: PROGRESS_W }}>進捗%</span>
                 <span style={{ width: ASSIGNEE_W }}>担当者</span>
@@ -919,6 +921,9 @@ function GroupFieldsRow({ row }: { row: Extract<Row, { kind: "group" }> }) {
         background: colors.surface,
         boxSizing: "border-box",
         color: colors.textSecondary,
+        // 固定列との境目の余白。行の背景 (surface) が乗った状態で content を右へ寄せ、
+        // ヘッダ/タスク行と桁を揃える。
+        paddingLeft: FIELDS_PAD_LEFT,
       }}
     >
       <span style={{ width: STATUS_W }}>{STATUS_LABEL[row.agg.status] ?? row.agg.status}</span>
@@ -993,6 +998,9 @@ function TaskFieldsRow({
         background: selected ? colors.primarySubtle : colors.background,
         cursor: editable ? "pointer" : "default",
         boxSizing: "border-box",
+        // 固定列との境目の余白。行の背景 (選択色/ゼブラ) が乗った状態で content を
+        // 右へ寄せ、ヘッダと桁を揃える (素通しの空白にしない)。
+        paddingLeft: FIELDS_PAD_LEFT,
       }}
     >
       <span style={{ width: STATUS_W }}>
