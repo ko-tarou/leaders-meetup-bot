@@ -67,19 +67,16 @@ ganttRouter.get("/gantt/:eventId/monthly", async (c) => {
 ganttRouter.get("/gantt/:eventId/dependencies", async (c) => {
   const db = drizzle(c.env.DB);
   const eventId = c.req.param("eventId");
-  const taskRows = await db
-    .select({ id: tasks.id })
-    .from(tasks)
-    .where(eq(tasks.eventId, eventId))
-    .all();
-  if (taskRows.length === 0) return c.json([]);
+  // イベント配下 task を IN (SELECT ...) の相関サブクエリで絞る。
+  // task id を JS 配列にして inArray に渡すと task 件数ぶんの bind パラメータが
+  // 生成され、D1 の「1 クエリ 100 bind param」上限を超えて 500 になる（>100 task 時）。
   const deps = await db
     .select()
     .from(taskDependencies)
     .where(
       inArray(
         taskDependencies.taskId,
-        taskRows.map((t) => t.id),
+        db.select({ id: tasks.id }).from(tasks).where(eq(tasks.eventId, eventId)),
       ),
     )
     .all();
@@ -130,13 +127,16 @@ ganttRouter.post("/gantt/:eventId/dependencies", async (c) => {
   if (dup) return c.json({ error: "dependency already exists" }, 409);
 
   // 循環チェック（イベント内の既存辺 + 追加予定の辺）
-  const eventTaskIds = (
-    await db.select({ id: tasks.id }).from(tasks).where(eq(tasks.eventId, eventId)).all()
-  ).map((t) => t.id);
+  // task id 配列でなくサブクエリで絞る（D1 の 100 bind param 上限回避）。
   const existing = await db
     .select()
     .from(taskDependencies)
-    .where(inArray(taskDependencies.taskId, eventTaskIds))
+    .where(
+      inArray(
+        taskDependencies.taskId,
+        db.select({ id: tasks.id }).from(tasks).where(eq(tasks.eventId, eventId)),
+      ),
+    )
     .all();
   const edges: [string, string][] = [
     ...existing.map((d): [string, string] => [d.taskId, d.dependsOnTaskId]),
