@@ -118,6 +118,12 @@ export const ACTION_META: Record<
       "新しく参加したメンバーを役割 (運営名簿) に応じたチャンネルへ振り分けます。まずはドライランで確認",
     icon: "🔀",
   },
+  participant_broadcast: {
+    label: "参加者一斉送信",
+    description:
+      "連携済み Gmail から参加者全員へ案内メールを一斉送信します。まずはプレビューで宛先と本文を確認",
+    icon: "📧",
+  },
 };
 
 // 共通タブ (イベント直下)

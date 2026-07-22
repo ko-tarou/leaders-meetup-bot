@@ -35,6 +35,7 @@ import { eventsTimetableRouter } from "./api/events-timetable";
 // ADR-0009: モジュール（src/modules/*）の import は index 経由・この api.ts のみで行う。
 import { ganttRouter } from "../modules/gantt";
 import { channelRouterRouter } from "./api/channel-router";
+import { broadcastRouter } from "./api/broadcast";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -186,5 +187,6 @@ api.route("/", ganttRouter);
 // ADR-0011 channel_router: チャンネル自動振り分け (ルール表 / 手動同期 / ドライラン)。
 // /api/orgs/:eventId/actions/:actionId/channel-router/* で adminAuth に保護される。
 api.route("/", channelRouterRouter);
+api.route("/", broadcastRouter);
 
 export { api };

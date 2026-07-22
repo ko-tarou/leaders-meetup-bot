@@ -20,6 +20,7 @@ import { gantt } from "./gantt";
 import { applications } from "./applications";
 import { sponsor } from "./sponsor";
 import { workspaces } from "./workspaces";
+import { broadcast } from "./broadcast";
 
 export {
   APIError,
@@ -48,4 +49,5 @@ export const api = {
   drive,
   appSettings,
   feedback,
+  broadcast,
 };
