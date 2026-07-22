@@ -31,21 +31,18 @@ tasksRouter.get("/tasks", async (c) => {
   if (parentTaskId === "null") conditions.push(isNull(tasks.parentTaskId));
   else if (parentTaskId) conditions.push(eq(tasks.parentTaskId, parentTaskId));
 
-  // assigneeSlackId は task_assignees サブクエリで絞り込み（IN (SELECT ...)）
+  // assigneeSlackId は task_assignees サブクエリで絞り込み（IN (SELECT ...)）。
+  // task id を JS 配列にして inArray に渡すと該当件数ぶんの bind パラメータが
+  // 生成され D1 の「1 クエリ 100 bind param」上限を超えて 500 になり得るため、
+  // 相関サブクエリ（bind param 1 個）で絞る。
   if (assigneeSlackId) {
-    const assigneeTaskIds = await db
-      .select({ taskId: taskAssignees.taskId })
-      .from(taskAssignees)
-      .where(eq(taskAssignees.slackUserId, assigneeSlackId))
-      .all();
-    if (assigneeTaskIds.length === 0) {
-      // 該当者がアサインされた task が無ければ即空配列
-      return c.json([]);
-    }
     conditions.push(
       inArray(
         tasks.id,
-        assigneeTaskIds.map((r) => r.taskId),
+        db
+          .select({ taskId: taskAssignees.taskId })
+          .from(taskAssignees)
+          .where(eq(taskAssignees.slackUserId, assigneeSlackId)),
       ),
     );
   }
@@ -59,13 +56,20 @@ tasksRouter.get("/tasks", async (c) => {
   // updatedAt 降順（既存挙動維持）
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  // assignees を 1 クエリで batch 取得 → task ごとにグルーピング
+  // assignees を 1 クエリで batch 取得 → task ごとにグルーピング。
+  // task id 配列を inArray に渡すと task 件数ぶんの bind パラメータになり
+  // D1 の 100 bind param 上限を超えて 500 になるため、同じ絞り込み条件を
+  // サブクエリに畳んで IN (SELECT ...) で取得する（bind param が件数に依存しない）。
   if (rows.length === 0) return c.json([]);
-  const taskIds = rows.map((t) => t.id);
   const allAssignees = await db
     .select()
     .from(taskAssignees)
-    .where(inArray(taskAssignees.taskId, taskIds))
+    .where(
+      inArray(
+        taskAssignees.taskId,
+        db.select({ id: tasks.id }).from(tasks).where(and(...conditions)),
+      ),
+    )
     .all();
   const assigneesByTaskId = new Map<string, typeof allAssignees>();
   for (const a of allAssignees) {
