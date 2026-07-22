@@ -44,7 +44,7 @@ export function GanttAddTaskForm({
     placeholder?: string;
   }[] = [
     { label: "タスク名 *", value: title, set: setTitle, testid: "gantt-add-title", placeholder: "例: 会場下見" },
-    { label: "WBS", value: wbs, set: setWbs, testid: "gantt-add-wbs", placeholder: "例: 1.5" },
+    { label: "工程番号", value: wbs, set: setWbs, testid: "gantt-add-wbs", placeholder: "例: 1.5" },
     { label: "チーム", value: team, set: setTeam, testid: "gantt-add-team", placeholder: "例: チームA" },
     { label: "担当者", value: assignee, set: setAssignee, testid: "gantt-add-assignee", placeholder: "例: 山田" },
     { label: "開始", value: start, set: setStart, testid: "gantt-add-start", type: "date" },
