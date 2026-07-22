@@ -81,15 +81,26 @@ function parentWbsKey(wbs: string | null): string | null {
   return seg.slice(0, -1).join(".");
 }
 
-/** グループ見出し: 子タイトルが "公式LP: ..." のように共通接頭辞+コロンを持てばそれを使う。 */
-function deriveGroupLabel(members: Task[], groupKey: string): string {
+/**
+ * グループ見出し: 子タイトルが "公式LP: ..." のように共通接頭辞+コロンを持てばそれを使う。
+ * 揃わない時は WBS 番号のような無意味な既定 (旧 "工程 4.2") を出さず、
+ * フェーズ名 -> チーム名 の順で意味の分かる見出しにフォールバックする。
+ */
+export function deriveGroupLabel(
+  members: Task[],
+  groupKey: string,
+  config: GanttConfig,
+): string {
   const prefixes = members.map((m) => {
     const idx = m.title.search(/[:：]/);
     return idx > 0 ? m.title.slice(0, idx).trim() : null;
   });
   const first = prefixes[0];
   if (first && prefixes.every((p) => p === first)) return first;
-  return `工程 ${groupKey}`;
+  const major = groupKey.split(".")[0];
+  const phaseLabel = config.phases.find((p) => p.id === `F${major}`)?.label;
+  if (phaseLabel) return phaseLabel;
+  return members[0]?.team ?? "未分類";
 }
 
 /** グループの集計 (開始=最小/終了=最大/進捗=平均/状態=導出)。rollupTasks と同じ規約。 */
@@ -399,7 +410,7 @@ export function GanttChartTab({
               kind: "group",
               key: gk,
               wbs: pk,
-              label: deriveGroupLabel(ordered, pk),
+              label: deriveGroupLabel(ordered, pk, config),
               team,
               count: ordered.length,
               agg: aggregate(ordered),
