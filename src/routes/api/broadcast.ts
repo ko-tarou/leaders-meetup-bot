@@ -19,6 +19,8 @@ import {
   previewBroadcast,
   sendBroadcast,
   listBroadcastLogs,
+  loadParticipantKitSource,
+  type ParticipantSource,
 } from "../../services/broadcast";
 
 export const broadcastRouter = new Hono<{ Bindings: Env }>();
@@ -42,30 +44,63 @@ async function loadAction(
   return action;
 }
 
+/**
+ * 宛先ソース。
+ *   - "text" (既定): body.recipientsText を貼り付け宛先として使う (従来挙動)。
+ *   - "participants": 参加者 (participation_forms) の学籍番号から KIT 在学生メール
+ *     `c<学籍番号>@st.kanazawa-it.ac.jp` を自動生成する。
+ */
+type RecipientSource = "text" | "participants";
+
 type PreviewBody = {
+  source?: RecipientSource;
   recipientsText?: string;
   subject?: string;
   body?: string;
   skipAlreadySent?: boolean;
 };
 
+/**
+ * source に応じて宛先テキストを解決する。participants の場合は
+ * participation_forms から KIT メールを生成し、除外情報も返す。
+ */
+async function resolveRecipients(
+  env: Env,
+  eventId: string,
+  source: RecipientSource,
+  fallbackText: string,
+): Promise<{ recipientsText: string; participants: ParticipantSource | null }> {
+  if (source === "participants") {
+    const src = await loadParticipantKitSource(env, eventId);
+    return { recipientsText: src.recipientsText, participants: src };
+  }
+  return { recipientsText: fallbackText, participants: null };
+}
+
 broadcastRouter.post(`${BASE}/preview`, async (c) => {
-  const action = await loadAction(
-    c.env,
-    c.req.param("eventId"),
-    c.req.param("actionId"),
-  );
+  const eventId = c.req.param("eventId");
+  const action = await loadAction(c.env, eventId, c.req.param("actionId"));
   if (!action) return c.json({ error: "action not found" }, 404);
 
   const body = await c.req.json<PreviewBody>().catch(() => ({}) as PreviewBody);
+  const source: RecipientSource =
+    body.source === "participants" ? "participants" : "text";
+  const resolved = await resolveRecipients(
+    c.env,
+    eventId,
+    source,
+    body.recipientsText ?? "",
+  );
+
   const preview = await previewBroadcast(c.env, {
     eventActionId: action.id,
-    recipientsText: body.recipientsText ?? "",
+    recipientsText: resolved.recipientsText,
     subject: body.subject ?? "",
     body: body.body ?? "",
     skipAlreadySent: body.skipAlreadySent ?? true,
   });
-  return c.json(preview);
+  // participants ソースのときは学籍番号ソースのメタ (総数・除外) も返す。
+  return c.json({ ...preview, source, participants: resolved.participants });
 });
 
 type SendBody = PreviewBody & {
@@ -74,11 +109,8 @@ type SendBody = PreviewBody & {
 };
 
 broadcastRouter.post(`${BASE}/send`, async (c) => {
-  const action = await loadAction(
-    c.env,
-    c.req.param("eventId"),
-    c.req.param("actionId"),
-  );
+  const eventId = c.req.param("eventId");
+  const action = await loadAction(c.env, eventId, c.req.param("actionId"));
   if (!action) return c.json({ error: "action not found" }, 404);
 
   const body = await c.req.json<SendBody>().catch(() => ({}) as SendBody);
@@ -94,11 +126,20 @@ broadcastRouter.post(`${BASE}/send`, async (c) => {
     return c.json({ error: "subject and body are required" }, 400);
   }
 
+  const source: RecipientSource =
+    body.source === "participants" ? "participants" : "text";
+  const resolved = await resolveRecipients(
+    c.env,
+    eventId,
+    source,
+    body.recipientsText ?? "",
+  );
+
   try {
     const result = await sendBroadcast(c.env, {
       eventActionId: action.id,
       gmailAccountId: body.gmailAccountId,
-      recipientsText: body.recipientsText ?? "",
+      recipientsText: resolved.recipientsText,
       subject: body.subject,
       body: body.body,
       skipAlreadySent: body.skipAlreadySent ?? true,
