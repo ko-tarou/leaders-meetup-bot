@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import type { Env } from "../../types/env";
 import { eventActions } from "../../db/schema";
+import { mintPublicToken } from "../../domain/public-session";
 
 /**
  * 公開管理 (Sprint X / public-management):
@@ -15,9 +16,12 @@ import { eventActions } from "../../db/schema";
  *   - パスワード固定値 `hackit` を入力すれば誰でも admin UI にアクセス可能。
  *   - permission ("view" | "edit") で mutation の可否を切り替える。
  *
- * セキュリティ警告 (POC):
- *   - パスワード `hackit` は hardcode の固定値。本番運用前に強化が必要。
- *   - `/api/public-auth` 経由で ADMIN_TOKEN を直接配布する。POC 用と割り切る。
+ * セキュリティ (認可根治後):
+ *   - `/api/public-auth` は ADMIN_TOKEN を配布しない。代わりに
+ *     {permission, eventId, actionId, exp} を署名した公開セッショントークンを返す。
+ *     view セッションの mutation はサーバー側 (adminAuth) が 403 で拒否する。
+ *   - パスワード `hackit` は依然 hardcode の固定値。ここは別途強化が必要
+ *     (レート制限 / URL ごとの個別パスワード等)。
  */
 
 export const publicTokensRouter = new Hono<{ Bindings: Env }>();
@@ -249,10 +253,20 @@ publicTokensRouter.post("/public-auth", async (c) => {
     return c.json({ error: "ADMIN_TOKEN not configured" }, 500);
   }
 
+  // 認可根治: 生の ADMIN_TOKEN は渡さない。permission/event/action をスコープした
+  // 署名トークンを発行し、view セッションの mutation はサーバー側で 403 拒否する。
+  const sessionToken = await mintPublicToken(adminToken, {
+    p: matched.permission,
+    e: matched.eventId,
+    a: matched.actionId,
+  });
+
   return c.json({
     eventId: matched.eventId,
     actionId: matched.actionId,
     permission: matched.permission,
-    adminToken,
+    // フロントは従来どおり x-admin-token としてこの値を送る。中身は
+    // ADMIN_TOKEN ではなくスコープ付き公開セッショントークン。
+    adminToken: sessionToken,
   });
 });

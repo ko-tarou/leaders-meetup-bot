@@ -38,6 +38,10 @@ vi.mock("../../../src/services/slack-api", () => ({
 import { api } from "../../../src/routes/api";
 import { makeEnv } from "../../helpers/env";
 import { makeEvent } from "../../helpers/factory";
+import {
+  mintPublicToken,
+  PUBLIC_TOKEN_PREFIX,
+} from "../../../src/domain/public-session";
 
 const TOKEN = "test-admin-token"; // makeEnv() の ADMIN_TOKEN と一致
 const env = makeEnv();
@@ -314,6 +318,106 @@ describe("境界: 公開 prefix の startsWith 前方一致の癖 (現状固定)
       headers: { "x-admin-token": TOKEN },
     });
     expect(res.status).toBe(404);
+  });
+});
+
+// ===========================================================================
+// 4.5 公開セッショントークン (認可根治): view は読み取り専用・edit は書込可。
+//     以前は view にも生 ADMIN_TOKEN が渡り、サーバー側で mutation を弾けて
+//     いなかった (フロントの disabled のみ)。ここで本丸 (サーバー側 403) を固定。
+// ===========================================================================
+describe("公開セッショントークン: view は 403 / edit は通過 (認可根治)", () => {
+  it("view トークン: GET は通過する (adminAuth を突破し配下へ)", async () => {
+    const viewToken = await mintPublicToken(TOKEN, {
+      p: "view",
+      e: "some-event",
+      a: "some-action",
+    });
+    const res = await req("/api/orgs", {
+      headers: { "x-admin-token": viewToken },
+    });
+    // 読み取りは許可 = 401 でも 403 でもない (配下ハンドラが応答)。
+    expect(res.status).toBe(200);
+    expect(Array.isArray(await res.json())).toBe(true);
+  });
+
+  it("view トークン: POST (mutation) は 403 で拒否される (本丸)", async () => {
+    const viewToken = await mintPublicToken(TOKEN, {
+      p: "view",
+      e: "some-event",
+      a: "some-action",
+    });
+    const res = await req("/api/orgs", {
+      method: "POST",
+      headers: {
+        "x-admin-token": viewToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "x", type: "meetup" }),
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "forbidden: read-only (view) session cannot mutate",
+    });
+  });
+
+  it("view トークン: DELETE も 403 で拒否される", async () => {
+    const viewToken = await mintPublicToken(TOKEN, {
+      p: "view",
+      e: "some-event",
+      a: "some-action",
+    });
+    const res = await req("/api/orgs/some-id", {
+      method: "DELETE",
+      headers: { "x-admin-token": viewToken },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("edit トークン: POST は 403/401 にならず配下へ到達する (書込許可)", async () => {
+    const editToken = await mintPublicToken(TOKEN, {
+      p: "edit",
+      e: "some-event",
+      a: "some-action",
+    });
+    const res = await req("/api/orgs", {
+      method: "POST",
+      headers: {
+        "x-admin-token": editToken,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    // adminAuth は通過する。配下バリデーション (400) 等はあっても 403/401 でない。
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(401);
+  });
+
+  it("改竄トークン (署名不一致) は 401 unauthorized", async () => {
+    const viewToken = await mintPublicToken(TOKEN, {
+      p: "view",
+      e: "some-event",
+      a: "some-action",
+    });
+    const tampered = viewToken.slice(0, -2) + "00";
+    const res = await req("/api/orgs", {
+      headers: { "x-admin-token": tampered },
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+  });
+
+  it("別 secret で署名したトークンは 401 (ADMIN_TOKEN を鍵に検証)", async () => {
+    const foreign = await mintPublicToken("some-other-secret", {
+      p: "edit",
+      e: "some-event",
+      a: "some-action",
+    });
+    expect(foreign.startsWith(PUBLIC_TOKEN_PREFIX)).toBe(true);
+    const res = await req("/api/orgs", {
+      headers: { "x-admin-token": foreign },
+    });
+    expect(res.status).toBe(401);
   });
 });
 
