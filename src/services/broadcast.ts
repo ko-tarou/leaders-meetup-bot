@@ -17,10 +17,62 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, desc, eq } from "drizzle-orm";
 import type { Env } from "../types/env";
-import { broadcastSends } from "../db/schema";
+import { broadcastSends, participationForms } from "../db/schema";
 import { renderTemplate } from "../domain/email/template";
 import { parseRecipients, type Recipient } from "../domain/broadcast/recipients";
+import {
+  buildKitRecipients,
+  type SkippedParticipant,
+} from "../domain/broadcast/kit";
 import { sendGmailEmail, GmailSendError } from "./gmail-send";
+
+/**
+ * 参加者 (participation_forms) の学籍番号から KIT 在学生メールの宛先ソースを作る。
+ *
+ * 宛先ソースを「差し込める」形にするための participants ソース実装。
+ * event 単位で status='submitted' の参加届を引き、学籍番号 -> KIT メールへ変換する。
+ * 学籍番号が無い/不正な参加者は skipped に回す (実送信対象に含めない)。
+ *
+ * I/O (D1 参照) はここに閉じ、変換は pure domain (domain/broadcast/kit) に委譲する。
+ */
+export type ParticipantSource = {
+  /** 既存 preview/send に渡す宛先テキスト (`表示名 <email>` 行)。 */
+  recipientsText: string;
+  /** 対象イベントの提出済み参加者総数。 */
+  participantTotal: number;
+  /** KIT メールを生成できた参加者数 (重複除去前)。 */
+  withEmail: number;
+  /** 学籍番号が無い/不正で除外した参加者。 */
+  skipped: SkippedParticipant[];
+};
+
+export async function loadParticipantKitSource(
+  env: Env,
+  eventId: string,
+): Promise<ParticipantSource> {
+  const db = drizzle(env.DB);
+  const rows = await db
+    .select({
+      studentId: participationForms.studentId,
+      name: participationForms.name,
+    })
+    .from(participationForms)
+    .where(
+      and(
+        eq(participationForms.eventId, eventId),
+        eq(participationForms.status, "submitted"),
+      ),
+    )
+    .all();
+
+  const built = buildKitRecipients(rows);
+  return {
+    recipientsText: built.recipientsText,
+    participantTotal: rows.length,
+    withEmail: built.emails.length,
+    skipped: built.skipped,
+  };
+}
 
 export type BroadcastPreview = {
   /** 送信対象 (invalid / duplicate 除外後) の宛先数。 */
