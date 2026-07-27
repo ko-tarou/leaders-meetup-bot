@@ -54,6 +54,23 @@ export function createReminderBlocks(
   ];
 }
 
+// 定足数割れで開催を見送る際の中止メッセージ。温かく・責めず・前向きな文面。
+// scheduleRemindersForWinner が「最多得票数 < min_votes」のとき投稿する。
+export function createPollCancelledBlocks(
+  meetingName: string,
+  customTemplate?: string | null,
+): Block[] {
+  if (customTemplate && customTemplate.trim().length > 0) {
+    return [mrkdwnSection(customTemplate)];
+  }
+  return [
+    mrkdwnSection(
+      `*${meetingName}* は、今回は参加できる方が集まらなかったため、開催を見送ることになりました :bow:\n` +
+        `また次回あらためて日程を調整しますので、その際はぜひお気軽にご参加ください〜！ :raised_hands:`,
+    ),
+  ];
+}
+
 // Sprint 23 PR2: 出席確認 (attendance_check) 用 blocks。
 // 個別の回答は ephemeral 応答でのみ本人に返す。チャンネルには件数のみ。
 export function createAttendancePollBlocks(

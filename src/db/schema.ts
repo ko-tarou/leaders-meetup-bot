@@ -569,6 +569,10 @@ export const autoSchedules = sqliteTable("auto_schedules", {
   // 新形式: トリガー型リマインダー配列（JSON文字列）
   // 例: [{"trigger":{"type":"before_event","daysBefore":3},"time":"09:00","message":"..."}]
   reminders: text("reminders").notNull().default("[]"),
+  // 開催に必要な最少得票数（定足数）。投票締切時の最多得票数がこれ未満なら
+  // winner リマインダ登録を skip し、中止メッセージを投稿する。0 なら常に開催。
+  // migration 0093 で追加。既存行は 3 にバックフィル。
+  minVotes: integer("min_votes").notNull().default(3),
   // 有効/無効
   enabled: integer("enabled").notNull().default(1),
   // 自動応答 ON/OFF

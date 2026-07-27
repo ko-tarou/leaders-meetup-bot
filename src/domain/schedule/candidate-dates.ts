@@ -79,6 +79,8 @@ export type ScheduleRow = {
   messageTemplate: string | null;
   reminderMessageTemplate: string | null;
   reminders: string;
+  // 開催に必要な最少得票数（定足数）。締切時の最多得票数がこれ未満なら開催を見送る。
+  minVotes: number;
   enabled: number;
   createdAt: string;
 };
