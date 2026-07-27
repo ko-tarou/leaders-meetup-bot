@@ -36,6 +36,7 @@ import { eventsTimetableRouter } from "./api/events-timetable";
 import { ganttRouter } from "../modules/gantt";
 import { channelRouterRouter } from "./api/channel-router";
 import { broadcastRouter } from "./api/broadcast";
+import { documentsRouter } from "./api/documents";
 
 const api = new Hono<{ Bindings: Env }>();
 
@@ -188,5 +189,8 @@ api.route("/", ganttRouter);
 // /api/orgs/:eventId/actions/:actionId/channel-router/* で adminAuth に保護される。
 api.route("/", channelRouterRouter);
 api.route("/", broadcastRouter);
+// document_generation: ドキュメント生成 (名簿生成)。参加届 × ロール割当から
+// 名簿を都度算出して返す (/orgs/:eventId/actions/:actionId/document/roster)。
+api.route("/", documentsRouter);
 
 export { api };

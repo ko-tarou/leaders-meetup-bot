@@ -246,6 +246,9 @@ orgsRouter.post("/orgs/:eventId/actions", async (c) => {
     // participant_broadcast: HackIT 参加者への一斉送信。連携済み Gmail から
     // 件名/本文テンプレ + 宛先貼り付けで送信。preview (ドライラン) + confirm ゲート付き。
     "participant_broadcast",
+    // document_generation: ドキュメント生成 (名簿生成)。参加届 × role_management の
+    // ロール割当から名簿を都度算出する (保存しないので参加届/割当の変化に自動追従)。
+    "document_generation",
   ];
   if (!body.actionType || !VALID_TYPES.includes(body.actionType)) {
     return c.json(
