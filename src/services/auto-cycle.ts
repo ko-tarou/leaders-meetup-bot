@@ -3,6 +3,7 @@ import { eq, and, like, inArray } from "drizzle-orm";
 import { autoSchedules, meetings, polls, pollOptions, pollVotes } from "../db/schema";
 import type { SlackClient } from "./slack-api";
 import { createPoll, closePoll } from "./poll";
+import { createPollCancelledBlocks } from "./slack-blocks";
 import { insertReminderJob } from "./scheduler";
 import {
   loadReminders,
@@ -53,6 +54,10 @@ export {
   generateCandidateDatesWithOffset,
   generateCandidateDatesForFrequency,
 };
+
+// 開催に必要な最少得票数のフォールバック。schedule.min_votes は NOT NULL
+// DEFAULT 3 なので通常はそちらが使われ、旧経路・欠損時のみこの値になる。
+const DEFAULT_MIN_VOTES = 3;
 
 /**
  * 冪等用の dedup スコープキー。
@@ -244,14 +249,19 @@ async function autoClosePoll(
     }
   }
 
-  await scheduleRemindersForWinner(d1, db, meeting, schedule, reminders, todayStr);
+  await scheduleRemindersForWinner(d1, db, slackClient, meeting, schedule, reminders, todayStr);
 }
 
-/** 最多得票日に対してリマインドジョブを登録 */
+/**
+ * 最多得票日に対してリマインドジョブを登録する。
+ * ただし最多得票数が定足数 (schedule.minVotes) 未満なら開催を見送り、
+ * winner リマインダは登録せず、中止メッセージをチャンネルへ投稿する。
+ */
 async function scheduleRemindersForWinner(
   d1: ReturnType<typeof drizzle>,
   db: D1Database,
-  meeting: { id: string; name: string },
+  slackClient: SlackClient,
+  meeting: { id: string; name: string; channelId: string },
   schedule: ScheduleRow,
   reminders: Reminder[],
   pollCloseDate: string,
@@ -296,6 +306,27 @@ async function scheduleRemindersForWinner(
       }
     }
   }
+
+  // 定足数チェック: 最多得票数が min_votes 未満なら開催を見送る。
+  // winner リマインダは登録せず、中止メッセージをチャンネルへ投稿する。
+  // 0 票 (winnerDate が空) の回もここで中止扱いになる。
+  const minVotes = schedule.minVotes ?? DEFAULT_MIN_VOTES;
+  if (maxVotes < minVotes) {
+    console.log(
+      `Max votes ${maxVotes} < min_votes ${minVotes} for ${meeting.name}: cancelling (no winner reminders)`,
+    );
+    try {
+      await slackClient.postMessage(
+        meeting.channelId,
+        `${meeting.name} は今回開催を見送ります`,
+        createPollCancelledBlocks(meeting.name),
+      );
+    } catch (e) {
+      console.error(`Failed to post cancellation message for ${meeting.name}:`, e);
+    }
+    return;
+  }
+
   if (!winnerDate) return;
 
   const winnerDateFormatted = formatDateJa(winnerDate);

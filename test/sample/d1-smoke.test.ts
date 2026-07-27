@@ -21,10 +21,10 @@ describe("D1 harness smoke", () => {
   it("全 migration を連番順に検出する", () => {
     const names = migrationFileNames();
     // 連番抜けがあるため絶対数ではなく前後端 + ソート不変条件で確認する。
-    // 末尾は participant_broadcast (参加者一斉送信の送信ログ) テーブル追加。
+    // 末尾は auto_schedules.min_votes (定足数) カラム追加。
     expect(names.length).toBeGreaterThanOrEqual(55);
     expect(names[0]).toBe("0000_dusty_falcon");
-    expect(names[names.length - 1]).toBe("0092_participant_broadcast");
+    expect(names[names.length - 1]).toBe("0093_add_min_votes_to_auto_schedules");
     // ソート不変条件: 連番昇順
     const sorted = [...names].sort();
     expect(names).toEqual(sorted);

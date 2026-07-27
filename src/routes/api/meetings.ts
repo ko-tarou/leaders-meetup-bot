@@ -1126,12 +1126,20 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
     reminders?: unknown;
+    minVotes?: number;
     autoRespondEnabled?: boolean | number;
     autoRespondTemplate?: string | null;
   }>();
 
   // frequency 未指定なら monthly 互換
   const frequency: Frequency = isFrequency(body.frequency) ? body.frequency : "monthly";
+
+  if (
+    body.minVotes !== undefined &&
+    (!Number.isInteger(body.minVotes) || body.minVotes < 0)
+  ) {
+    return c.json({ error: "minVotes must be a non-negative integer" }, 400);
+  }
 
   if (!body.candidateRule || typeof body.candidateRule !== "object") {
     return c.json({ error: "candidateRule is required" }, 400);
@@ -1178,6 +1186,7 @@ meetingsRouter.post("/meetings/:meetingId/auto-schedule", async (c) => {
     messageTemplate: body.messageTemplate ?? null,
     reminderMessageTemplate: body.reminderMessageTemplate ?? null,
     reminders: remindersStr,
+    minVotes: body.minVotes ?? 3,
     enabled: 1,
     autoRespondEnabled: body.autoRespondEnabled ? 1 : 0,
     autoRespondTemplate: body.autoRespondTemplate ?? null,
@@ -1215,10 +1224,18 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
     messageTemplate?: string | null;
     reminderMessageTemplate?: string | null;
     reminders?: unknown;
+    minVotes?: number;
     enabled?: number;
     autoRespondEnabled?: boolean | number;
     autoRespondTemplate?: string | null;
   }>();
+
+  if (
+    body.minVotes !== undefined &&
+    (!Number.isInteger(body.minVotes) || body.minVotes < 0)
+  ) {
+    return c.json({ error: "minVotes must be a non-negative integer" }, 400);
+  }
 
   // frequency が body にあれば差し替え、なければ既存値を維持
   const frequency: Frequency = isFrequency(body.frequency)
@@ -1316,6 +1333,7 @@ meetingsRouter.put("/auto-schedules/:id", async (c) => {
           ? existing.reminderMessageTemplate
           : body.reminderMessageTemplate,
       reminders: remindersStr,
+      minVotes: body.minVotes ?? existing.minVotes,
       enabled: body.enabled ?? existing.enabled,
       autoRespondEnabled:
         body.autoRespondEnabled === undefined

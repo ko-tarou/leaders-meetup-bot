@@ -265,11 +265,13 @@ describe("processAutoCycles: poll 自動締切 (現状固定)", () => {
         { id: "opt-a", pollId: "poll-c", date: "2026-06-10" },
         { id: "opt-b", pollId: "poll-c", date: "2026-06-11" },
       ]);
+    // winner=opt-a に 3 票 = デフォルト定足数 (min_votes=3) を満たす → 開催継続。
     await testDb()
       .insert(pollVotes)
       .values([
         { id: "v1", pollOptionId: "opt-a", slackUserId: "U1", votedAt: "2026-05-20T00:00:00.000Z" },
         { id: "v2", pollOptionId: "opt-a", slackUserId: "U2", votedAt: "2026-05-20T00:00:00.000Z" },
+        { id: "v4", pollOptionId: "opt-a", slackUserId: "U4", votedAt: "2026-05-20T00:00:00.000Z" },
         { id: "v3", pollOptionId: "opt-b", slackUserId: "U3", votedAt: "2026-05-20T00:00:00.000Z" },
       ]);
     await processAutoCycles(testD1(), slack() as never);
@@ -285,5 +287,126 @@ describe("processAutoCycles: poll 自動締切 (現状固定)", () => {
     expect(jobs[0].payload).toBe(
       JSON.stringify({ message: `${m.name} 開催 2 日前` }),
     );
+  });
+});
+
+describe("processAutoCycles: 定足数割れで開催を見送る (min_votes)", () => {
+  /** 締切対象の open poll + 候補日 2 件を seed し、opt-a に voteCount 票入れる。 */
+  async function seedClosablePoll(meetingId: string, voteCount: number) {
+    await testDb()
+      .insert(polls)
+      .values({
+        id: "poll-q",
+        meetingId,
+        status: "open",
+        createdAt: "2026-05-18T00:00:00.000Z",
+      });
+    await testDb()
+      .insert(pollOptions)
+      .values([
+        { id: "opt-a", pollId: "poll-q", date: "2026-06-10" },
+        { id: "opt-b", pollId: "poll-q", date: "2026-06-11" },
+      ]);
+    const votes = Array.from({ length: voteCount }, (_, i) => ({
+      id: `qv${i}`,
+      pollOptionId: "opt-a",
+      slackUserId: `U${i}`,
+      votedAt: "2026-05-20T00:00:00.000Z",
+    }));
+    if (votes.length > 0) await testDb().insert(pollVotes).values(votes);
+  }
+
+  const beforeEventReminder = JSON.stringify([
+    {
+      trigger: { type: "before_event", daysBefore: 2 },
+      time: "09:00",
+      message: "{meetingName} 開催 {daysBefore} 日前",
+    },
+  ]);
+
+  /** blocks に中止文面 (見送り) が含まれる postMessage があるか。 */
+  function cancelledPosts(sc: MockSlackClient) {
+    return sc
+      .callsOf("postMessage")
+      .filter((call) => JSON.stringify(call.args[2] ?? "").includes("開催を見送る"));
+  }
+
+  it("最多得票 2 < 既定 min_votes 3 → 中止: リマインダ登録なし + 中止メッセージ投稿", async () => {
+    freezeJst("18:00", "2026-05-25"); // pollCloseDay=25 で締切
+    const m = await makeMeeting();
+    await seedSchedule(m.id, { reminders: beforeEventReminder }); // min_votes は既定 3
+    await seedClosablePoll(m.id, 2);
+
+    const sc = new MockSlackClient();
+    await processAutoCycles(testD1(), sc as never);
+
+    // poll は締切られる
+    const poll = await testDb().select().from(polls).where(eq(polls.id, "poll-q")).get();
+    expect(poll?.status).toBe("closed");
+    // winner リマインダは登録されない
+    const jobs = await testDb()
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.referenceId, m.id))
+      .all();
+    expect(jobs).toHaveLength(0);
+    // 中止メッセージが投稿される
+    expect(cancelledPosts(sc)).toHaveLength(1);
+    expect(cancelledPosts(sc)[0].args[0]).toBe(m.channelId);
+  });
+
+  it("最多得票 3 == 既定 min_votes 3 → 開催: リマインダ登録あり + 中止メッセージなし", async () => {
+    freezeJst("18:00", "2026-05-25");
+    const m = await makeMeeting();
+    await seedSchedule(m.id, { reminders: beforeEventReminder });
+    await seedClosablePoll(m.id, 3);
+
+    const sc = new MockSlackClient();
+    await processAutoCycles(testD1(), sc as never);
+
+    const jobs = await testDb()
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.referenceId, m.id))
+      .all();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].nextRunAt).toBe("2026-06-08T00:00:00.000Z");
+    expect(cancelledPosts(sc)).toHaveLength(0);
+  });
+
+  it("min_votes を 2 に下げれば 2 票でも開催 (閾値は設定可能・3 固定でない)", async () => {
+    freezeJst("18:00", "2026-05-25");
+    const m = await makeMeeting();
+    await seedSchedule(m.id, { reminders: beforeEventReminder, minVotes: 2 });
+    await seedClosablePoll(m.id, 2);
+
+    const sc = new MockSlackClient();
+    await processAutoCycles(testD1(), sc as never);
+
+    const jobs = await testDb()
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.referenceId, m.id))
+      .all();
+    expect(jobs).toHaveLength(1);
+    expect(cancelledPosts(sc)).toHaveLength(0);
+  });
+
+  it("0 票 → 中止扱い (中止メッセージ投稿・リマインダ登録なし)", async () => {
+    freezeJst("18:00", "2026-05-25");
+    const m = await makeMeeting();
+    await seedSchedule(m.id, { reminders: beforeEventReminder });
+    await seedClosablePoll(m.id, 0);
+
+    const sc = new MockSlackClient();
+    await processAutoCycles(testD1(), sc as never);
+
+    const jobs = await testDb()
+      .select()
+      .from(scheduledJobs)
+      .where(eq(scheduledJobs.referenceId, m.id))
+      .all();
+    expect(jobs).toHaveLength(0);
+    expect(cancelledPosts(sc)).toHaveLength(1);
   });
 });
