@@ -22,6 +22,8 @@
   "dependencies": {
     "drizzle-orm": "^0.45.2",
     "hono": "latest",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "react": "^19",
     "react-dom": "^19",
     "react-router-dom": "^7.14.2"

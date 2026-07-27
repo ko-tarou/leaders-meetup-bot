@@ -42,7 +42,10 @@ export type EventActionType =
   | "channel_router"
   // participant_broadcast: HackIT 参加者への一斉メール送信。連携済み Gmail から
   // 件名/本文テンプレ + 宛先貼り付けで送る。preview (ドライラン) + confirm ゲート付き。
-  | "participant_broadcast";
+  | "participant_broadcast"
+  // document_generation: ドキュメント生成 (名簿生成)。参加届 × role_management の
+  // ロール割当から名簿を都度算出し、チーム別にまとめて PDF ダウンロードできる。
+  | "document_generation";
 
 export type EventAction = {
   id: string;
