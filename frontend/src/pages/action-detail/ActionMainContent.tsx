@@ -15,6 +15,7 @@ import { AppManagementTab } from "../../components/app-management/AppManagementT
 import { GanttScopeView } from "../../components/gantt/GanttScopeView";
 import { ChannelRouterMainTab } from "../../components/channel-router/ChannelRouterMainTab";
 import { ParticipantBroadcastMainTab } from "../../components/participant-broadcast/ParticipantBroadcastMainTab";
+import { DocumentGenerationMainTab } from "../../components/document-generation/DocumentGenerationMainTab";
 import { PlaceholderContent } from "./PlaceholderContent";
 import { resolveLgtmThreshold } from "./subTabs";
 
@@ -109,6 +110,8 @@ export function ActionMainContent({
           onChanged={onChanged ?? (() => {})}
         />
       );
+    case "document_generation":
+      return <DocumentGenerationMainTab eventId={eventId} action={action} />;
     default:
       return null;
   }

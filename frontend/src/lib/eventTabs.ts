@@ -124,6 +124,12 @@ export const ACTION_META: Record<
       "連携済み Gmail から参加者全員へ案内メールを一斉送信します。まずはプレビューで宛先と本文を確認",
     icon: "📧",
   },
+  document_generation: {
+    label: "ドキュメント生成",
+    description:
+      "参加届とロール割当から名簿を自動生成します。チーム別にまとめて PDF でダウンロードできます",
+    icon: "📄",
+  },
 };
 
 // 共通タブ (イベント直下)

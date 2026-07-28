@@ -21,6 +21,7 @@ import { applications } from "./applications";
 import { sponsor } from "./sponsor";
 import { workspaces } from "./workspaces";
 import { broadcast } from "./broadcast";
+import { documents } from "./documents";
 
 export {
   APIError,
@@ -50,4 +51,5 @@ export const api = {
   appSettings,
   feedback,
   broadcast,
+  documents,
 };
