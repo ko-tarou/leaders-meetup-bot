@@ -25,10 +25,15 @@ const STATE_TTL_MS = 10 * 60 * 1000; // 10分
 // conversations.kick を呼ぶため、channels:manage (public) / groups:write (private)
 // を追加。プロフィール取得用に users.profile:read も追加。
 // 反映には Slack App 管理画面で Reinstall が必要。
+//
+// Slack履歴移行(Dub): users:read.email（履歴投稿者のメールアドレス解決）/
+// files:read（履歴中の添付ファイル取得）を追加。既存 workspace への再インストールで
+// scope が UPDATE される（ADR-0007 の重複インストール対応）。
 const REQUIRED_SCOPES = [
   "chat:write",
   "chat:write.public",
   "users:read",
+  "users:read.email",
   "users.profile:read",
   "commands",
   "channels:history",
@@ -37,6 +42,7 @@ const REQUIRED_SCOPES = [
   "groups:read",
   "groups:history",
   "groups:write",
+  "files:read",
 ];
 
 // 005-user-oauth: admin user の権限で bot を private channel に invite するため、
